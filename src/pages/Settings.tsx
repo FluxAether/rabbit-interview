@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Sun, Mic, Shield } from 'lucide-react'
 import { useAppStore } from '../stores/useAppStore'
 import { invoke } from '@tauri-apps/api/core'
@@ -23,7 +23,7 @@ export default function Settings() {
   const [groqModel, setGroqModel] = useState('llama-3.1-8b-instant')
   const [openaiModel, setOpenaiModel] = useState('gpt-4o')
   const [anthropicModel, setAnthropicModel] = useState('claude-3-5-sonnet-20241022')
-  const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash')
+  const [geminiModel, setGeminiModel] = useState('gemini-3.5-flash')
 
   // Track which API keys are already configured (without exposing the actual keys)
   const [keyStatus, setKeyStatus] = useState({
@@ -37,6 +37,85 @@ export default function Settings() {
   // STT (real-time speech-to-text) configuration
   const [sttProvider, setSttProvider] = useState<'deepgram'>('deepgram')
   const [sttModel, setSttModel] = useState('nova-2')
+
+  // --- Auto-save implementation ---
+  const saveTimeoutRef = useRef<number | null>(null)
+  const isHydratedRef = useRef(false)
+
+  // Build payload from current local state values
+  const buildPayload = () => ({
+    theme,
+    launchAtStartup,
+    autoUpdate,
+    updateChannel,
+    language,
+    aiModel,
+    stealthEnabled: stealth,
+    aiModels: {
+      groq: groqModel,
+      openai: openaiModel,
+      anthropic: anthropicModel,
+      gemini: geminiModel,
+    },
+    sttProvider,
+    sttModel,
+  })
+
+  const persistToDisk = async (payload: ReturnType<typeof buildPayload>) => {
+    try {
+      await saveAppSettings(payload as Partial<PersistedSettings>)
+
+      // Optional Rust side (non-critical)
+      try {
+        await invoke('save_settings', { settings: payload })
+      } catch (e) {
+        console.warn('Rust save_settings (non-critical):', e)
+      }
+    } catch (e) {
+      console.warn('Auto-save to disk failed:', e)
+    }
+  }
+
+  // Force immediate persist (bypasses debounce)
+  const saveNow = async () => {
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current)
+      saveTimeoutRef.current = null
+    }
+    const payload = buildPayload()
+    useAppStore.setState((s) => ({ settings: { ...s.settings, ...payload } }))
+    await persistToDisk(payload)
+  }
+
+  // React to any setting change after hydration → update Zustand immediately + debounce disk save
+  useEffect(() => {
+    if (!isHydratedRef.current) return
+
+    const payload = buildPayload()
+
+    // Make change visible to the rest of the app right away (LLM, STT, language, etc.)
+    useAppStore.setState((s) => ({ settings: { ...s.settings, ...payload } }))
+
+    // Debounce actual write to app-settings.json
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current)
+    }
+    saveTimeoutRef.current = window.setTimeout(() => {
+      void persistToDisk(payload)
+    }, 350)
+
+    // Cleanup pending timer on unmount or before next run
+    return () => {
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [
+    theme, launchAtStartup, autoUpdate, updateChannel,
+    language, aiModel, stealth,
+    groqModel, openaiModel, anthropicModel, geminiModel,
+    sttProvider, sttModel,
+  ])
 
   // Load key configuration status (presence only)
   useEffect(() => {
@@ -85,7 +164,8 @@ export default function Settings() {
     if (aiModels.groq) setGroqModel(aiModels.groq)
     if (aiModels.openai) setOpenaiModel(aiModels.openai)
     if (aiModels.anthropic) setAnthropicModel(aiModels.anthropic)
-    if (aiModels.gemini) setGeminiModel(aiModels.gemini)
+    // Gemini only supports the latest single model now: gemini-3.5-flash
+    setGeminiModel('gemini-3.5-flash')
 
     // Activate the correct provider tab based on current aiModel
     if (currentAiModel.includes('gemini')) {
@@ -103,23 +183,33 @@ export default function Settings() {
     if (settings.sttModel) setSttModel(settings.sttModel as string)
   }, [settings])
 
+  // Mark as hydrated after the first settings load so we don't auto-save during initial population
+  useEffect(() => {
+    if (settings) {
+      // Use microtask so any pending setState from the population effect above have been processed
+      queueMicrotask(() => {
+        isHydratedRef.current = true
+      })
+    }
+  }, [settings])
+
   const handleLanguageChange = (newLang: SupportedLanguage) => {
     setLanguage(newLang)
     setStoreLanguage(newLang)
-    // Also update the full settings object so it gets picked up on Save
-    useAppStore.setState((s) => ({
-      settings: { ...s.settings, language: newLang },
-    }))
+    // Immediate store update for instant UI translation feedback
+    useAppStore.setState((s) => ({ settings: { ...s.settings, language: newLang } }))
   }
 
   // Update the active provider + aiModel in both local state and global store
   const activateProvider = (provider: 'groq' | 'openai' | 'anthropic' | 'gemini', model: string) => {
     setActiveProvider(provider)
-    setAiModel(model)
+    const finalModel = provider === 'gemini' ? 'gemini-3.5-flash' : model
+    setAiModel(finalModel)
 
     useAppStore.setState((s) => ({
-      settings: { ...s.settings, aiModel: model },
+      settings: { ...s.settings, aiModel: finalModel },
     }))
+    // auto-save useEffect will handle persistence
   }
 
   // Change model for a specific provider. If it is currently active, also update global aiModel.
@@ -127,9 +217,13 @@ export default function Settings() {
     if (provider === 'groq') setGroqModel(model)
     else if (provider === 'openai') setOpenaiModel(model)
     else if (provider === 'anthropic') setAnthropicModel(model)
-    else setGeminiModel(model)
+    else {
+      // Gemini: only one supported model (as requested)
+      model = 'gemini-3.5-flash'
+      setGeminiModel(model)
+    }
 
-    // Update the aiModels map in global state (will be persisted on Save)
+    // Update the aiModels map in global state (persisted automatically)
     useAppStore.setState((s) => {
       const currentModels = (s.settings?.aiModels as Record<string, string>) || {}
       return {
@@ -144,6 +238,7 @@ export default function Settings() {
     if (provider === activeProvider) {
       setAiModel(model)
     }
+    // auto-save useEffect will trigger on groqModel/openaiModel/... changes
   }
 
   // Save an API key for a provider and refresh status
@@ -177,44 +272,10 @@ export default function Settings() {
         sttModel: model,
       },
     }))
+    // auto-save effect reacts to sttProvider / sttModel
   }
 
-  const save = async () => {
-    // Collect current per-provider models
-    const aiModels = {
-      groq: groqModel,
-      openai: openaiModel,
-      anthropic: anthropicModel,
-      gemini: geminiModel,
-    }
-
-    const payload = {
-      theme,
-      launchAtStartup,
-      autoUpdate,
-      updateChannel,
-      language,
-      aiModel,
-      stealthEnabled: stealth,
-      aiModels,
-      sttProvider,
-      sttModel,
-    }
-
-    // 1. Persist to disk using plugin-store (this is what actually survives restarts)
-    await saveAppSettings(payload as Partial<PersistedSettings>)
-
-    // 2. Update global Zustand store immediately so LLM/STT pick up changes
-    const { setSettings } = useAppStore.getState()
-    setSettings(payload)
-
-    // 3. (Optional) still call the Rust command for logging / future SQLite
-    try {
-      await invoke('save_settings', { settings: payload })
-    } catch (e) {
-      console.warn('Rust save_settings (non-critical):', e)
-    }
-  }
+  // saveNow() can be called to force immediate persistence if needed.
 
   return (
     <div className="p-8 overflow-auto">
@@ -237,7 +298,10 @@ export default function Settings() {
               </div>
               <select
                 value={theme}
-                onChange={(e) => setTheme(e.target.value as any)}
+                onChange={(e) => {
+                  const val = e.target.value as 'Light' | 'Dark' | 'System'
+                  setTheme(val)
+                }}
                 className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
               >
                 <option>Light</option>
@@ -258,7 +322,9 @@ export default function Settings() {
                 <input
                   type="checkbox"
                   checked={launchAtStartup}
-                  onChange={(e) => setLaunchAtStartup(e.target.checked)}
+                  onChange={(e) => {
+                    setLaunchAtStartup(e.target.checked)
+                  }}
                   className="sr-only peer"
                 />
                 <div className="w-9 h-5 bg-[#e2e8f0] peer-focus:outline-none peer-focus:ring-0 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#6366f1]"></div>
@@ -284,7 +350,9 @@ export default function Settings() {
                 <input
                   type="checkbox"
                   checked={autoUpdate}
-                  onChange={e => setAutoUpdate(e.target.checked)}
+                  onChange={e => {
+                    setAutoUpdate(e.target.checked)
+                  }}
                   className="sr-only peer"
                 />
                 <div className="w-9 h-5 bg-[#e2e8f0] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#6366f1]"></div>
@@ -301,7 +369,9 @@ export default function Settings() {
               </div>
               <select
                 value={updateChannel}
-                onChange={e => setUpdateChannel(e.target.value as any)}
+                onChange={e => {
+                  setUpdateChannel(e.target.value as any)
+                }}
                 className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
               >
                 <option>Stable</option>
@@ -486,7 +556,7 @@ export default function Settings() {
                   <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">Active</span>
                 ) : (
                   <button
-                    onClick={() => activateProvider('gemini', geminiModel)}
+                    onClick={() => activateProvider('gemini', 'gemini-3.5-flash')}
                     className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors"
                   >
                     Use Gemini
@@ -497,15 +567,9 @@ export default function Settings() {
               <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-3">
                   <span className="w-12 text-[#64748b] text-xs">Model</span>
-                  <select
-                    value={geminiModel}
-                    onChange={(e) => updateProviderModel('gemini', e.target.value)}
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
-                  >
-                    <option value="gemini-2.0-flash">Gemini 2.0 Flash (Recommended)</option>
-                    <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-                    <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-                  </select>
+                  <div className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm text-[#0f172a] font-medium">
+                    gemini-3.5-flash <span className="text-[10px] ml-1 text-emerald-600">(latest)</span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="w-12 text-[#64748b] text-xs">Key</span>
@@ -581,7 +645,13 @@ export default function Settings() {
         <div className="card p-6 mb-4">
           <div className="font-semibold text-[#6366f1] mb-3">{t('settings.stealth.title')}</div>
           <label className="flex items-center gap-2">
-            <input type="checkbox" checked={stealth} onChange={e => setStealth(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={stealth}
+              onChange={e => {
+                setStealth(e.target.checked)
+              }}
+            />
             <span>{t('settings.stealth.desc')}</span>
           </label>
           <p className="text-xs mt-2 text-[#64748b]">{t('settings.stealth.note')}</p>
@@ -640,7 +710,10 @@ export default function Settings() {
           <button onClick={() => alert('All local data cleared (demo)')} className="mt-4 text-red-600 text-sm">{t('settings.privacy.clear')}</button>
         </div>
 
-        <button onClick={save} className="mt-6 px-5 py-2 bg-[#6366f1] text-white text-sm rounded-2xl">{t('common.save')}</button>
+        {/* Auto-save is enabled — no manual save required */}
+        <div className="mt-6 text-xs text-[#64748b]">
+          {t('settings.saved')} automatically
+        </div>
 
         <div className="mt-8 text-xs text-[#64748b] flex items-center gap-1.5">
           <Shield className="w-3.5 h-3.5" /> {t('settings.secureNote')}

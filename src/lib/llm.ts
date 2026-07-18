@@ -21,14 +21,14 @@ async function getKeys(forceReload = false) {
  *   "groq-llama-3.1", "groq-llama-3.3-70b"
  *   "gpt-4o", "gpt-4o-mini", "openai-gpt-4o"
  *   "claude-3.5", "claude-3.5-sonnet"
- *   "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"
+ *   "gemini-3.5-flash" (only supported Gemini model)
  */
 function resolveProviderAndModel(aiModel: string): { provider: 'groq' | 'openai' | 'anthropic' | 'gemini'; model: string } {
   const m = (aiModel || 'groq-llama-3.1').toLowerCase();
 
   if (m.startsWith('gemini')) {
-    // gemini-2.0-flash, gemini-1.5-flash, gemini-1.5-pro etc. (3.5 never existed)
-    return { provider: 'gemini', model: aiModel };
+    // Only gemini-3.5-flash is supported for Gemini (latest)
+    return { provider: 'gemini', model: 'gemini-3.5-flash' };
   }
   if (m.includes('claude')) {
     return { provider: 'anthropic', model: aiModel };
@@ -88,23 +88,11 @@ async function callOpenAI(prompt: string, model: string, apiKey: string): Promis
   return data.choices?.[0]?.message?.content || '';
 }
 
-async function callGemini(prompt: string, model: string, apiKey: string): Promise<string> {
-  // Gemini uses a different API shape. Map to currently supported stable model IDs.
-  // Supported in Google AI Studio / Gemini API: gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash, etc.
-  const lower = model.toLowerCase();
-  let modelId: string;
-  if (lower.includes('2.5') || lower.includes('gemini-2.5')) {
-    modelId = 'gemini-2.5-flash-preview-05-20';
-  } else if (lower.includes('2.0') || lower.includes('gemini-2')) {
-    modelId = 'gemini-2.0-flash';
-  } else if (lower.includes('1.5-pro') || lower.includes('pro')) {
-    modelId = 'gemini-1.5-pro';
-  } else {
-    // Default to fast and widely available flash model
-    modelId = 'gemini-1.5-flash';
-  }
+async function callGemini(prompt: string, _model: string, apiKey: string): Promise<string> {
+  // Gemini 3.5 Flash is the only supported model (latest as of 2026).
+  const modelId = 'gemini-3.5-flash';
 
-  // Use stable v1 endpoint (v1beta also works but v1 is preferred)
+  // Use v1 endpoint with the exact model name requested by user.
   const url = `https://generativelanguage.googleapis.com/v1/models/${modelId}:generateContent?key=${apiKey}`;
 
   const res = await fetch(url, {
@@ -159,7 +147,7 @@ export async function generateSuggestions(question: string, transcriptSoFar?: st
       if (k) {
         provider = cand;
         // Use a reasonable default model per provider when auto-falling back
-        model = cand === 'gemini' ? 'gemini-2.0-flash' : (cand === 'openai' ? 'gpt-4o' : 'llama-3.1-8b-instant');
+        model = cand === 'gemini' ? 'gemini-3.5-flash' : (cand === 'openai' ? 'gpt-4o' : 'llama-3.1-8b-instant');
         apiKey = k;
         console.log('[LLM] Auto-selected provider with key:', provider);
         break;

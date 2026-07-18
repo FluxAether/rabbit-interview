@@ -36,7 +36,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     groq: 'llama-3.1-8b-instant',
     openai: 'gpt-4o',
     anthropic: 'claude-3-5-sonnet-20241022',
-    gemini: 'gemini-2.0-flash',
+    gemini: 'gemini-3.5-flash',
   },
   sttProvider: 'deepgram',
   sttModel: 'nova-2',
