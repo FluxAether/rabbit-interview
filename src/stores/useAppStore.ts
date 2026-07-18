@@ -32,6 +32,7 @@ interface AppState {
   currentPage: string
   settings: Record<string, any>
   setLanguage: (lang: SupportedLanguage) => void
+  setSettings: (newSettings: Partial<Record<string, any>>) => void
   
   // Copilot (real-time)
   copilot: CopilotState
@@ -67,8 +68,16 @@ export const useAppStore = create<AppState>((set) => ({
   settings: {
     theme: 'Light',
     launchAtStartup: true,
+    autoUpdate: true,
+    updateChannel: 'Stable',
     stealthEnabled: true,
-    aiModel: 'groq-llama-3.1', // also supports: gpt-4o, claude-3.5, gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash
+    aiModel: 'groq-llama-3.1',
+    aiModels: {
+      groq: 'llama-3.1-8b-instant',
+      openai: 'gpt-4o',
+      anthropic: 'claude-3-5-sonnet-20241022',
+      gemini: 'gemini-2.0-flash',
+    },
     language: 'zh-CN' as const,
     // STT (Speech-to-Text) provider for real-time transcription
     sttProvider: 'deepgram',
@@ -156,5 +165,11 @@ export const useAppStore = create<AppState>((set) => ({
   setLanguage: (lang) =>
     set((state) => ({
       settings: { ...state.settings, language: lang },
+    })),
+
+  // Initialize or update the settings object (used for persistence + LLM/STT)
+  setSettings: (newSettings: Partial<Record<string, any>>) =>
+    set((state) => ({
+      settings: { ...state.settings, ...newSettings },
     })),
 }))

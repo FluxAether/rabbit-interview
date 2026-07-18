@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/useAppStore'
 import { invoke } from '@tauri-apps/api/core'
 import { useTranslation } from '../i18n'
 import { LANGUAGE_OPTIONS, SupportedLanguage, DEFAULT_LANGUAGE } from '../i18n/types'
+import { saveAppSettings, type AppSettings as PersistedSettings } from '../lib/settingsStore'
 
 export default function Settings() {
   const { settings, setLanguage: setStoreLanguage } = useAppStore()
@@ -22,7 +23,7 @@ export default function Settings() {
   const [groqModel, setGroqModel] = useState('llama-3.1-8b-instant')
   const [openaiModel, setOpenaiModel] = useState('gpt-4o')
   const [anthropicModel, setAnthropicModel] = useState('claude-3-5-sonnet-20241022')
-  const [geminiModel, setGeminiModel] = useState('gemini-1.5-flash-latest')
+  const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash')
 
   // Track which API keys are already configured (without exposing the actual keys)
   const [keyStatus, setKeyStatus] = useState({
@@ -36,12 +37,6 @@ export default function Settings() {
   // STT (real-time speech-to-text) configuration
   const [sttProvider, setSttProvider] = useState<'deepgram'>('deepgram')
   const [sttModel, setSttModel] = useState('nova-2')
-
-  // Initialize from store
-  useEffect(() => {
-    const storedLang = (settings?.language as SupportedLanguage) || DEFAULT_LANGUAGE
-    setLanguage(storedLang)
-  }, [settings?.language])
 
   // Load key configuration status (presence only)
   useEffect(() => {
@@ -66,39 +61,55 @@ export default function Settings() {
     })()
   }, [])
 
-  // Sync aiModel + per-provider state from global settings
+  // Initialize ALL local UI state from the global persisted settings
+  // This runs when the app loads settings from disk into Zustand
   useEffect(() => {
-    const model = (settings?.aiModel as string) || 'groq-llama-3.1'
-    setAiModel(model)
+    if (!settings) return
 
-    if (model.includes('gemini')) {
+    // Basic settings
+    if (settings.theme) setTheme(settings.theme as any)
+    if (typeof settings.launchAtStartup === 'boolean') setLaunchAtStartup(settings.launchAtStartup)
+    if (typeof settings.autoUpdate === 'boolean') setAutoUpdate(settings.autoUpdate)
+    if (settings.updateChannel) setUpdateChannel(settings.updateChannel as any)
+    if (settings.stealthEnabled !== undefined) setStealth(!!settings.stealthEnabled)
+
+    // Language
+    const lang = (settings.language as SupportedLanguage) || DEFAULT_LANGUAGE
+    setLanguage(lang)
+
+    // AI model + per provider models
+    const currentAiModel = (settings.aiModel as string) || 'groq-llama-3.1'
+    setAiModel(currentAiModel)
+
+    const aiModels = (settings.aiModels as Record<string, string>) || {}
+    if (aiModels.groq) setGroqModel(aiModels.groq)
+    if (aiModels.openai) setOpenaiModel(aiModels.openai)
+    if (aiModels.anthropic) setAnthropicModel(aiModels.anthropic)
+    if (aiModels.gemini) setGeminiModel(aiModels.gemini)
+
+    // Activate the correct provider tab based on current aiModel
+    if (currentAiModel.includes('gemini')) {
       setActiveProvider('gemini')
-      setGeminiModel(model)
-    } else if (model.includes('claude')) {
+    } else if (currentAiModel.includes('claude')) {
       setActiveProvider('anthropic')
-      setAnthropicModel(model)
-    } else if (model.includes('gpt') || model.startsWith('openai')) {
+    } else if (currentAiModel.includes('gpt') || currentAiModel.startsWith('openai')) {
       setActiveProvider('openai')
-      setOpenaiModel(model)
     } else {
       setActiveProvider('groq')
-      setGroqModel(model)
     }
-  }, [settings?.aiModel])
 
-  // Sync STT settings
-  useEffect(() => {
-    if (settings?.sttProvider) {
-      setSttProvider(settings.sttProvider as 'deepgram')
-    }
-    if (settings?.sttModel) {
-      setSttModel(settings.sttModel as string)
-    }
-  }, [settings?.sttProvider, settings?.sttModel])
+    // STT
+    if (settings.sttProvider) setSttProvider(settings.sttProvider as 'deepgram')
+    if (settings.sttModel) setSttModel(settings.sttModel as string)
+  }, [settings])
 
   const handleLanguageChange = (newLang: SupportedLanguage) => {
     setLanguage(newLang)
     setStoreLanguage(newLang)
+    // Also update the full settings object so it gets picked up on Save
+    useAppStore.setState((s) => ({
+      settings: { ...s.settings, language: newLang },
+    }))
   }
 
   // Update the active provider + aiModel in both local state and global store
@@ -118,11 +129,20 @@ export default function Settings() {
     else if (provider === 'anthropic') setAnthropicModel(model)
     else setGeminiModel(model)
 
+    // Update the aiModels map in global state (will be persisted on Save)
+    useAppStore.setState((s) => {
+      const currentModels = (s.settings?.aiModels as Record<string, string>) || {}
+      return {
+        settings: {
+          ...s.settings,
+          aiModels: { ...currentModels, [provider]: model },
+          ...(provider === activeProvider ? { aiModel: model } : {}),
+        },
+      }
+    })
+
     if (provider === activeProvider) {
       setAiModel(model)
-      useAppStore.setState((s) => ({
-        settings: { ...s.settings, aiModel: model },
-      }))
     }
   }
 
@@ -160,6 +180,14 @@ export default function Settings() {
   }
 
   const save = async () => {
+    // Collect current per-provider models
+    const aiModels = {
+      groq: groqModel,
+      openai: openaiModel,
+      anthropic: anthropicModel,
+      gemini: geminiModel,
+    }
+
     const payload = {
       theme,
       launchAtStartup,
@@ -168,10 +196,24 @@ export default function Settings() {
       language,
       aiModel,
       stealthEnabled: stealth,
+      aiModels,
       sttProvider,
       sttModel,
     }
-    await invoke('save_settings', { settings: payload })
+
+    // 1. Persist to disk using plugin-store (this is what actually survives restarts)
+    await saveAppSettings(payload as Partial<PersistedSettings>)
+
+    // 2. Update global Zustand store immediately so LLM/STT pick up changes
+    const { setSettings } = useAppStore.getState()
+    setSettings(payload)
+
+    // 3. (Optional) still call the Rust command for logging / future SQLite
+    try {
+      await invoke('save_settings', { settings: payload })
+    } catch (e) {
+      console.warn('Rust save_settings (non-critical):', e)
+    }
   }
 
   return (
@@ -460,9 +502,9 @@ export default function Settings() {
                     onChange={(e) => updateProviderModel('gemini', e.target.value)}
                     className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
                   >
-                    <option value="gemini-1.5-flash-latest">Gemini 1.5 Flash (Recommended)</option>
-                    <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
-                    <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                    <option value="gemini-2.0-flash">Gemini 2.0 Flash (Recommended)</option>
+                    <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                    <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
                   </select>
                 </div>
                 <div className="flex items-center gap-3">

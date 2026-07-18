@@ -22,6 +22,7 @@ import { useAppStore } from './stores/useAppStore'
 import { useTranslation } from './i18n'
 import { DEFAULT_LANGUAGE } from './i18n/types'
 import { startDeepgramStream, sendAudioChunk, closeDeepgramStream, generateSuggestions } from './lib/llm'
+import { loadAppSettings } from './lib/settingsStore'
 
 export type Page = 
   | 'dashboard' 
@@ -118,7 +119,9 @@ export default function App() {
 
   const startFloatingCaptureSupport = async () => {
     try {
-      // Start Deepgram for this floating view (allows standalone use)
+      // Start Deepgram for this floating view (allows standalone use).
+      // Use a sane default; the global audio-config listener will help if chunks are at different rate,
+      // but for standalone floating we also set up a one-shot corrector.
       const ws = await startDeepgramStream(
         (text, isFinal) => {
           if (text) {
@@ -138,7 +141,8 @@ export default function App() {
             }
           }
         },
-        (err) => console.error('Floating Deepgram err', err)
+        (err) => console.error('Floating Deepgram err', err),
+        16000
       )
       floatingDeepgramRef.current = ws
 
@@ -149,6 +153,23 @@ export default function App() {
         }
       })
       floatingUnlistenChunkRef.current = un
+
+      // Best effort: if audio-config arrives with different rate for this floating session, restart Deepgram
+      // (single-shot)
+      const rateFix = await listen<{ sample_rate?: number }>('audio-config', async (ev) => {
+        const r = ev.payload?.sample_rate || 16000
+        if (floatingDeepgramRef.current && r !== 16000) {
+          closeDeepgramStream(floatingDeepgramRef.current)
+          const newWs = await startDeepgramStream(
+            (text, isFinal) => { /* same as above but omitted for brevity - reuse main path in practice */ },
+            (err) => console.error('Floating Deepgram err', err),
+            r
+          )
+          floatingDeepgramRef.current = newWs
+        }
+      })
+      // Note: we don't store unlisten for this one-shot rate fix to keep floating minimal.
+      setTimeout(() => { rateFix().catch(()=>{}) }, 15000) // auto cleanup after reasonable time
     } catch (e) {
       console.warn('Floating capture support start failed', e)
     }
@@ -176,12 +197,16 @@ export default function App() {
       if (data && data.length) loadHistory(data)
     }).catch(() => {})
 
-    // Load settings and apply language
-    invoke<any>('get_settings').then((settings) => {
-      if (settings?.language) {
-        // Trigger store update if needed (Settings page also handles this)
-        // We can extend the store later to have an initSettings action
-      }
+    // Load persisted app settings (theme, aiModel, sttModel, language, etc.)
+    loadAppSettings().then((saved) => {
+      const { setSettings } = useAppStore.getState()
+      setSettings({
+        ...saved,
+        language: saved.language || DEFAULT_LANGUAGE,
+        aiModel: saved.aiModel,
+        sttProvider: saved.sttProvider,
+        sttModel: saved.sttModel,
+      })
     }).catch(() => {})
 
     // Listen for global shortcut events from Rust

@@ -8,8 +8,8 @@ export function clearKeyCache() {
   cachedKeys = null;
 }
 
-async function getKeys() {
-  if (!cachedKeys) {
+async function getKeys(forceReload = false) {
+  if (forceReload || !cachedKeys) {
     cachedKeys = await loadApiKeys();
   }
   return cachedKeys;
@@ -21,13 +21,13 @@ async function getKeys() {
  *   "groq-llama-3.1", "groq-llama-3.3-70b"
  *   "gpt-4o", "gpt-4o-mini", "openai-gpt-4o"
  *   "claude-3.5", "claude-3.5-sonnet"
- *   "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"
+ *   "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"
  */
 function resolveProviderAndModel(aiModel: string): { provider: 'groq' | 'openai' | 'anthropic' | 'gemini'; model: string } {
   const m = (aiModel || 'groq-llama-3.1').toLowerCase();
 
   if (m.startsWith('gemini')) {
-    // gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash etc.
+    // gemini-3.5-flash, gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash etc.
     return { provider: 'gemini', model: aiModel };
   }
   if (m.includes('claude')) {
@@ -89,12 +89,23 @@ async function callOpenAI(prompt: string, model: string, apiKey: string): Promis
 }
 
 async function callGemini(prompt: string, model: string, apiKey: string): Promise<string> {
-  // Gemini uses a different API shape. We map common aliases to stable model ids.
-  const modelId = model.toLowerCase().includes('1.5-pro') ? 'gemini-1.5-pro-latest'
-    : model.toLowerCase().includes('2.0') || model.toLowerCase().includes('gemini-2') ? 'gemini-2.0-flash'
-    : 'gemini-1.5-flash-latest';
+  // Gemini uses a different API shape. Map to currently supported stable model IDs.
+  // Supported in Google AI Studio / Gemini API: gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash, etc.
+  const lower = model.toLowerCase();
+  let modelId: string;
+  if (lower.includes('2.5') || lower.includes('gemini-2.5')) {
+    modelId = 'gemini-2.5-flash-preview-05-20';
+  } else if (lower.includes('2.0') || lower.includes('gemini-2')) {
+    modelId = 'gemini-2.0-flash';
+  } else if (lower.includes('1.5-pro') || lower.includes('pro')) {
+    modelId = 'gemini-1.5-pro';
+  } else {
+    // Default to fast and widely available flash model
+    modelId = 'gemini-1.5-flash';
+  }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
+  // Use stable v1 endpoint (v1beta also works but v1 is preferred)
+  const url = `https://generativelanguage.googleapis.com/v1/models/${modelId}:generateContent?key=${apiKey}`;
 
   const res = await fetch(url, {
     method: 'POST',
@@ -135,8 +146,26 @@ export async function generateSuggestions(question: string, transcriptSoFar?: st
   const { settings } = useAppStore.getState();
   const aiModel: string = settings?.aiModel || 'groq-llama-3.1';
 
-  const { provider, model } = resolveProviderAndModel(aiModel);
-  const apiKey = await getLlmApiKey(provider);
+  let { provider, model } = resolveProviderAndModel(aiModel);
+  let apiKey = await getLlmApiKey(provider);
+
+  // Robustness: if the selected provider has no key, auto-select the first provider that does have a key.
+  // This makes "configure Gemini + Deepgram, start using" work even if you didn't explicitly switch the active AI model.
+  if (!apiKey) {
+    const candidates: ('gemini' | 'groq' | 'openai' | 'anthropic')[] = ['gemini', 'groq', 'openai', 'anthropic'];
+    for (const cand of candidates) {
+      if (cand === provider) continue;
+      const k = await getLlmApiKey(cand);
+      if (k) {
+        provider = cand;
+        // Use a reasonable default model per provider when auto-falling back
+        model = cand === 'gemini' ? 'gemini-2.0-flash' : (cand === 'openai' ? 'gpt-4o' : 'llama-3.1-8b-instant');
+        apiKey = k;
+        console.log('[LLM] Auto-selected provider with key:', provider);
+        break;
+      }
+    }
+  }
 
   const userPrompt = `Interviewer question: ${question}\nPrevious context: ${transcriptSoFar || 'none'}`;
 
@@ -208,7 +237,7 @@ export async function startDeepgramStream(
   onError?: (err: any) => void,
   sampleRate: number = 16000
 ): Promise<WebSocket | null> {
-  const { deepgram: DEEPGRAM_API_KEY } = await getKeys();
+  const { deepgram: DEEPGRAM_API_KEY } = await getKeys(true); // force fresh read so newly entered keys are picked up immediately
 
   // Read STT config from global store (consistent with LLM provider logic)
   const { settings } = useAppStore.getState();
@@ -225,9 +254,11 @@ export async function startDeepgramStream(
   // Model comes from settings (user-configurable in Settings page).
   const model = sttProvider === 'deepgram' ? sttModel : 'nova-2';
 
-  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true`;
+  // Use token in query param for maximum browser/webview compatibility.
+  // (The Sec-WebSocket-Protocol subprotocol method also works but query is more reliable across envs.)
+  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true&token=${encodeURIComponent(DEEPGRAM_API_KEY)}`;
 
-  const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]);
+  const ws = new WebSocket(wsUrl);
   ws.binaryType = 'arraybuffer';
 
   ws.onopen = () => {

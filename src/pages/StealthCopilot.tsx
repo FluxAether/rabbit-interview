@@ -203,9 +203,10 @@ export default function StealthCopilot() {
       if (useSystemAudio) {
         try {
           res = await invoke<string>('start_macos_capture', {
-            captureSystemAudio: true,
-            captureMicrophone: useMicWithSystem,
-            deepgramKey
+            // Must match exact Rust parameter names (snake_case) defined in screencapturekit.rs
+            capture_system_audio: true,
+            capture_microphone: useMicWithSystem,
+            deepgram_key: deepgramKey
           })
         } catch (e: any) {
           // Fallback if the native command is not available (feature not enabled or non-mac)
@@ -214,7 +215,7 @@ export default function StealthCopilot() {
             deviceName: selectedDevice || null,
             deepgramKey
           })
-          setStatus('Native system audio unavailable — using mic only. ' + (res || ''))
+          setStatus('Using microphone only (no system audio). Install/build with macos-system-audio feature for interviewer voice capture. ' + (res || ''))
         }
       } else {
         res = await invoke<string>('start_capture', {
@@ -228,45 +229,75 @@ export default function StealthCopilot() {
       isCapturingRef.current = true
       setCopilotActive(true)
 
-      // Listen for audio-config (sent once at start of capture) to get real sample rate
-      const unlistenConfig = await listen<{ sample_rate: number; device: string }>('audio-config', (event) => {
-        const rate = event.payload.sample_rate || 16000
-        sampleRateRef.current = rate
-        console.log('[Copilot] Audio config received:', event.payload)
+      // Smart initial guess for sample rate. SCK always uses 48k. cpal often 16k or device default.
+      const initialRateGuess = useSystemAudio ? 48000 : 16000
+      sampleRateRef.current = initialRateGuess
+
+      // Reusable starter for Deepgram so we can (re)create with correct rate when we learn it.
+      const startOrRestartDeepgram = async (rate: number) => {
+        // Close previous if any (e.g. rate changed)
+        if (deepgramWsRef.current) {
+          closeDeepgramStream(deepgramWsRef.current)
+          deepgramWsRef.current = null
+        }
+        const ws = await startDeepgramStream(
+          (text, isFinal) => {
+            // Guard: ignore late callbacks after user clicked stop
+            if (!isCapturingRef.current) return
+            if (text) {
+              if (isFinal) {
+                updateCopilotQuestion?.(text)
+                emit('copilot-question', text).catch(() => {})
+              }
+              // IMPORTANT: Only call LLM on FINAL results to avoid spamming the model on every interim.
+              if (isFinal) {
+                generateSuggestions(text).then((sugs) => {
+                  if (!isCapturingRef.current) return
+                  const { settings } = useAppStore.getState()
+                  const modelLabel = (settings?.aiModel || 'groq').replace(/-/g, ' ')
+                  sugs.forEach((s: string) => {
+                    const sugText = s.startsWith('•') ? s : `• ${s}`
+                    addSuggestion({ text: sugText, category: `Deepgram + ${modelLabel}` })
+                    emit('copilot-suggestion', { text: sugText }).catch(() => {})
+                  })
+                })
+              }
+            }
+          },
+          (err) => console.error('Deepgram error', err),
+          rate
+        )
+        deepgramWsRef.current = ws
+        console.log('[Copilot] Deepgram stream (re)started @', rate, 'Hz')
+      }
+
+      // Listen for audio-config (sent once at start of capture) to get real sample rate.
+      // We (re)start Deepgram here to guarantee the WS URL declares the correct sample_rate
+      // that matches the actual audio chunks the backend will emit.
+      const unlistenConfig = await listen<{ sample_rate: number; device: string }>('audio-config', async (event) => {
+        const rate = event.payload.sample_rate || initialRateGuess
+        if (rate !== sampleRateRef.current) {
+          sampleRateRef.current = rate
+          console.log('[Copilot] Audio config received (rate updated):', event.payload)
+          // Recreate Deepgram stream with correct rate (important for accurate transcription)
+          if (isCapturingRef.current) {
+            await startOrRestartDeepgram(rate)
+          }
+        } else {
+          sampleRateRef.current = rate
+          console.log('[Copilot] Audio config received:', event.payload)
+        }
       })
       unlistenConfigRef.current = unlistenConfig
 
-      // Start Deepgram using the **actual** sample rate from the mic (or default 16k)
-      const currentRate = sampleRateRef.current
-      const ws = await startDeepgramStream(
-        (text, isFinal) => {
-          // Guard: ignore late callbacks after user clicked stop
-          if (!isCapturingRef.current) return
-          if (text) {
-            if (isFinal) {
-              updateCopilotQuestion?.(text)
-              emit('copilot-question', text).catch(() => {})
-            }
-            // IMPORTANT: Only call LLM on FINAL results to avoid spamming the model on every interim.
-            // This was one source of excessive work.
-            if (isFinal) {
-              generateSuggestions(text).then((sugs) => {
-                if (!isCapturingRef.current) return
-                const { settings } = useAppStore.getState()
-                const modelLabel = (settings?.aiModel || 'groq').replace(/-/g, ' ')
-                sugs.forEach((s: string) => {
-                  const sugText = s.startsWith('•') ? s : `• ${s}`
-                  addSuggestion({ text: sugText, category: `Deepgram + ${modelLabel}` })
-                  emit('copilot-suggestion', { text: sugText }).catch(() => {})
-                })
-              })
-            }
-          }
-        },
-        (err) => console.error('Deepgram error', err),
-        currentRate
-      )
-      deepgramWsRef.current = ws
+      // Start Deepgram immediately with best guess. The config listener will correct it if needed
+      // (this avoids losing early audio while waiting for the event).
+      await startOrRestartDeepgram(sampleRateRef.current)
+
+      // If no key was present at start time, Deepgram stream returns null and we fall back to no live transcription.
+      if (!deepgramWsRef.current) {
+        setStatus((prev) => (prev || '') + ' | (No Deepgram key at start — live transcription disabled)')
+      }
 
       // Amplitude listener — very cheap, OK to keep
       const unlistenAmp = await listen<number>('audio-amplitude', (event) => {

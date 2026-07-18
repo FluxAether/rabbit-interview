@@ -1,3 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+src-tauri/target/
+target/
+
+# Build caches
+*.tsbuildinfo
+*.local
+
 # Logs
 logs
 *.log
@@ -5,21 +18,29 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
+# Editor / IDE
+.idea/
+.vscode/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-.vscode/
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Tauri generated files
+src-tauri/gen/
+src-tauri/*.log
+
+# Rust
+**/*.rs.bk
+# Note: Cargo.lock should be committed for binary applications (recommended)
