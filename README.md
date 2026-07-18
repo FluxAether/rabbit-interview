@@ -47,6 +47,8 @@ The Stealth Copilot can capture **both your voice and the interviewer's voice** 
 
 This completely removes the need to install BlackHole or create Aggregate Devices for most users.
 
+**Note on building**: Native ScreenCaptureKit support pulls in Swift-based dependencies (`apple-metal` etc.). You need a full Xcode installation for successful linking on macOS (see Packaging section below).
+
 ### Fallback / Other platforms
 - Microphone-only mode still uses `cpal` (select device in the UI).
 - On older macOS or Windows, you may still need virtual audio routing tools for system audio.
@@ -58,14 +60,23 @@ Proprietary (internal project)
 
 ## Packaging & Signing (Phase 4)
 
-### macOS
-1. `npm run build:mac`
-2. For notarization:
+### macOS (with native audio capture)
+1. Make sure you have **full Xcode** (not just Command Line Tools) installed and selected:
+   ```bash
+   xcode-select -s /Applications/Xcode.app/Contents/Developer
+   ```
+   The `screencapturekit` crate (and its `apple-metal` dependency) uses Swift bridges, which require a proper Xcode installation.
+
+2. `npm run build:mac` (or `npm run tauri build`)
+
+3. If you see Swift compatibility linker errors during build, update Xcode / Command Line Tools and try again.
+
+4. For notarization:
    - Create App Store Connect API key or use `xcrun notarytool store-credentials`
    - `xcrun notarytool submit --keychain-profile "AC_PASSWORD" --wait ./target/release/bundle/macos/StealthPath.app.tar.gz`
-3. Staple: `xcrun stapler staple ./target/.../StealthPath.app`
+5. Staple: `xcrun stapler staple ./target/.../StealthPath.app`
 
-Entitlements are in `src-tauri/entitlements.plist` (microphone + network + file access).
+Entitlements are in `src-tauri/entitlements.plist` (microphone + network + file access + screen capture via Info.plist descriptions).
 
 ### Windows
 - `npm run build:win`
