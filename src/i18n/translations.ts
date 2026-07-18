@@ -6,7 +6,7 @@ export type TranslationKey = string
 export const translations: Record<SupportedLanguage, Record<string, string>> = {
   'en-US': {
     // App / Shell
-    'app.name': 'StealthPath',
+    'app.name': 'RabbitInterview',
     'app.tagline': '即答侠',
     'app.userName': 'Alex Morgan',
     'app.userPlan': 'Premium Plan',
@@ -213,7 +213,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
 
   'zh-CN': {
     // App / Shell
-    'app.name': 'StealthPath',
+    'app.name': 'RabbitInterview',
     'app.tagline': '即答侠',
     'app.userName': 'Alex Morgan',
     'app.userPlan': '高级会员',
@@ -420,7 +420,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
 
   'zh-TW': {
     // For now, alias most to zh-CN for completeness. Can be refined later.
-    'app.name': 'StealthPath',
+    'app.name': 'RabbitInterview',
     'app.tagline': '即答俠',
     'app.userName': 'Alex Morgan',
     'app.userPlan': '高級會員',

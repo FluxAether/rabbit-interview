@@ -4,7 +4,7 @@ let db: any = null;
 
 export async function getDb() {
   if (!db) {
-    db = await Database.load('sqlite:stealthpath.db');
+    db = await Database.load('sqlite:rabbitinterview.db');
     // Ensure tables
     await db.execute(`
       CREATE TABLE IF NOT EXISTS settings (

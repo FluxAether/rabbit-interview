@@ -1,4 +1,4 @@
-# StealthPath (即答侠) — Desktop Interview Copilot
+# RabbitInterview (即答侠) — Desktop Interview Copilot
 
 Full-featured cross-platform desktop app built with **Tauri 2 + React 19**.
 
@@ -93,8 +93,8 @@ Proprietary (internal project)
 
 4. For notarization:
    - Create App Store Connect API key or use `xcrun notarytool store-credentials`
-   - `xcrun notarytool submit --keychain-profile "AC_PASSWORD" --wait ./target/release/bundle/macos/StealthPath.app.tar.gz`
-5. Staple: `xcrun stapler staple ./target/.../StealthPath.app`
+   - `xcrun notarytool submit --keychain-profile "AC_PASSWORD" --wait ./target/release/bundle/macos/RabbitInterview.app.tar.gz`
+5. Staple: `xcrun stapler staple ./target/.../RabbitInterview.app`
 
 Entitlements are in `src-tauri/entitlements.plist` (microphone + network + file access + screen capture via Info.plist descriptions).
 
