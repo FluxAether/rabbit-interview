@@ -123,12 +123,12 @@ export default function App() {
       // Use a sane default; the global audio-config listener will help if chunks are at different rate,
       // but for standalone floating we also set up a one-shot corrector.
       const ws = await startDeepgramStream(
-        (text, isFinal) => {
-          if (text) {
-            if (isFinal) setFloatingQuestion(text)
-            emit('copilot-question', text).catch(() => {})
-            if (isFinal) {
-              generateSuggestions(text).then((sugs) => {
+        (_text, _isFinal) => {
+          if (_text) {
+            if (_isFinal) setFloatingQuestion(_text)
+            emit('copilot-question', _text).catch(() => {})
+            if (_isFinal) {
+              generateSuggestions(_text).then((sugs) => {
                 sugs.forEach((s: string) => {
                   const sugText = s.startsWith('•') ? s : `• ${s}`
                   setFloatingSuggestions(prev => {
@@ -161,7 +161,7 @@ export default function App() {
         if (floatingDeepgramRef.current && r !== 16000) {
           closeDeepgramStream(floatingDeepgramRef.current)
           const newWs = await startDeepgramStream(
-            (text, isFinal) => { /* same as above but omitted for brevity - reuse main path in practice */ },
+            (_text, _isFinal) => { /* same as above but omitted for brevity - reuse main path in practice */ },
             (err) => console.error('Floating Deepgram err', err),
             r
           )
@@ -169,7 +169,7 @@ export default function App() {
         }
       })
       // Note: we don't store unlisten for this one-shot rate fix to keep floating minimal.
-      setTimeout(() => { rateFix().catch(()=>{}) }, 15000) // auto cleanup after reasonable time
+      setTimeout(() => { rateFix() }, 15000) // auto cleanup after reasonable time
     } catch (e) {
       console.warn('Floating capture support start failed', e)
     }

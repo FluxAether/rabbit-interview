@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "tauri": "tauri",
+    "tauri:mac-audio": "sh -c 'DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer} SDKROOT=$(DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer} xcrun --sdk macosx --show-sdk-path) PATH=\"${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}/Toolchains/XcodeDefault.xctoolchain/usr/bin:${PATH}\" npm run tauri dev -- --features macos-system-audio'",
     "build:mac": "tauri build --target universal-apple-darwin",
     "build:win": "tauri build --target x86_64-pc-windows-msvc",
     "sign:mac": "echo 'Run: xcrun notarytool submit --keychain-profile \"AC_PASSWORD\" --wait dist/StealthPath.app.tar.gz'",

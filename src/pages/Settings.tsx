@@ -76,17 +76,6 @@ export default function Settings() {
     }
   }
 
-  // Force immediate persist (bypasses debounce)
-  const saveNow = async () => {
-    if (saveTimeoutRef.current) {
-      window.clearTimeout(saveTimeoutRef.current)
-      saveTimeoutRef.current = null
-    }
-    const payload = buildPayload()
-    useAppStore.setState((s) => ({ settings: { ...s.settings, ...payload } }))
-    await persistToDisk(payload)
-  }
-
   // React to any setting change after hydration → update Zustand immediately + debounce disk save
   useEffect(() => {
     if (!isHydratedRef.current) return

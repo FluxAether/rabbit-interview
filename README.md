@@ -50,13 +50,22 @@ This completely removes the need to install BlackHole or create Aggregate Device
 **Note on building**: Native ScreenCaptureKit support pulls in Swift-based dependencies (`apple-metal` etc.). 
 
 - By default the app builds without the heavy dependency (`cargo build` / `npm run tauri dev` works with just microphone capture).
-- To enable system audio capture, build with the feature:
+- To enable system audio capture, build/run with the feature:
   ```bash
+  # Dev (recommended)
+  npm run tauri:mac-audio
+  # or manually with env (if your Xcode is in a different location)
+  DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  SDKROOT=$(DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcrun --sdk macosx --show-sdk-path) \
+  PATH="/Applications/Xcode-beta.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:$PATH" \
+  npm run tauri dev -- --features macos-system-audio
+
+  # Build
   cargo tauri build -- --features macos-system-audio
   # or
   npm run tauri build -- --features macos-system-audio
   ```
-- You need a full Xcode installation (not only Command Line Tools) for the final link step when the feature is enabled.
+- You need a **full Xcode** (not only Command Line Tools). The helper script and DEVELOPER_DIR override take care of selecting the correct Swift toolchain and macOS SDK during compilation and linking.
 
 See Packaging section below for more details.
 

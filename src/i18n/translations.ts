@@ -186,6 +186,9 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.listSources': 'List sources',
     'copilot.openPicker': 'Open native picker',
     'copilot.requestPerm': 'Request perm',
+    'copilot.permInstruction': 'Please go to System Settings → Privacy & Security → Screen Recording and enable permission for this app.',
+    'copilot.permGranted': 'Permission already granted (or allowed).',
+    'copilot.permMacOnly': 'Screen recording permission is only available when the app is built with macOS system audio support (macos-system-audio feature).',
 
     // Feedback labels (used in mock)
     'feedback.clarity': 'Clarity',
@@ -383,6 +386,9 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.listSources': '列出来源',
     'copilot.openPicker': '打开原生选择器',
     'copilot.requestPerm': '请求权限',
+    'copilot.permInstruction': '请前往「系统设置 → 隐私与安全性 → 屏幕录制」为本应用开启权限。',
+    'copilot.permGranted': '权限已授予（或已允许）。',
+    'copilot.permMacOnly': '仅在启用 macOS 系统音频支持（macos-system-audio 特性）时可用。',
 
     // Feedback labels
     'feedback.clarity': '清晰度',

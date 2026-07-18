@@ -83,10 +83,28 @@ export default function StealthCopilot() {
 
   const requestScreenPermission = async () => {
     try {
-      const ok = await invoke<boolean>('check_screen_recording_permission')
-      alert(ok ? 'Permission OK (or already granted)' : 'Please grant Screen Recording permission in System Settings > Privacy & Security')
+      // Dynamically import to avoid hard dependency at module load time.
+      const { openUrl } = await import('@tauri-apps/plugin-opener')
+      // Open the operating system's Screen Recording permission settings page directly.
+      // This works on macOS (Ventura / Sonoma / Sequoia+). The user can toggle the app there.
+      await openUrl('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')
+
+      // Also attempt to surface the native permission prompt (best effort, non-blocking).
+      // This helps first-time users while the Settings page is open for manual toggle.
+      invoke<boolean>('check_screen_recording_permission').catch(() => {})
     } catch (e) {
-      alert('Screen recording permission check is only available with macOS system audio support enabled.')
+      // Fallback: try to trigger the permission prompt via ScreenCaptureKit check,
+      // and show instructions if that also isn't available.
+      try {
+        const ok = await invoke<boolean>('check_screen_recording_permission')
+        if (!ok) {
+          alert(t('copilot.permInstruction'))
+        } else {
+          alert(t('copilot.permGranted'))
+        }
+      } catch {
+        alert(t('copilot.permMacOnly'))
+      }
     }
   }
 
