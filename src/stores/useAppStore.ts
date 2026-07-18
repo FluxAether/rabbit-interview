@@ -90,12 +90,16 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({ copilot: { ...state.copilot, currentQuestion: q } })),
 
   addSuggestion: (s) =>
-    set((state) => ({
-      copilot: {
-        ...state.copilot,
-        suggestions: [...state.copilot.suggestions, { ...s, id: Date.now() }],
-      },
-    })),
+    set((state) => {
+      const next = [...state.copilot.suggestions, { ...s, id: Date.now() }];
+      // Cap suggestions to avoid memory / UI bloat during long sessions
+      return {
+        copilot: {
+          ...state.copilot,
+          suggestions: next.length > 40 ? next.slice(next.length - 40) : next,
+        },
+      };
+    }),
 
   updateAmplitude: (amp) =>
     set((state) => ({ copilot: { ...state.copilot, amplitude: amp } })),

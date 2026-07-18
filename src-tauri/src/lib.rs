@@ -4,6 +4,8 @@ mod db;
 
 use audio::{start_capture, stop_capture, list_audio_devices};
 use commands::{get_settings, save_settings, launch_copilot_window, hide_copilot_window, close_copilot_window, get_history, save_interview_record};
+use tauri::Emitter;
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -17,7 +19,23 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, _shortcut_id| {
+                    // We only care about the two documented shortcuts.
+                    // Emit different events so frontend can react appropriately.
+                    let _ = match shortcut {
+                        s if s.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyC) => {
+                            app.emit("toggle-capture", ())
+                        }
+                        s if s.matches(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyI) => {
+                            app.emit("toggle-copilot", ())
+                        }
+                        _ => Ok(()),
+                    };
+                })
+                .build()
+        )
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -36,6 +54,19 @@ pub fn run() {
             if let Err(e) = db::init_db(app) {
                 eprintln!("DB init error: {}", e);
             }
+
+            // Register the actual hotkey combinations.
+            // The .with_handler on the plugin builder above will receive them and emit events.
+            let capture_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyC);
+            if let Err(e) = app.global_shortcut().register(capture_shortcut) {
+                eprintln!("Failed to register ⌘⇧C capture shortcut: {}", e);
+            }
+
+            let copilot_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyI);
+            if let Err(e) = app.global_shortcut().register(copilot_shortcut) {
+                eprintln!("Failed to register ⌘⇧I copilot shortcut: {}", e);
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())

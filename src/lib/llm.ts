@@ -83,7 +83,8 @@ function float32ToInt16(float32Array: Float32Array): Int16Array {
  */
 export async function startDeepgramStream(
   onTranscript: (text: string, isFinal: boolean) => void,
-  onError?: (err: any) => void
+  onError?: (err: any) => void,
+  sampleRate: number = 16000
 ): Promise<WebSocket | null> {
   const { deepgram: DEEPGRAM_API_KEY } = await getKeys();
   if (!DEEPGRAM_API_KEY) {
@@ -91,7 +92,9 @@ export async function startDeepgramStream(
     return null;
   }
 
-  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&channels=1&model=nova-2&interim_results=true&smart_format=true&punctuate=true`;
+  // Use the actual mic sample rate reported by backend (fixes STT quality).
+  // Deepgram accepts 16000, 44100, 48000 etc. as long as audio matches.
+  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=nova-2&interim_results=true&smart_format=true&punctuate=true`;
 
   const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]);
   ws.binaryType = 'arraybuffer';

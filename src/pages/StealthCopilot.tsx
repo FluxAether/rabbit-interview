@@ -16,6 +16,33 @@ export default function StealthCopilot() {
   const [selectedDevice, setSelectedDevice] = useState<string>('')
 
   const deepgramWsRef = useRef<WebSocket | null>(null)
+  // Store unlisten functions so we can properly remove listeners on stop
+  const unlistenAmpRef = useRef<(() => void) | null>(null)
+  const unlistenChunkRef = useRef<(() => void) | null>(null)
+  const unlistenConfigRef = useRef<(() => void) | null>(null)
+  // Accumulate recorded audio in a ref to avoid flooding React state on every audio buffer
+  const recordedChunksRef = useRef<number[][]>([])
+  // Used to guard async callbacks (transcription etc.) after we've stopped
+  const isCapturingRef = useRef(false)
+  // Actual sample rate reported by the audio backend (critical for correct STT + WAV export)
+  const sampleRateRef = useRef<number>(16000)
+  // Ref to current toggle function so shortcuts can safely call it
+  const toggleCaptureRef = useRef<() => Promise<void>>(async () => {})
+
+  const cleanupListeners = () => {
+    if (unlistenAmpRef.current) {
+      try { unlistenAmpRef.current() } catch {}
+      unlistenAmpRef.current = null
+    }
+    if (unlistenChunkRef.current) {
+      try { unlistenChunkRef.current() } catch {}
+      unlistenChunkRef.current = null
+    }
+    if (unlistenConfigRef.current) {
+      try { unlistenConfigRef.current() } catch {}
+      unlistenConfigRef.current = null
+    }
+  }
 
   const loadDevices = async () => {
     try {
@@ -31,6 +58,30 @@ export default function StealthCopilot() {
 
   useEffect(() => {
     loadDevices()
+    return () => {
+      // Ensure we clean up everything if component unmounts while capturing
+      cleanupListeners()
+      if (deepgramWsRef.current) {
+        closeDeepgramStream(deepgramWsRef.current)
+        deepgramWsRef.current = null
+      }
+      // Best effort stop on backend too (use ref because state may be stale in cleanup)
+      if (isCapturingRef.current) {
+        invoke('stop_capture').catch(() => {})
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Global shortcut support: ⌘⇧C etc. will emit this from Rust
+  useEffect(() => {
+    const unlisten = listen('toggle-capture', () => {
+      // Use ref so we always call the current implementation
+      toggleCaptureRef.current().catch((e) => console.warn('toggle-capture via shortcut failed', e))
+    })
+    return () => {
+      unlisten.then((f) => f()).catch(() => {})
+    }
   }, [])
 
   const launchFloatingWindow = async () => {
@@ -52,100 +103,209 @@ export default function StealthCopilot() {
   }
 
   const [recordedChunks, setRecordedChunks] = useState<number[][]>([])
+  const [hasLiveRecording, setHasLiveRecording] = useState(false)
+
+  // Snapshot the ref into state so Export button works after stopping
+  const snapshotRecording = () => {
+    setRecordedChunks(recordedChunksRef.current.slice())
+    setHasLiveRecording(recordedChunksRef.current.length > 0)
+  }
+
+  const resetRecording = () => {
+    recordedChunksRef.current = []
+    setRecordedChunks([])
+    setHasLiveRecording(false)
+  }
 
   const toggleCapture = async () => {
-    try {
-      if (!isCapturing) {
-        // Start real audio with selected device
-        const res = await invoke<string>('start_capture', { 
-          deviceName: selectedDevice || null 
-        })
-        setStatus(res)
-        setIsCapturing(true)
-        setCopilotActive(true)
-        setRecordedChunks([])
+    // If currently capturing, stop first (do this outside try so UI feels responsive)
+    if (isCapturing) {
+      // Flip UI state immediately so button and status respond
+      setIsCapturing(false)
+      isCapturingRef.current = false
+      setCopilotActive(false)
+      setStatus('Stopping...')
 
-        // Start Deepgram real-time transcription (if key present)
-        const ws = await startDeepgramStream(
-          (text, isFinal) => {
-            if (text) {
-              // Use transcript as the "question" the interviewer asked
-              // This is the key integration: real STT feeds the LLM
-              if (isFinal) {
-                updateCopilotQuestion?.(text)  // update question from real speech
-              }
-              // Generate AI suggestions based on real transcript
+      // 1. Stop emitting new events from backend
+      try {
+        await invoke('stop_capture')
+      } catch (e) {
+        console.warn('stop_capture invoke failed:', e)
+      }
+
+      // 2. Close Deepgram WS
+      closeDeepgramStream(deepgramWsRef.current)
+      deepgramWsRef.current = null
+
+      // 3. Remove the heavy audio listeners (this was the main cause of continued work + freezes)
+      cleanupListeners()
+
+      // 4. Snapshot whatever we recorded so export works
+      snapshotRecording()
+
+      setStatus('Stopped')
+      return
+    }
+
+    // === START CAPTURE ===
+    try {
+      // Clean any stale listeners from previous (interrupted) session
+      cleanupListeners()
+      resetRecording()
+      sampleRateRef.current = 16000 // will be overwritten by audio-config event shortly
+
+      const res = await invoke<string>('start_capture', {
+        deviceName: selectedDevice || null
+      })
+      setStatus(res)
+      setIsCapturing(true)
+      isCapturingRef.current = true
+      setCopilotActive(true)
+
+      // Listen for audio-config (sent once at start of capture) to get real sample rate
+      const unlistenConfig = await listen<{ sample_rate: number; device: string }>('audio-config', (event) => {
+        const rate = event.payload.sample_rate || 16000
+        sampleRateRef.current = rate
+        console.log('[Copilot] Audio config received:', event.payload)
+      })
+      unlistenConfigRef.current = unlistenConfig
+
+      // Start Deepgram using the **actual** sample rate from the mic (or default 16k)
+      const currentRate = sampleRateRef.current
+      const ws = await startDeepgramStream(
+        (text, isFinal) => {
+          // Guard: ignore late callbacks after user clicked stop
+          if (!isCapturingRef.current) return
+          if (text) {
+            if (isFinal) {
+              updateCopilotQuestion?.(text)
+            }
+            // IMPORTANT: Only call LLM on FINAL results to avoid spamming the model on every interim.
+            // This was one source of excessive work.
+            if (isFinal) {
               generateSuggestions(text).then((sugs) => {
+                if (!isCapturingRef.current) return
                 sugs.forEach((s: string) => {
                   addSuggestion({ text: s.startsWith('•') ? s : `• ${s}`, category: 'Deepgram + Groq' })
                 })
               })
             }
-          },
-          (err) => console.error('Deepgram error', err)
-        )
-        deepgramWsRef.current = ws
-
-        await listen<number>('audio-amplitude', (event) => {
-          updateAmplitude(event.payload)
-        })
-
-        await listen<number[]>('audio-chunk', async (event) => {
-          const chunk = new Float32Array(event.payload)
-          setRecordedChunks(prev => [...prev, Array.from(chunk)])
-
-          // Send to Deepgram (real STT)
-          if (deepgramWsRef.current) {
-            sendAudioChunk(deepgramWsRef.current, chunk)
           }
+        },
+        (err) => console.error('Deepgram error', err),
+        currentRate
+      )
+      deepgramWsRef.current = ws
 
-          // Also generate suggestions from LLM (can run in parallel with STT)
-          if (Math.random() > 0.75) {
-            const suggestions = await generateSuggestions(copilot.currentQuestion || "Tell me about a recent project.");
-            suggestions.forEach((s: string) => {
-              addSuggestion({ text: s.startsWith('•') ? s : `• ${s}`, category: "AI" })
-            });
-          }
-        })
-      } else {
-        await invoke('stop_capture')
-        closeDeepgramStream(deepgramWsRef.current)
-        deepgramWsRef.current = null
-        setStatus('Stopped')
-        setIsCapturing(false)
-        setCopilotActive(false)
-      }
+      // Amplitude listener — very cheap, OK to keep
+      const unlistenAmp = await listen<number>('audio-amplitude', (event) => {
+        if (!isCapturingRef.current) return
+        updateAmplitude(event.payload)
+      })
+      unlistenAmpRef.current = unlistenAmp
+
+      // Chunk listener — lightweight: full buffers, ref only, forward to STT.
+      const unlistenChunk = await listen<number[]>('audio-chunk', (event) => {
+        if (!isCapturingRef.current) return
+        const chunk = new Float32Array(event.payload)
+
+        // Accumulate in ref only (no re-renders, prevents UI freeze)
+        const wasEmpty = recordedChunksRef.current.length === 0
+        recordedChunksRef.current.push(Array.from(chunk))
+        if (wasEmpty) {
+          // Light state update so Export button enables promptly during capture
+          setHasLiveRecording(true)
+        }
+
+        // Forward to STT engine (now with correct sample rate)
+        if (deepgramWsRef.current) {
+          sendAudioChunk(deepgramWsRef.current, chunk)
+        }
+      })
+      unlistenChunkRef.current = unlistenChunk
     } catch (err: any) {
       setStatus('Error: ' + (err?.message || err))
-      setIsCapturing(!isCapturing)
+      // Cleanup on failure
+      cleanupListeners()
       closeDeepgramStream(deepgramWsRef.current)
       deepgramWsRef.current = null
-      if (!isCapturing) {
-        setCopilotActive(true)
-        setRecordedChunks([])
-        const interval = setInterval(() => {
-          updateAmplitude(Math.random() * 0.8)
-          if (Math.random() > 0.7) {
-            addSuggestion({ text: "• Keep answers under 90 seconds.", category: "Clarity" })
-          }
-        }, 1200)
-        setTimeout(() => clearInterval(interval), 25000)
-      }
+      setIsCapturing(false)
+      isCapturingRef.current = false
+      setCopilotActive(false)
     }
   }
 
+  // Keep a live reference to the toggle function so shortcuts can call the latest version
+  toggleCaptureRef.current = toggleCapture
+
+  // Convert collected f32 chunks + known sample rate into a playable mono WAV (PCM16)
   const exportRecording = () => {
-    if (recordedChunks.length === 0) {
+    const data = recordedChunks.length > 0 ? recordedChunks : recordedChunksRef.current
+    if (data.length === 0) {
       alert(t('copilot.noRecording'))
       return
     }
-    const blob = new Blob([JSON.stringify(recordedChunks)], { type: 'application/json' })
+
+    // Flatten all chunks into one Float32Array
+    const flatLength = data.reduce((sum, arr) => sum + arr.length, 0)
+    const flat = new Float32Array(flatLength)
+    let offset = 0
+    for (const chunk of data) {
+      flat.set(chunk, offset)
+      offset += chunk.length
+    }
+
+    const sampleRate = sampleRateRef.current || 16000
+    const numChannels = 1
+    const bytesPerSample = 2 // PCM16
+
+    // Build WAV header (standard PCM)
+    const blockAlign = numChannels * bytesPerSample
+    const byteRate = sampleRate * blockAlign
+    const dataSize = flat.length * bytesPerSample
+    const buffer = new ArrayBuffer(44 + dataSize)
+    const view = new DataView(buffer)
+
+    // RIFF chunk descriptor
+    writeString(view, 0, 'RIFF')
+    view.setUint32(4, 36 + dataSize, true)
+    writeString(view, 8, 'WAVE')
+
+    // fmt sub-chunk
+    writeString(view, 12, 'fmt ')
+    view.setUint32(16, 16, true) // PCM chunk size
+    view.setUint16(20, 1, true)  // Audio format = 1 (PCM)
+    view.setUint16(22, numChannels, true)
+    view.setUint32(24, sampleRate, true)
+    view.setUint32(28, byteRate, true)
+    view.setUint16(32, blockAlign, true)
+    view.setUint16(34, 16, true) // bits per sample
+
+    // data sub-chunk
+    writeString(view, 36, 'data')
+    view.setUint32(40, dataSize, true)
+
+    // Write PCM16 samples (convert f32 -1..1 to int16)
+    let pos = 44
+    for (let i = 0; i < flat.length; i++) {
+      const s = Math.max(-1, Math.min(1, flat[i]))
+      view.setInt16(pos, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+      pos += 2
+    }
+
+    const blob = new Blob([buffer], { type: 'audio/wav' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `interview-recording-${Date.now()}.json`
+    a.download = `interview-recording-${Date.now()}.wav`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  function writeString(view: DataView, offset: number, str: string) {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i))
+    }
   }
 
   const ampBarWidth = Math.min(100, Math.round(copilot.amplitude * 140))
@@ -153,7 +313,7 @@ export default function StealthCopilot() {
   const getDisplayStatus = (s: string, tt: (k: string) => string) => {
     if (s === 'Idle' || s === '空闲') return tt('misc.idle')
     if (s.includes('started') || s.includes('capture')) return tt('copilot.start')
-    if (s.includes('Stopped') || s.includes('stop')) return tt('copilot.stop')
+    if (s.includes('Stopped') || s.includes('stop') || s === 'Stopping...') return tt('copilot.stop')
     return s
   }
 
@@ -164,7 +324,10 @@ export default function StealthCopilot() {
           <div>
             <h1 className="text-2xl font-semibold">{t('copilot.title')}</h1>
             <p className="text-[#475569]">{t('copilot.subtitle')}</p>
-            <div className="text-xs mt-1 text-[#64748b]">{t('copilot.status')}: {getDisplayStatus(status, t)} {isCapturing ? '●' : ''}</div>
+            <div className="text-xs mt-1 text-[#64748b]">
+              {t('copilot.status')}: {getDisplayStatus(status, t)} {isCapturing ? '●' : ''}
+              {isCapturing && <span className="ml-2 opacity-60">@{sampleRateRef.current}Hz</span>}
+            </div>
           </div>
           <div className="flex flex-col items-end gap-2">
             {/* Device selector */}
@@ -294,7 +457,7 @@ export default function StealthCopilot() {
 
           <button
             onClick={exportRecording}
-            disabled={recordedChunks.length === 0}
+            disabled={!hasLiveRecording && recordedChunks.length === 0}
             className="text-xs py-1.5 border rounded-xl hover:bg-[#f8fafc] disabled:opacity-50"
           >
             {t('copilot.exportRecording')}

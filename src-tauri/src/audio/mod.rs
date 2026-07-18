@@ -1,4 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{SampleRate, SupportedStreamConfigRange};
+use serde::Serialize;
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::thread;
@@ -7,6 +9,12 @@ use tauri::{AppHandle, Emitter};
 /// Control messages for the audio thread.
 enum AudioCommand {
     Stop,
+}
+
+#[derive(Serialize, Clone)]
+struct AudioConfigPayload {
+    sample_rate: u32,
+    device: String,
 }
 
 /// Holds the handle to the background audio thread.
@@ -27,11 +35,18 @@ impl Default for AudioCapture {
 static AUDIO_STATE: once_cell::sync::Lazy<AudioCapture> = once_cell::sync::Lazy::new(|| AudioCapture::default());
 
 fn stop_capture_internal() {
+    // Send stop signal to the audio thread (this wakes recv())
     if let Some(tx) = AUDIO_STATE.tx.lock().unwrap().take() {
         let _ = tx.send(AudioCommand::Stop);
     }
+    // IMPORTANT: Do NOT call join() here on the caller thread.
+    // join() is blocking. If called from a Tauri async command it can stall the UI.
+    // We take the handle so the next start can clean up, and join in a background thread.
     if let Some(handle) = AUDIO_STATE.handle.lock().unwrap().take() {
-        let _ = handle.join();
+        thread::spawn(move || {
+            // Best-effort join; ignore result
+            let _ = handle.join();
+        });
     }
 }
 
@@ -61,17 +76,37 @@ pub async fn start_capture(app: AppHandle, deviceName: Option<String>) -> Result
             host.default_input_device().expect("no default input device")
         };
 
-        let config = match device.default_input_config() {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Config error: {}", e);
-                return;
+        let dev_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+
+        // Prefer 16kHz for STT (Deepgram and others work best at 16k).
+        // Fall back to device's default if 16k not supported.
+        let config = match device.supported_input_configs() {
+            Ok(mut supported) => {
+                // Try to find a config that supports 16000 Hz, mono or any channels (we'll use as-is)
+                let preferred_rate = 16000;
+                supported
+                    .find(|c: &SupportedStreamConfigRange| {
+                        c.min_sample_rate() <= SampleRate(preferred_rate)
+                            && c.max_sample_rate() >= SampleRate(preferred_rate)
+                    })
+                    .map(|range| range.with_sample_rate(SampleRate(preferred_rate)))
+                    .or_else(|| device.default_input_config().ok())
             }
-        };
+            Err(_) => device.default_input_config().ok(),
+        }
+        .expect("failed to obtain any input config");
 
         let sample_rate = config.sample_rate().0;
-        let dev_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
         println!("Starting real capture on device: {} @ {}Hz", dev_name, sample_rate);
+
+        // Emit config so frontend knows the real sample rate (important for Deepgram)
+        let _ = app_handle.emit(
+            "audio-config",
+            AudioConfigPayload {
+                sample_rate,
+                device: dev_name.clone(),
+            },
+        );
 
         let err_fn = |err| eprintln!("stream error: {}", err);
 
@@ -87,10 +122,10 @@ pub async fn start_capture(app: AppHandle, deviceName: Option<String>) -> Result
                 };
                 let _ = app_handle.emit("audio-amplitude", rms.min(1.0));
 
-                // Send chunk for STT or further processing (f32, frontend will convert)
-                if data.len() > 64 {
-                    let preview: Vec<f32> = data.iter().take(512).cloned().collect();
-                    let _ = app_handle.emit("audio-chunk", preview);
+                // Send FULL buffer for good STT quality (no more artificial truncation to 512)
+                if !data.is_empty() {
+                    let chunk: Vec<f32> = data.to_vec();
+                    let _ = app_handle.emit("audio-chunk", chunk);
                 }
             },
             err_fn,

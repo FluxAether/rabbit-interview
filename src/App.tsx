@@ -124,12 +124,20 @@ export default function App() {
     }).catch(() => {})
 
     // Listen for global shortcut events from Rust
-    const unlisten = listen('toggle-copilot', () => {
+    const unlistenCopilot = listen('toggle-copilot', () => {
       setCurrentPage('copilot')
       invoke('launch_copilot_window').catch(() => {})
     })
 
-    return () => { unlisten.then(f => f()) }
+    // ⌘⇧C - navigate to copilot page so capture toggle can work
+    const unlistenCapture = listen('toggle-capture', () => {
+      setCurrentPage('copilot')
+    })
+
+    return () => {
+      unlistenCopilot.then(f => f())
+      unlistenCapture.then(f => f())
+    }
   }, [])
 
   // Auto-focus the floating panel so Escape key works immediately
