@@ -3,7 +3,7 @@ mod commands;
 mod db;
 
 use audio::{start_capture, stop_capture, list_audio_devices};
-use commands::{get_settings, save_settings, launch_copilot_window, hide_copilot_window, get_history, save_interview_record};
+use commands::{get_settings, save_settings, launch_copilot_window, hide_copilot_window, close_copilot_window, get_history, save_interview_record};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -28,6 +28,7 @@ pub fn run() {
             save_settings,
             launch_copilot_window,
             hide_copilot_window,
+            close_copilot_window,
             get_history,
             save_interview_record
         ])

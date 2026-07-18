@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { 
   LayoutDashboard, 
   Rocket, 
@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import Dashboard from './pages/Dashboard'
 import StealthCopilot from './pages/StealthCopilot'
@@ -96,6 +97,7 @@ export default function App() {
   const { loadHistory } = useAppStore()
 
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
+  const floatingPanelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     // Load history once
@@ -112,21 +114,85 @@ export default function App() {
     return () => { unlisten.then(f => f()) }
   }, [])
 
+  // Auto-focus the floating panel so Escape key works immediately
+  useEffect(() => {
+    if (isFloating && floatingPanelRef.current) {
+      // Delay slightly to ensure the webview is ready
+      const t = setTimeout(() => {
+        floatingPanelRef.current?.focus()
+      }, 50)
+      return () => clearTimeout(t)
+    }
+  }, [isFloating])
+
   // Minimal floating copilot-only UI (matches the exact reference image)
   if (isFloating) {
     return (
-      <div className="floating-panel w-[400px] h-[360px] m-2 p-4 text-sm select-none overflow-hidden border border-[#e2e8f0]">
-        <div className="flex items-center justify-between mb-3 px-1" data-tauri-drag-region style={{ cursor: 'move' }}>
-          <div className="flex items-center gap-2">
+      <div 
+        ref={floatingPanelRef}
+        className="floating-panel w-[400px] h-[360px] m-2 p-4 text-sm select-none overflow-hidden border border-[#e2e8f0]"
+        tabIndex={-1}
+        onKeyDown={async (e) => {
+          if (e.key === 'Escape') {
+            console.log('[Copilot] Escape pressed')
+            try { await getCurrentWindow().close() } catch {}
+            try { await invoke('close_copilot_window') } catch {}
+            window.close()
+          }
+        }}
+      >
+        <div className="flex items-center justify-between mb-3 px-1">
+          {/* Drag region only on the title area */}
+          <div className="flex items-center gap-2" data-tauri-drag-region style={{ cursor: 'move' }}>
             <div className="w-7 h-7 rounded-lg bg-[#6366f1] flex items-center justify-center">
               <span className="text-white text-xs">🎤</span>
             </div>
             <span className="font-semibold tracking-tight">AI Interview Assistant</span>
           </div>
+          {/* Controls are explicitly non-draggable and have dedicated click handlers */}
           <div className="flex items-center gap-3 text-[#64748b]">
-            <span className="cursor-pointer">📈</span>
-            <span className="cursor-pointer">✎</span>
-            <span className="cursor-pointer" onClick={() => window.close()}>✕</span>
+            <span className="cursor-pointer select-none" data-tauri-drag-region="false">📈</span>
+            <span className="cursor-pointer select-none" data-tauri-drag-region="false">✎</span>
+            <button 
+              type="button"
+              className="cursor-pointer hover:text-[#334155] px-1.5 py-0.5 rounded hover:bg-[#f1f5f9] select-none text-base leading-none" 
+              data-tauri-drag-region="false"
+              onClick={async (e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                console.log('[Copilot] Close button clicked')
+                const win = getCurrentWindow()
+                try {
+                  // 1. Preferred: Tauri Window API
+                  await win.close()
+                  console.log('[Copilot] win.close() succeeded')
+                  return
+                } catch (err1) {
+                  console.warn('[Copilot] win.close() failed:', err1)
+                }
+                try {
+                  // 2. Force destroy
+                  await (win as any).destroy?.()
+                  console.log('[Copilot] win.destroy() succeeded')
+                  return
+                } catch (err2) {
+                  console.warn('[Copilot] destroy() failed:', err2)
+                }
+                try {
+                  // 3. Ask Rust backend to close it (most reliable for some setups)
+                  await invoke('close_copilot_window')
+                  console.log('[Copilot] close_copilot_window invoke succeeded')
+                  return
+                } catch (err3) {
+                  console.warn('[Copilot] Rust close command failed:', err3)
+                }
+                // 4. Last resort
+                console.log('[Copilot] falling back to window.close()')
+                window.close()
+              }}
+            >
+              ✕
+            </button>
           </div>
         </div>
 

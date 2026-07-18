@@ -59,9 +59,11 @@ pub async fn launch_copilot_window(app: AppHandle) -> Result<(), String> {
     .inner_size(420.0, 380.0)
     .resizable(false)
     .decorations(false)
+    .closable(true)
     .always_on_top(true)
     .shadow(true)
     .skip_taskbar(true)
+    // Do not set transparent(true) here — the floating panel uses CSS background + blur
     .build()
     .map_err(|e| e.to_string())?;
 
@@ -72,6 +74,14 @@ pub async fn launch_copilot_window(app: AppHandle) -> Result<(), String> {
 pub async fn hide_copilot_window(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("copilot") {
         let _ = window.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn close_copilot_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("copilot") {
+        let _ = window.close();
     }
     Ok(())
 }

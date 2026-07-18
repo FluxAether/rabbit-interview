@@ -43,7 +43,8 @@ export default function StealthCopilot() {
         resizable: false,
         alwaysOnTop: true,
         decorations: false,
-        transparent: true,
+        closable: true,
+        // transparent omitted to match Rust path and CSS-based card look
       })
     }
   }
@@ -192,17 +193,25 @@ export default function StealthCopilot() {
         </div>
 
         <div className="floating-panel w-full max-w-[460px] p-4 text-sm shadow-xl mx-auto border border-[#e2e8f0]">
-          <div className="flex items-center justify-between mb-3 px-1" data-tauri-drag-region style={{ cursor: 'move' }}>
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between mb-3 px-1">
+            {/* Only title area is draggable */}
+            <div className="flex items-center gap-2" data-tauri-drag-region style={{ cursor: 'move' }}>
               <div className="w-7 h-7 rounded-lg bg-[#6366f1] flex items-center justify-center">
                 <Mic className="w-3.5 h-3.5 text-white" />
               </div>
               <span className="font-semibold tracking-tight">AI Interview Assistant</span>
             </div>
             <div className="flex items-center gap-3 text-[#64748b]">
-              <Volume2 className="w-4 h-4" />
-              <Edit3 className="w-4 h-4" />
-              <X className="w-4 h-4 cursor-pointer" onClick={() => setCopilotActive(false)} />
+              <Volume2 className="w-4 h-4 cursor-pointer" data-tauri-drag-region="false" />
+              <Edit3 className="w-4 h-4 cursor-pointer" data-tauri-drag-region="false" />
+              <X 
+                className="w-4 h-4 cursor-pointer hover:text-[#334155] px-1 py-0.5 rounded hover:bg-[#f1f5f9]" 
+                data-tauri-drag-region="false"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setCopilotActive(false)
+                }} 
+              />
             </div>
           </div>
 
