@@ -19,6 +19,7 @@ import ResumeOptimizer from './pages/ResumeOptimizer'
 import History from './pages/History'
 import Settings from './pages/Settings'
 import { useAppStore } from './stores/useAppStore'
+import { useTranslation } from './i18n'
 
 export type Page = 
   | 'dashboard' 
@@ -29,18 +30,20 @@ export type Page =
   | 'settings'
 
 const navItems = [
-  { id: 'dashboard' as Page, label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'copilot' as Page, label: 'Stealth Copilot', icon: Rocket },
-  { id: 'mock' as Page, label: 'Mock Interview', icon: Mic },
-  { id: 'resume' as Page, label: 'Resume Optimizer', icon: FileText },
-  { id: 'history' as Page, label: 'History', icon: Clock },
-  { id: 'settings' as Page, label: 'Settings', icon: SettingsIcon },
+  { id: 'dashboard' as Page, labelKey: 'nav.dashboard', icon: LayoutDashboard },
+  { id: 'copilot' as Page, labelKey: 'nav.copilot', icon: Rocket },
+  { id: 'mock' as Page, labelKey: 'nav.mock', icon: Mic },
+  { id: 'resume' as Page, labelKey: 'nav.resume', icon: FileText },
+  { id: 'history' as Page, labelKey: 'nav.history', icon: Clock },
+  { id: 'settings' as Page, labelKey: 'nav.settings', icon: SettingsIcon },
 ]
 
 function Sidebar({ currentPage, onNavigate }: { 
   currentPage: Page; 
   onNavigate: (page: Page) => void 
 }) {
+  const t = useTranslation()
+
   return (
     <div className="w-60 bg-[#f8fafc] border-r border-[#e2e8f0] h-screen flex flex-col p-4">
       {/* Logo */}
@@ -49,8 +52,8 @@ function Sidebar({ currentPage, onNavigate }: {
           <Shield className="w-4.5 h-4.5 text-white" />
         </div>
         <div>
-          <div className="font-semibold text-lg tracking-tight">StealthPath</div>
-          <div className="text-[10px] text-[#64748b] -mt-1">即答侠</div>
+          <div className="font-semibold text-lg tracking-tight">{t('app.name')}</div>
+          <div className="text-[10px] text-[#64748b] -mt-1">{t('app.tagline')}</div>
         </div>
       </div>
 
@@ -73,7 +76,7 @@ function Sidebar({ currentPage, onNavigate }: {
                 <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[#6366f1] rounded-r" />
               )}
               <Icon className="w-4 h-4" />
-              <span>{item.label}</span>
+              <span>{t(item.labelKey)}</span>
             </div>
           )
         })}
@@ -83,8 +86,8 @@ function Sidebar({ currentPage, onNavigate }: {
         <div className="flex items-center gap-2 text-xs text-[#64748b]">
           <div className="w-6 h-6 rounded-full bg-[#6366f1] text-white flex items-center justify-center text-[10px] font-medium">AK</div>
           <div>
-            <div className="text-[#0f172a] text-sm font-medium">Alex Morgan</div>
-            <div className="text-[10px]">Premium Plan</div>
+            <div className="text-[#0f172a] text-sm font-medium">{t('app.userName')}</div>
+            <div className="text-[10px]">{t('app.userPlan')}</div>
           </div>
         </div>
       </div>
@@ -94,15 +97,30 @@ function Sidebar({ currentPage, onNavigate }: {
 
 export default function App() {
   const isFloating = window.location.hash === '#copilot-floating'
-  const { loadHistory } = useAppStore()
+  const { loadHistory, settings } = useAppStore()
+  const currentLang = (settings?.language as string) || 'en-US'
+  const t = useTranslation()
 
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
   const floatingPanelRef = useRef<HTMLDivElement>(null)
+
+  // Keep <html lang> in sync with selected language
+  useEffect(() => {
+    document.documentElement.lang = currentLang
+  }, [currentLang])
 
   useEffect(() => {
     // Load history once
     invoke<any[]>('get_history').then((data) => {
       if (data && data.length) loadHistory(data)
+    }).catch(() => {})
+
+    // Load settings and apply language
+    invoke<any>('get_settings').then((settings) => {
+      if (settings?.language) {
+        // Trigger store update if needed (Settings page also handles this)
+        // We can extend the store later to have an initSettings action
+      }
     }).catch(() => {})
 
     // Listen for global shortcut events from Rust
@@ -147,7 +165,7 @@ export default function App() {
             <div className="w-7 h-7 rounded-lg bg-[#6366f1] flex items-center justify-center">
               <span className="text-white text-xs">🎤</span>
             </div>
-            <span className="font-semibold tracking-tight">AI Interview Assistant</span>
+            <span className="font-semibold tracking-tight">{t('copilot.floating.title')}</span>
           </div>
           {/* Controls are explicitly non-draggable and have dedicated click handlers */}
           <div className="flex items-center gap-3 text-[#64748b]">
@@ -197,12 +215,12 @@ export default function App() {
         </div>
 
         <div className="mb-3">
-          <div className="text-[10px] tracking-widest text-[#64748b] mb-1">INTERVIEWER QUESTION</div>
+          <div className="text-[10px] tracking-widest text-[#64748b] mb-1">{t('copilot.question')}</div>
           <div className="text-[13px] leading-tight">Can you walk me through a project where you had to solve a complex problem under tight constraints?</div>
         </div>
 
         <div>
-          <div className="text-[10px] tracking-widest text-[#64748b] mb-1.5">AI SUGGESTIONS</div>
+          <div className="text-[10px] tracking-widest text-[#64748b] mb-1.5">{t('copilot.suggestions')}</div>
           <div className="space-y-[3px] text-[12.5px]">
             <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">• Situation: Briefly set the context and the challenge.</div>
             <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">• Task: Explain your specific responsibility.</div>
@@ -212,7 +230,7 @@ export default function App() {
         </div>
 
         <div className="absolute bottom-3 left-0 right-0 text-center text-[11px] text-[#6366f1] flex items-center justify-center gap-1">
-          <Shield className="w-3 h-3" /> Stealth Mode Active
+          <Shield className="w-3 h-3" /> {t('copilot.stealthActive')}
         </div>
       </div>
     )

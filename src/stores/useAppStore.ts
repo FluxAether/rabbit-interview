@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { SupportedLanguage } from '../i18n/types'
 
 export interface InterviewRecord {
   id?: number
@@ -30,6 +31,7 @@ interface AppState {
   // Global
   currentPage: string
   settings: Record<string, any>
+  setLanguage: (lang: SupportedLanguage) => void
   
   // Copilot (real-time)
   copilot: CopilotState
@@ -67,6 +69,7 @@ export const useAppStore = create<AppState>((set) => ({
     launchAtStartup: true,
     stealthEnabled: true,
     aiModel: 'groq-llama-3.1',
+    language: 'en-US' as const,
   },
 
   copilot: {
@@ -142,4 +145,9 @@ export const useAppStore = create<AppState>((set) => ({
   setMockFeedback: (fb) => set({ mockFeedback: fb }),
   resetMock: () =>
     set({ mockConversation: [], mockFeedback: [] }),
+
+  setLanguage: (lang) =>
+    set((state) => ({
+      settings: { ...state.settings, language: lang },
+    })),
 }))

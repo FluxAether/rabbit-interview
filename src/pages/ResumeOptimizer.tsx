@@ -3,6 +3,7 @@ import { Upload, FileText } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
 import { useAppStore } from '../stores/useAppStore'
 import * as pdfjsLib from 'pdfjs-dist'
+import { useTranslation } from '../i18n'
 
 // Configure PDF.js worker (use CDN for simplicity in desktop build)
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
@@ -12,6 +13,7 @@ export default function ResumeOptimizer() {
     resumeOriginal, resumeOptimized, jobDescription, resumeSuggestions, 
     setResumeData, applyResumeSuggestion 
   } = useAppStore()
+  const t = useTranslation()
 
   const [jd, setJd] = useState(jobDescription)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -80,36 +82,36 @@ export default function ResumeOptimizer() {
     <div className="p-8 max-w-[1100px]">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
-          <div className="text-[#6366f1] font-medium text-lg">ResumeAI Optimize</div>
-          <div className="text-xs bg-[#6366f1] text-white px-2 py-px rounded">AI Powered</div>
+          <div className="text-[#6366f1] font-medium text-lg">{t('resume.title')}</div>
+          <div className="text-xs bg-[#6366f1] text-white px-2 py-px rounded">{t('resume.badge')}</div>
         </div>
-        <button onClick={exportResume} className="text-sm px-4 py-1 border rounded-xl">Export DOCX</button>
+        <button onClick={exportResume} className="text-sm px-4 py-1 border rounded-xl">{t('resume.export')}</button>
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-4">
         {/* Upload */}
         <div className="card p-6">
-          <div className="flex items-center gap-2 mb-4 text-sm font-medium"><Upload className="w-4 h-4" /> Upload Resume</div>
+          <div className="flex items-center gap-2 mb-4 text-sm font-medium"><Upload className="w-4 h-4" /> {t('resume.upload.title')}</div>
           <div {...getRootProps()} className={`border border-dashed border-[#cbd5e1] rounded-2xl h-36 flex flex-col items-center justify-center text-center cursor-pointer ${isDragActive ? 'bg-[#f8fafc]' : ''}`}>
             <input {...getInputProps()} />
             <FileText className="w-8 h-8 text-[#64748b] mb-2" />
-            <div className="text-sm">{isDragActive ? 'Drop the file here...' : 'Choose file or drag and drop'}</div>
-            <div className="text-xs text-[#64748b]">PDF, DOCX up to 5MB</div>
+            <div className="text-sm">{isDragActive ? t('resume.upload.drop') : t('resume.upload.choose')}</div>
+            <div className="text-xs text-[#64748b]">{t('resume.upload.hint')}</div>
           </div>
-          <button onClick={() => setResumeData('Alex Morgan\nProduct Designer\n• Led design of core product...', 'Alex Morgan\nProduct Designer\n• Led design...', jd)} className="mt-4 w-full bg-[#6366f1] text-white py-2 rounded-2xl text-sm">Use Sample Resume</button>
+          <button onClick={() => setResumeData('Alex Morgan\nProduct Designer\n• Led design of core product...', 'Alex Morgan\nProduct Designer\n• Led design...', jd)} className="mt-4 w-full bg-[#6366f1] text-white py-2 rounded-2xl text-sm">{t('common.useSample')}</button>
         </div>
 
         {/* JD */}
         <div className="card p-6">
-          <div className="flex items-center gap-2 mb-4 text-sm font-medium"><FileText className="w-4 h-4" /> Paste Job Description</div>
+          <div className="flex items-center gap-2 mb-4 text-sm font-medium"><FileText className="w-4 h-4" /> {t('resume.jd.title')}</div>
           <textarea 
             value={jd} 
             onChange={e => setJd(e.target.value)}
             className="w-full h-36 border border-[#e2e8f0] rounded-xl p-3 text-sm" 
-            placeholder="Paste job description..." 
+            placeholder={t('resume.jd.placeholder')} 
           />
           <button onClick={analyze} disabled={isAnalyzing} className="mt-4 w-full bg-[#6366f1] text-white py-2 rounded-2xl text-sm flex items-center justify-center gap-2 disabled:opacity-60">
-            {isAnalyzing ? 'Analyzing...' : '✨ Analyze & Optimize'}
+            {isAnalyzing ? t('common.analyzing') : t('common.analyze')}
           </button>
         </div>
       </div>
@@ -118,28 +120,28 @@ export default function ResumeOptimizer() {
       <div className="grid grid-cols-2 gap-4 relative">
         <div className="card p-5">
           <div className="flex justify-between mb-2 text-sm">
-            <div>Original Resume <span className="text-xs bg-[#e2e8f0] px-1.5 rounded">v1</span></div>
-            <div className="text-[#64748b]">Word count: {(resumeOriginal || '').split(' ').length}</div>
+            <div>{t('resume.original')} <span className="text-xs bg-[#e2e8f0] px-1.5 rounded">v1</span></div>
+            <div className="text-[#64748b]">{t('resume.wordCount')}: {(resumeOriginal || '').split(' ').length}</div>
           </div>
           <div className="text-sm leading-relaxed text-[#334155] border p-4 rounded-xl bg-[#fafafa] whitespace-pre-wrap min-h-[160px]">
-            {resumeOriginal || 'Upload or use sample resume to see content here.'}
+            {resumeOriginal || t('resume.originalPlaceholder')}
           </div>
         </div>
 
         <div className="card p-5">
           <div className="flex justify-between mb-2 text-sm">
-            <div>AI Optimized Version <span className="text-xs bg-[#e0e7ff] px-1.5 rounded text-[#4338ca]">v2</span></div>
-            <button onClick={analyze} className="text-xs text-[#6366f1]">Re-optimize</button>
+            <div>{t('resume.optimized')} <span className="text-xs bg-[#e0e7ff] px-1.5 rounded text-[#4338ca]">v2</span></div>
+            <button onClick={analyze} className="text-xs text-[#6366f1]">{t('common.reoptimize')}</button>
           </div>
           <div className="text-sm leading-relaxed border p-4 rounded-xl bg-white whitespace-pre-wrap min-h-[160px]">
-            {resumeOptimized || 'Optimized version will appear after analysis.'}
+            {resumeOptimized || t('resume.optimizedPlaceholder')}
           </div>
         </div>
 
         {/* Floating suggestions panel matching design */}
         {resumeSuggestions.length > 0 && (
           <div className="absolute -right-1 top-2 bg-white border shadow rounded-2xl p-3 w-[210px] text-xs z-10">
-            <div className="font-medium mb-2 flex items-center gap-1">AI Suggestions ★</div>
+            <div className="font-medium mb-2 flex items-center gap-1">{t('resume.suggestions')}</div>
             <div className="space-y-1.5">
               {resumeSuggestions.map((s) => (
                 <div key={s.id} className="flex justify-between items-center bg-[#f8fafc] px-2 py-1 rounded">
@@ -150,12 +152,12 @@ export default function ResumeOptimizer() {
                 </div>
               ))}
             </div>
-            <button onClick={applyAll} className="mt-2 text-[#6366f1] text-xs w-full">Apply all</button>
+            <button onClick={applyAll} className="mt-2 text-[#6366f1] text-xs w-full">{t('common.applyAll')}</button>
           </div>
         )}
       </div>
 
-      <div className="text-center mt-5 text-xs text-[#64748b]">Your data is secure and confidential</div>
+      <div className="text-center mt-5 text-xs text-[#64748b]">{t('resume.confidential')}</div>
     </div>
   )
 }

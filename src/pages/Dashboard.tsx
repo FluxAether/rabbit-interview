@@ -6,9 +6,11 @@ interface DashboardProps {
 
 import { invoke } from '@tauri-apps/api/core'
 import { useAppStore } from '../stores/useAppStore'
+import { useTranslation } from '../i18n'
 
 export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
   const { history } = useAppStore()
+  const t = useTranslation()
 
   const launch = async () => {
     try {
@@ -23,8 +25,8 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Welcome back, Alex</h1>
-          <p className="text-[#475569] mt-1">Let's prepare for your next opportunity.</p>
+          <h1 className="text-3xl font-semibold tracking-tight">{t('dashboard.welcome')}</h1>
+          <p className="text-[#475569] mt-1">{t('dashboard.subtitle')}</p>
         </div>
         
         <div className="flex items-center gap-2">
@@ -47,7 +49,7 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2 text-[#64748b] text-sm">
-                <Users className="w-4 h-4" /> Interviews Assisted
+                <Users className="w-4 h-4" /> {t('dashboard.stat.interviews')}
               </div>
               <div className="text-[42px] font-semibold tracking-[-1.5px] leading-none mt-1">24</div>
             </div>
@@ -55,7 +57,7 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
               <div className="inline-flex items-center text-emerald-600 text-xs font-medium bg-emerald-50 px-2 py-0.5 rounded">
                 <ArrowUp className="w-3 h-3 mr-0.5" /> 18%
               </div>
-              <div className="text-[10px] text-[#64748b] mt-1">vs last month</div>
+              <div className="text-[10px] text-[#64748b] mt-1">{t('dashboard.vsLastMonth')}</div>
             </div>
           </div>
         </div>
@@ -64,7 +66,7 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2 text-[#64748b] text-sm">
-                <TrendingUp className="w-4 h-4" /> Average Score
+                <TrendingUp className="w-4 h-4" /> {t('dashboard.stat.score')}
               </div>
               <div className="text-[42px] font-semibold tracking-[-1.5px] leading-none mt-1">82</div>
               <div className="text-xs text-[#64748b]">/100</div>
@@ -73,7 +75,7 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
               <div className="inline-flex items-center text-emerald-600 text-xs font-medium bg-emerald-50 px-2 py-0.5 rounded">
                 <ArrowUp className="w-3 h-3 mr-0.5" /> 8 pts
               </div>
-              <div className="text-[10px] text-[#64748b] mt-1">vs last month</div>
+              <div className="text-[10px] text-[#64748b] mt-1">{t('dashboard.vsLastMonth')}</div>
             </div>
           </div>
         </div>
@@ -82,7 +84,7 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2 text-[#64748b] text-sm">
-                <Briefcase className="w-4 h-4" /> Offers Landed
+                <Briefcase className="w-4 h-4" /> {t('dashboard.stat.offers')}
               </div>
               <div className="text-[42px] font-semibold tracking-[-1.5px] leading-none mt-1">3</div>
             </div>
@@ -90,7 +92,7 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
               <div className="inline-flex items-center text-emerald-600 text-xs font-medium bg-emerald-50 px-2 py-0.5 rounded">
                 <ArrowUp className="w-3 h-3 mr-0.5" /> 50%
               </div>
-              <div className="text-[10px] text-[#64748b] mt-1">vs last month</div>
+              <div className="text-[10px] text-[#64748b] mt-1">{t('dashboard.vsLastMonth')}</div>
             </div>
           </div>
         </div>
@@ -103,19 +105,19 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
             <div className="w-8 h-8 rounded-2xl bg-[#6366f1]/10 flex items-center justify-center">
               <Rocket className="w-4 h-4" />
             </div>
-            REAL-TIME ASSISTANCE
+            {t('dashboard.launch.badge')}
           </div>
           
-          <h2 className="text-3xl font-semibold tracking-[-1px] mb-2">Launch Stealth Copilot</h2>
+          <h2 className="text-3xl font-semibold tracking-[-1px] mb-2">{t('dashboard.launch.title')}</h2>
           <p className="text-[#475569] max-w-md">
-            Your AI career partner for real-time guidance, feedback, and interview mastery.
+            {t('dashboard.launch.subtitle')}
           </p>
           
           <button 
             onClick={launch}
             className="mt-6 inline-flex items-center gap-2 bg-[#6366f1] hover:bg-[#4f46e5] active:bg-[#4338ca] transition-colors text-white px-6 py-2.5 rounded-2xl text-sm font-medium shadow-sm"
           >
-            Launch Stealth Copilot <span className="text-base">→</span>
+            {t('common.launch')}
           </button>
         </div>
 
@@ -129,8 +131,8 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
       {/* Recent Activity */}
       <div>
         <div className="flex items-center justify-between mb-3 px-1">
-          <div className="font-semibold">Recent Activity</div>
-          <button className="text-xs text-[#6366f1] hover:underline" onClick={() => window.location.hash = '#history'}>View all history →</button>
+          <div className="font-semibold">{t('dashboard.recentActivity')}</div>
+          <button className="text-xs text-[#6366f1] hover:underline" onClick={() => window.location.hash = '#history'}>{t('dashboard.viewAllHistory')}</button>
         </div>
         
         {history.length > 0 ? (
@@ -144,7 +146,7 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
           </div>
         ) : (
           <div className="card p-8 text-center text-[#64748b] text-sm">
-            Your recent interviews and activities will appear here.
+            {t('dashboard.noActivity')}
           </div>
         )}
       </div>

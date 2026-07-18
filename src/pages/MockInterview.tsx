@@ -1,14 +1,22 @@
 import { useState } from 'react'
 import { useAppStore } from '../stores/useAppStore'
 import { saveInterview } from '../lib/db'
+import { useTranslation } from '../i18n'
 
-const STAGES = ['Introduction', 'Core Skills', 'Behavioral', 'Technical', 'Conclusion']
+const STAGES_KEYS = [
+  'mock.stage.introduction',
+  'mock.stage.core',
+  'mock.stage.behavioral',
+  'mock.stage.technical',
+  'mock.stage.conclusion'
+]
 
 export default function MockInterview() {
   const { 
     mockConversation, mockFeedback, 
     addMockMessage, setMockFeedback, resetMock, addHistory 
   } = useAppStore()
+  const t = useTranslation()
 
   const [currentStage, setCurrentStage] = useState(1)
   const [answer, setAnswer] = useState('')
@@ -34,9 +42,9 @@ export default function MockInterview() {
 
     // Generate realistic feedback
     const newFeedback = [
-      { label: 'Clarity', score: 78 + Math.floor(Math.random()*15), text: 'Well structured answer.' },
-      { label: 'Relevance', score: 85 + Math.floor(Math.random()*10), text: 'Directly addressed the question.' },
-      { label: 'Impact', score: 70 + Math.floor(Math.random()*20), text: 'Try to add more metrics.' },
+      { label: 'Clarity', score: 78 + Math.floor(Math.random()*15), text: t('feedback.clarityText') },
+      { label: 'Relevance', score: 85 + Math.floor(Math.random()*10), text: t('feedback.relevanceText') },
+      { label: 'Impact', score: 70 + Math.floor(Math.random()*20), text: t('feedback.impactText') },
     ]
     setMockFeedback(newFeedback)
 
@@ -82,7 +90,7 @@ export default function MockInterview() {
     setCurrentStage(1)
     setIsEnded(false)
     setAnswer('')
-    addMockMessage('ai', "Let's begin. Can you tell me about a time when you had to work under pressure to meet a tight deadline?")
+    addMockMessage('ai', t('mock.startPrompt'))
   }
 
   return (
@@ -91,19 +99,19 @@ export default function MockInterview() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <div className="flex items-center gap-2 text-[#6366f1] font-medium text-sm">
-              <span>AI MOCK INTERVIEW</span>
+              <span>{t('mock.badge')}</span>
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight mt-1">AI Mock Interview</h1>
+            <h1 className="text-2xl font-semibold tracking-tight mt-1">{t('mock.title')}</h1>
           </div>
           <div className="text-right">
             <div className="text-xs text-[#64748b]">{new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
-            <button onClick={endInterview} className="mt-1 text-xs bg-red-100 hover:bg-red-200 text-red-600 px-3 py-1 rounded-lg">End Interview</button>
+            <button onClick={endInterview} className="mt-1 text-xs bg-red-100 hover:bg-red-200 text-red-600 px-3 py-1 rounded-lg">{t('mock.end')}</button>
           </div>
         </div>
 
         {/* Progress stepper */}
         <div className="flex items-center gap-2 mb-8 text-xs">
-          {STAGES.map((label, i) => {
+          {STAGES_KEYS.map((labelKey, i) => {
             const n = i + 1
             const active = n === currentStage
             return (
@@ -111,7 +119,7 @@ export default function MockInterview() {
                 <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium ${n < currentStage ? 'bg-[#22c55e] text-white' : active ? 'bg-[#6366f1] text-white' : 'bg-[#e2e8f0] text-[#64748b]'}`}>
                   {n}
                 </div>
-                <div className={active || n < currentStage ? 'text-[#4338ca]' : 'text-[#64748b]'}>{label}</div>
+                <div className={active || n < currentStage ? 'text-[#4338ca]' : 'text-[#64748b]'}>{t(labelKey)}</div>
                 {i < 4 && <div className="w-6 h-px bg-[#cbd5e1]" />}
               </div>
             )
@@ -121,12 +129,12 @@ export default function MockInterview() {
         <div className="grid grid-cols-2 gap-4">
           {/* Conversation */}
           <div className="card p-5">
-            <div className="text-sm font-medium mb-3">AI Interviewer</div>
+            <div className="text-sm font-medium mb-3">{t('mock.interviewer')}</div>
             <div className="flex items-center gap-3 mb-5">
               <div className="w-11 h-11 rounded-full bg-[#e0e7ff] flex items-center justify-center text-xl">👤</div>
               <div>
                 <div className="font-medium">Alex Morgan</div>
-                <div className="text-xs text-[#6366f1]">AI Interviewer • Powered by LLM</div>
+                <div className="text-xs text-[#6366f1]">{t('mock.interviewerSub')}</div>
               </div>
             </div>
 
@@ -147,38 +155,38 @@ export default function MockInterview() {
             {!isEnded ? (
               <div className="card p-5">
                 <div className="flex justify-between text-sm mb-2">
-                  <div className="font-medium">Your Response</div>
+                  <div className="font-medium">{t('mock.yourResponse')}</div>
                   <div className="text-[#64748b] text-xs">{answer.length} / 1000</div>
                 </div>
                 <textarea 
                   value={answer} 
                   onChange={e => setAnswer(e.target.value)} 
                   className="w-full h-28 border border-[#e2e8f0] rounded-xl p-3 text-sm resize-y" 
-                  placeholder="Type your answer here..." 
+                  placeholder={t('mock.placeholder')} 
                 />
                 <button 
                   onClick={submitAnswer} 
                   disabled={isSubmitting || !answer.trim()}
                   className="mt-3 w-full bg-[#6366f1] disabled:opacity-60 text-white py-2 rounded-2xl text-sm font-medium"
                 >
-                  {isSubmitting ? 'Thinking...' : 'Submit Answer →'}
+                  {isSubmitting ? t('common.thinking') : t('common.submit')}
                 </button>
               </div>
             ) : (
               <div className="card p-5 text-center">
-                <div className="text-lg font-semibold mb-1">Interview Complete</div>
-                <button onClick={startNew} className="text-sm px-4 py-1 bg-[#6366f1] text-white rounded-xl mt-2">Start New Interview</button>
+                <div className="text-lg font-semibold mb-1">{t('mock.complete.title')}</div>
+                <button onClick={startNew} className="text-sm px-4 py-1 bg-[#6366f1] text-white rounded-xl mt-2">{t('mock.complete.new')}</button>
               </div>
             )}
 
             <div className="card p-5">
-              <div className="font-medium mb-3 flex items-center gap-2">Real-time Feedback</div>
+              <div className="font-medium mb-3 flex items-center gap-2">{t('mock.feedback')}</div>
               <div className="space-y-2.5 text-sm">
-                {mockFeedback.length === 0 && <div className="text-[#64748b] text-xs">Submit an answer to receive instant scoring.</div>}
+                {mockFeedback.length === 0 && <div className="text-[#64748b] text-xs">{t('mock.feedback.empty')}</div>}
                 {mockFeedback.map((fb, i) => (
                   <div key={i} className="feedback-card p-3 flex justify-between items-center">
                     <div>
-                      {fb.label}<br />
+                      {t('feedback.' + (fb.label.toLowerCase() as any)) || fb.label}<br />
                       <span className="text-xs text-[#64748b]">{fb.text}</span>
                     </div>
                     <div className="text-xl font-semibold text-[#6366f1]">{fb.score}%</div>
@@ -190,7 +198,7 @@ export default function MockInterview() {
         </div>
 
         <div className="mt-4 text-right">
-          <button onClick={startNew} className="text-xs text-[#64748b] underline">Reset session</button>
+          <button onClick={startNew} className="text-xs text-[#64748b] underline">{t('common.reset')}</button>
         </div>
       </div>
     </div>

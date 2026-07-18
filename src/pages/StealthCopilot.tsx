@@ -5,9 +5,11 @@ import { listen } from '@tauri-apps/api/event'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useAppStore } from '../stores/useAppStore'
 import { generateSuggestions, startDeepgramStream, sendAudioChunk, closeDeepgramStream } from '../lib/llm'
+import { useTranslation } from '../i18n'
 
 export default function StealthCopilot() {
   const { copilot, setCopilotActive, addSuggestion, updateAmplitude, applySuggestion, updateCopilotQuestion } = useAppStore()
+  const t = useTranslation()
   const [isCapturing, setIsCapturing] = useState(false)
   const [status, setStatus] = useState('Idle')
   const [devices, setDevices] = useState<string[]>([])
@@ -134,7 +136,7 @@ export default function StealthCopilot() {
 
   const exportRecording = () => {
     if (recordedChunks.length === 0) {
-      alert('No audio recorded yet.')
+      alert(t('copilot.noRecording'))
       return
     }
     const blob = new Blob([JSON.stringify(recordedChunks)], { type: 'application/json' })
@@ -148,26 +150,33 @@ export default function StealthCopilot() {
 
   const ampBarWidth = Math.min(100, Math.round(copilot.amplitude * 140))
 
+  const getDisplayStatus = (s: string, tt: (k: string) => string) => {
+    if (s === 'Idle' || s === '空闲') return tt('misc.idle')
+    if (s.includes('started') || s.includes('capture')) return tt('copilot.start')
+    if (s.includes('Stopped') || s.includes('stop')) return tt('copilot.stop')
+    return s
+  }
+
   return (
     <div className="p-8">
       <div className="max-w-[820px] mx-auto">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold">Stealth Copilot</h1>
-            <p className="text-[#475569]">Real-time Interview Assistant — system audio + AI suggestions</p>
-            <div className="text-xs mt-1 text-[#64748b]">Status: {status} {isCapturing ? '●' : ''}</div>
+            <h1 className="text-2xl font-semibold">{t('copilot.title')}</h1>
+            <p className="text-[#475569]">{t('copilot.subtitle')}</p>
+            <div className="text-xs mt-1 text-[#64748b]">{t('copilot.status')}: {getDisplayStatus(status, t)} {isCapturing ? '●' : ''}</div>
           </div>
           <div className="flex flex-col items-end gap-2">
             {/* Device selector */}
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-[#64748b]">Audio Device:</span>
+              <span className="text-[#64748b]">{t('copilot.device')}:</span>
               <select 
                 value={selectedDevice} 
                 onChange={(e) => setSelectedDevice(e.target.value)}
                 className="bg-white border border-[#e2e8f0] rounded px-2 py-0.5 text-xs max-w-[180px]"
                 disabled={isCapturing}
               >
-                {devices.length === 0 && <option value="">Default Microphone</option>}
+                {devices.length === 0 && <option value="">{t('copilot.defaultDevice')}</option>}
                 {devices.map(d => (
                   <option key={d} value={d}>{d}</option>
                 ))}
@@ -180,13 +189,13 @@ export default function StealthCopilot() {
                 onClick={launchFloatingWindow}
                 className="flex items-center gap-2 px-4 py-2 bg-white border rounded-2xl text-sm hover:bg-[#f8fafc]"
               >
-                <ExternalLink className="w-4 h-4" /> Detach Floating
+                <ExternalLink className="w-4 h-4" /> {t('copilot.detach')}
               </button>
               <button
                 onClick={toggleCapture}
                 className={`flex items-center gap-2 px-5 py-2 rounded-2xl text-sm font-medium text-white ${isCapturing ? 'bg-red-500' : 'bg-[#6366f1] hover:bg-[#4f46e5]'}`}
               >
-                {isCapturing ? <><Square className="w-4 h-4" /> Stop Capture</> : <><Play className="w-4 h-4" /> Start Listening</>}
+                {isCapturing ? <><Square className="w-4 h-4" /> {t('copilot.stop')}</> : <><Play className="w-4 h-4" /> {t('copilot.start')}</>}
               </button>
             </div>
           </div>
@@ -199,7 +208,7 @@ export default function StealthCopilot() {
               <div className="w-7 h-7 rounded-lg bg-[#6366f1] flex items-center justify-center">
                 <Mic className="w-3.5 h-3.5 text-white" />
               </div>
-              <span className="font-semibold tracking-tight">AI Interview Assistant</span>
+              <span className="font-semibold tracking-tight">{t('copilot.floating.title')}</span>
             </div>
             <div className="flex items-center gap-3 text-[#64748b]">
               <Volume2 className="w-4 h-4 cursor-pointer" data-tauri-drag-region="false" />
@@ -222,7 +231,7 @@ export default function StealthCopilot() {
           <div className="mb-4">
             <div className="uppercase text-[10px] tracking-widest text-[#64748b] mb-1 flex items-center gap-1.5">
               <div className="w-4 h-4 rounded-full border flex items-center justify-center text-[9px]">Q</div>
-              INTERVIEWER QUESTION
+              {t('copilot.question')}
             </div>
             <div className="text-[13.5px] leading-snug min-h-[42px]">
               {copilot.currentQuestion}
@@ -232,12 +241,12 @@ export default function StealthCopilot() {
           <div>
             <div className="uppercase text-[10px] tracking-widest text-[#64748b] mb-1.5 flex items-center gap-1.5">
               <div className="w-4 h-4 rounded-full border flex items-center justify-center">✦</div>
-              AI SUGGESTIONS
+              {t('copilot.suggestions')}
             </div>
 
             <div className="space-y-1.5 max-h-[170px] overflow-auto pr-1">
               {copilot.suggestions.length === 0 && (
-                <div className="text-[#64748b] text-xs">Start capture to receive live suggestions...</div>
+                <div className="text-[#64748b] text-xs">{t('copilot.suggestions.empty')}</div>
               )}
               {copilot.suggestions.map((sug, idx) => (
                 <div
@@ -253,12 +262,12 @@ export default function StealthCopilot() {
           </div>
 
           <div className="mt-4 pt-3 border-t flex items-center text-[11px] text-[#6366f1]">
-            <Shield className="w-3.5 h-3.5 mr-1.5" /> Stealth Mode Active
+            <Shield className="w-3.5 h-3.5 mr-1.5" /> {t('copilot.stealthActive')}
           </div>
         </div>
 
         <div className="mt-4 text-xs text-center text-[#64748b]">
-          Tip: Use <span className="font-mono">Cmd/Ctrl + Shift + I</span> to toggle the floating window.
+          {t('copilot.tip')}
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-2">
@@ -275,12 +284,12 @@ export default function StealthCopilot() {
                   duration: 420,
                   mode: 'copilot'
                 })
-                alert('Session saved to History!')
+                alert(t('copilot.sessionSaved'))
               }
             }}
             className="text-xs py-1.5 border rounded-xl hover:bg-[#f8fafc]"
           >
-            Save Session to History
+            {t('copilot.saveSession')}
           </button>
 
           <button
@@ -288,7 +297,7 @@ export default function StealthCopilot() {
             disabled={recordedChunks.length === 0}
             className="text-xs py-1.5 border rounded-xl hover:bg-[#f8fafc] disabled:opacity-50"
           >
-            Export Recording
+            {t('copilot.exportRecording')}
           </button>
         </div>
       </div>

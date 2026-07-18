@@ -20,7 +20,7 @@ impl Default for AppSettings {
             launch_at_startup: true,
             auto_update: true,
             update_channel: "Stable".into(),
-            language: "English (United States)".into(),
+            language: "en-US".into(),
             ai_model: "groq-llama-3.1".into(),
             stealth_enabled: true,
             mic_device: None,
