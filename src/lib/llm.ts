@@ -27,7 +27,7 @@ function resolveProviderAndModel(aiModel: string): { provider: 'groq' | 'openai'
   const m = (aiModel || 'groq-llama-3.1').toLowerCase();
 
   if (m.startsWith('gemini')) {
-    // gemini-3.5-flash, gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash etc.
+    // gemini-2.0-flash, gemini-1.5-flash, gemini-1.5-pro etc. (3.5 never existed)
     return { provider: 'gemini', model: aiModel };
   }
   if (m.includes('claude')) {
