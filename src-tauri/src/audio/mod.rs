@@ -57,7 +57,7 @@ pub(crate) fn stop_capture_internal() {
 
     // Also stop any active macOS ScreenCaptureKit session
     #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
-    crate::audio::screencapturekit::stop_macos_capture();
+    crate::audio::screencapturekit::stop_macos_capture_sync();
 }
 
 #[tauri::command]
@@ -234,6 +234,24 @@ pub async fn list_audio_devices() -> Result<Vec<String>, String> {
         .map(|d| d.name().unwrap_or_else(|_| "Unknown".into()))
         .collect();
     Ok(devices)
+}
+
+/// Always-exposed stop for macOS capture path.
+/// When the macos-system-audio feature + mac is active, this stops the SCK backend.
+/// Otherwise it is a harmless no-op so that JS "always call both stop" paths never throw.
+#[tauri::command]
+pub async fn stop_macos_capture() -> Result<String, String> {
+    #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
+    {
+        crate::audio::screencapturekit::stop_macos_capture_sync();
+        // Also ensure the shared internal state is cleared (idempotent)
+        // stop_capture_internal already does this but we call sync here directly.
+    }
+    #[cfg(not(all(target_os = "macos", feature = "macos-system-audio")))]
+    {
+        // no-op
+    }
+    Ok("Stop signal sent (macOS path if active)".into())
 }
 
 /// Stub / basic direct Deepgram forwarder from Rust (addresses direct connection).

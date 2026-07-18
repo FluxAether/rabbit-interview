@@ -198,8 +198,9 @@ export async function generateSuggestions(question: string, transcriptSoFar?: st
 
 /**
  * Converts Float32 audio (from cpal, range -1.0 to 1.0) to Int16 PCM (for Deepgram linear16)
+ * Exported so real entry point can be driven in verification tests (mocks only network).
  */
-function float32ToInt16(float32Array: Float32Array): Int16Array {
+export function float32ToInt16(float32Array: Float32Array): Int16Array {
   const int16Array = new Int16Array(float32Array.length);
   for (let i = 0; i < float32Array.length; i++) {
     // Clamp and scale to 16-bit signed integer

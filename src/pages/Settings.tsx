@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Sun, Mic, Shield } from 'lucide-react'
 import { useAppStore } from '../stores/useAppStore'
-import { invoke } from '@tauri-apps/api/core'
 import { useTranslation } from '../i18n'
 import { LANGUAGE_OPTIONS, SupportedLanguage, DEFAULT_LANGUAGE } from '../i18n/types'
 import { saveAppSettings, type AppSettings as PersistedSettings } from '../lib/settingsStore'
@@ -63,14 +62,9 @@ export default function Settings() {
 
   const persistToDisk = async (payload: ReturnType<typeof buildPayload>) => {
     try {
+      // Real persistence for copilot/LLM etc is via tauri-plugin-store (app-settings.json).
+      // The Rust get/save_settings are stubs and not used by copilot flows.
       await saveAppSettings(payload as Partial<PersistedSettings>)
-
-      // Optional Rust side (non-critical)
-      try {
-        await invoke('save_settings', { settings: payload })
-      } catch (e) {
-        console.warn('Rust save_settings (non-critical):', e)
-      }
     } catch (e) {
       console.warn('Auto-save to disk failed:', e)
     }

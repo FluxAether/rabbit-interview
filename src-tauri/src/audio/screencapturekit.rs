@@ -226,7 +226,7 @@ fn stop_macos_capture_internal() {
 }
 
 #[cfg(target_os = "macos")]
-pub fn stop_macos_capture() {
+pub fn stop_macos_capture_sync() {
     stop_macos_capture_internal();
 }
 
@@ -335,13 +335,20 @@ pub async fn present_macos_content_picker(app: AppHandle) -> Result<String, Stri
 }
 
 /// Get the currently selected filter (if any) or create a default one.
+/// Fixed: clone the stored picked filter so the user's choice survives multiple start/stop cycles
+/// (previously take() consumed it after first use).
 #[cfg(target_os = "macos")]
 fn get_or_create_filter() -> SCContentFilter {
-    if let Some(f) = CURRENT_FILTER.lock().unwrap().take() {
-        return f;
+    {
+        let guard = CURRENT_FILTER.lock().unwrap();
+        if let Some(f) = guard.as_ref() {
+            // Clone the selection so it can be reused for future captures without re-picking.
+            // (SCContentFilter is Clone in the screencapturekit crate.)
+            return f.clone();
+        }
     }
 
-    // Fallback to first display
+    // Fallback to first display (do not overwrite a picked filter)
     if let Ok(content) = SCShareableContent::get() {
         if let Some(display) = content.displays().into_iter().next() {
             return SCContentFilter::create()
@@ -374,4 +381,4 @@ pub async fn check_screen_recording_permission() -> Result<bool, String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn stop_macos_capture() {}
+pub fn stop_macos_capture_sync() {}

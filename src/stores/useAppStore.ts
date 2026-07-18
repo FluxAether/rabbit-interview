@@ -33,6 +33,9 @@ interface AppState {
   settings: Record<string, any>
   setLanguage: (lang: SupportedLanguage) => void
   setSettings: (newSettings: Partial<Record<string, any>>) => void
+  // Hotkey intent: allows ⌘⇧C from other pages to navigate + toggle capture reliably
+  captureHotkeyPending: boolean
+  consumeCaptureHotkeyPending: () => boolean
   
   // Copilot (real-time)
   copilot: CopilotState
@@ -86,10 +89,10 @@ export const useAppStore = create<AppState>((set) => ({
 
   copilot: {
     isActive: false,
-    currentQuestion: '请介绍一下你自己。',
+    currentQuestion: 'Tell me about yourself.',
     suggestions: [
-      { id: 1, text: '情境：清晰描述项目背景。', category: 'STAR' },
-      { id: 2, text: '任务：说明你的具体职责。', category: 'STAR' },
+      { id: 1, text: 'Situation: Briefly set the context.', category: 'STAR' },
+      { id: 2, text: 'Task: State your specific responsibility.', category: 'STAR' },
     ],
     amplitude: 0,
     isStealth: true,
@@ -172,4 +175,14 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       settings: { ...state.settings, ...newSettings },
     })),
+
+  captureHotkeyPending: false,
+  consumeCaptureHotkeyPending: () => {
+    let did = false
+    set((state) => {
+      did = state.captureHotkeyPending
+      return { captureHotkeyPending: false }
+    })
+    return did
+  },
 }))

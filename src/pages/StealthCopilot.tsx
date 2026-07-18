@@ -6,6 +6,50 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useAppStore } from '../stores/useAppStore'
 import { generateSuggestions, startDeepgramStream, sendAudioChunk, closeDeepgramStream } from '../lib/llm'
 import { useTranslation } from '../i18n'
+import { buildExportWav } from '../lib/recording'
+
+// Testable pure implementation of the export logic (computation via buildExportWav + side effects).
+// The component's exportRecording delegates to this so that node verification can literally invoke
+// the shipped behavior with controlled fixtures for master state, refs, etc.
+export function performExportRecording(deps: {
+  t: (k: string) => string;
+  recordedChunks: number[][];
+  recordedChunksRef: { current: number[][] };
+  sampleRateRef: { current: number };
+  buildExportWav: (recordedChunks: number[][], recordedChunksRef: { current: number[][] }, sampleRateRef: { current: number }, master: any) => { buffer: ArrayBuffer | null; sampleRate: number };
+  alert?: (msg: string) => void;
+  Blob?: any;
+  URL?: any;
+  document?: any;
+}) {
+  const {
+    t,
+    recordedChunks,
+    recordedChunksRef,
+    sampleRateRef,
+    buildExportWav,
+    alert: alertFn = (typeof alert !== 'undefined' ? alert : (m: string) => console.log('[test-alert]', m)),
+    Blob: BlobCtor = (typeof Blob !== 'undefined' ? Blob : class { constructor(_: any, __: any){} }),
+    URL: URLObj = (typeof URL !== 'undefined' ? URL : { createObjectURL: () => 'blob:mock', revokeObjectURL: () => {} }),
+    document: doc = (typeof document !== 'undefined' ? document : { createElement: (_tag: string) => ({ href: '', download: '', click: () => {} }) }),
+  } = deps;
+
+  const w = (typeof window !== 'undefined' ? window : globalThis);
+  const master = (w as any).__stealthMasterRecording;
+  const result = buildExportWav(recordedChunks, recordedChunksRef, sampleRateRef, master);
+  if (!result || !result.buffer) {
+    alertFn(t('copilot.noRecording'));
+    return { exported: false, buffer: null, sampleRate: result ? result.sampleRate : 16000 };
+  }
+  const blob = new BlobCtor([result.buffer], { type: 'audio/wav' });
+  const url = URLObj.createObjectURL(blob);
+  const a = doc.createElement('a') as any;
+  a.href = url;
+  a.download = `interview-recording-${Date.now()}.wav`;
+  a.click();
+  URLObj.revokeObjectURL(url);
+  return { exported: true, sampleRate: result.sampleRate, buffer: result.buffer };
+}
 
 export default function StealthCopilot() {
   const { copilot, setCopilotActive, addSuggestion, updateAmplitude, applySuggestion, updateCopilotQuestion } = useAppStore()
@@ -16,7 +60,8 @@ export default function StealthCopilot() {
   const [selectedDevice, setSelectedDevice] = useState<string>('')
 
   // New: macOS native capture (ScreenCaptureKit) for system audio + mic
-  const [useSystemAudio, setUseSystemAudio] = useState(true) // default on for better interview experience
+  // Defaults + loaded from persisted settings so choice survives detach / reload
+  const [useSystemAudio, setUseSystemAudio] = useState(true)
   const [useMicWithSystem, setUseMicWithSystem] = useState(true)
   const [macosSources, setMacosSources] = useState<any>(null)
 
@@ -108,8 +153,25 @@ export default function StealthCopilot() {
     }
   }
 
+  // Persist copilot audio mode toggles so they survive floating detach / reload
+  const persistAudioPrefs = async (sys: boolean, mic: boolean) => {
+    try {
+      const { saveAppSettings } = await import('../lib/settingsStore')
+      await saveAppSettings({ useSystemAudio: sys, useMicWithSystem: mic })
+    } catch {}
+  }
+
   useEffect(() => {
     loadDevices()
+    // Load persisted audio capture prefs (so useSystemAudio etc survive detach to floating or app restart)
+    ;(async () => {
+      try {
+        const { loadAppSettings } = await import('../lib/settingsStore')
+        const saved = await loadAppSettings()
+        if (typeof saved.useSystemAudio === 'boolean') setUseSystemAudio(saved.useSystemAudio)
+        if (typeof saved.useMicWithSystem === 'boolean') setUseMicWithSystem(saved.useMicWithSystem)
+      } catch {}
+    })()
     return () => {
       // Ensure we clean up everything if component unmounts while capturing
       cleanupListeners()
@@ -120,6 +182,7 @@ export default function StealthCopilot() {
       // Best effort stop on backend too (use ref because state may be stale in cleanup)
       if (isCapturingRef.current) {
         invoke('stop_capture').catch(() => {})
+        invoke('stop_macos_capture').catch(() => {})
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -135,6 +198,21 @@ export default function StealthCopilot() {
       unlisten.then((f) => f()).catch(() => {})
     }
   }, [])
+
+  // Consume hotkey pending from App (so ⌘⇧C from other pages navigates + starts capture)
+  useEffect(() => {
+    const { captureHotkeyPending, consumeCaptureHotkeyPending } = useAppStore.getState()
+    if (captureHotkeyPending && !isCapturingRef.current) {
+      const did = consumeCaptureHotkeyPending()
+      if (did) {
+        // trigger toggle (which will start)
+        setTimeout(() => {
+          toggleCaptureRef.current().catch((e) => console.warn('hotkey pending start failed', e))
+        }, 80)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // run once on mount of copilot panel
 
   const launchFloatingWindow = async () => {
     try {
@@ -167,6 +245,10 @@ export default function StealthCopilot() {
     recordedChunksRef.current = []
     setRecordedChunks([])
     setHasLiveRecording(false)
+    // Also reset master (in case previous session was floating-started or cross-session data)
+    const w = window as any
+    if (w.__resetStealthMasterRecording) w.__resetStealthMasterRecording()
+    if (w.__stealthMasterRecording?.sampleRate) w.__stealthMasterRecording.sampleRate.current = 16000
   }
 
   const toggleCapture = async () => {
@@ -178,12 +260,13 @@ export default function StealthCopilot() {
       setCopilotActive(false)
       setStatus('Stopping...')
 
-      // 1. Stop emitting new events from backend
+      // 1. Stop emitting new events from backend — always call both to cover cpal + SCK
       try {
         await invoke('stop_capture')
       } catch (e) {
         console.warn('stop_capture invoke failed:', e)
       }
+      try { await invoke('stop_macos_capture').catch(() => {}) } catch {}
 
       // 2. Close Deepgram WS
       closeDeepgramStream(deepgramWsRef.current)
@@ -215,43 +298,12 @@ export default function StealthCopilot() {
       } catch {}
       let res: string
 
-      // Prefer native macOS ScreenCaptureKit when system audio is desired
-      // This allows capturing the other person's voice without BlackHole.
-      // The command only exists when the crate was compiled with --features macos-system-audio
-      if (useSystemAudio) {
-        try {
-          res = await invoke<string>('start_macos_capture', {
-            // Must match exact Rust parameter names (snake_case) defined in screencapturekit.rs
-            capture_system_audio: true,
-            capture_microphone: useMicWithSystem,
-            deepgram_key: deepgramKey
-          })
-        } catch (e: any) {
-          // Fallback if the native command is not available (feature not enabled or non-mac)
-          console.warn('start_macos_capture not available, falling back to mic-only:', e)
-          res = await invoke<string>('start_capture', {
-            deviceName: selectedDevice || null,
-            deepgramKey
-          })
-          setStatus('Using microphone only (no system audio). Install/build with macos-system-audio feature for interviewer voice capture. ' + (res || ''))
-        }
-      } else {
-        res = await invoke<string>('start_capture', {
-          deviceName: selectedDevice || null,
-          deepgramKey
-        })
-      }
-
-      setStatus(res)
-      setIsCapturing(true)
-      isCapturingRef.current = true
-      setCopilotActive(true)
-
       // Smart initial guess for sample rate. SCK always uses 48k. cpal often 16k or device default.
       const initialRateGuess = useSystemAudio ? 48000 : 16000
       sampleRateRef.current = initialRateGuess
 
       // Reusable starter for Deepgram so we can (re)create with correct rate when we learn it.
+      // Defined early so config listener (registered before backend start) can call it.
       const startOrRestartDeepgram = async (rate: number) => {
         // Close previous if any (e.g. rate changed)
         if (deepgramWsRef.current) {
@@ -289,9 +341,8 @@ export default function StealthCopilot() {
         console.log('[Copilot] Deepgram stream (re)started @', rate, 'Hz')
       }
 
-      // Listen for audio-config (sent once at start of capture) to get real sample rate.
-      // We (re)start Deepgram here to guarantee the WS URL declares the correct sample_rate
-      // that matches the actual audio chunks the backend will emit.
+      // FIX: register audio-config listener BEFORE invoking start_* (Rust may emit synchronously on start_macos_capture / start_capture).
+      // This mirrors the floating path fix so first rate event is never missed.
       const unlistenConfig = await listen<{ sample_rate: number; device: string }>('audio-config', async (event) => {
         const rate = event.payload.sample_rate || initialRateGuess
         if (rate !== sampleRateRef.current) {
@@ -308,15 +359,10 @@ export default function StealthCopilot() {
       })
       unlistenConfigRef.current = unlistenConfig
 
-      // Start Deepgram immediately with best guess. The config listener will correct it if needed
-      // (this avoids losing early audio while waiting for the event).
+      // Start Deepgram immediately with best guess (listeners already wired).
       await startOrRestartDeepgram(sampleRateRef.current)
 
-      // If no key was present at start time, Deepgram stream returns null and we fall back to no live transcription.
-      if (!deepgramWsRef.current) {
-        setStatus((prev) => (prev || '') + ' | (No Deepgram key at start — live transcription disabled)')
-      }
-
+      // FIX: also pre-register amp + chunk listeners BEFORE backend start (so first events/amps are not dropped).
       // Amplitude listener — very cheap, OK to keep
       const unlistenAmp = await listen<number>('audio-amplitude', (event) => {
         if (!isCapturingRef.current) return
@@ -354,6 +400,47 @@ export default function StealthCopilot() {
         }
       })
       unlistenChunkRef.current = unlistenChunk
+
+      // Mark capturing ref early so pre-registered listeners accept first events
+      isCapturingRef.current = true
+
+      // Prefer native macOS ScreenCaptureKit when system audio is desired
+      // This allows capturing the other person's voice without BlackHole.
+      // The command only exists when the crate was compiled with --features macos-system-audio
+      if (useSystemAudio) {
+        try {
+          res = await invoke<string>('start_macos_capture', {
+            // Must match exact Rust parameter names (snake_case) defined in screencapturekit.rs
+            capture_system_audio: true,
+            capture_microphone: useMicWithSystem,
+            deepgram_key: deepgramKey
+          })
+        } catch (e: any) {
+          // Fallback if the native command is not available (feature not enabled or non-mac)
+          console.warn('start_macos_capture not available, falling back to mic-only:', e)
+          res = await invoke<string>('start_capture', {
+            deviceName: selectedDevice || null,
+            deepgramKey
+          })
+          setStatus('Using microphone only (no system audio). Install/build with macos-system-audio feature for interviewer voice capture. ' + (res || ''))
+        }
+      } else {
+        res = await invoke<string>('start_capture', {
+          deviceName: selectedDevice || null,
+          deepgramKey
+        })
+      }
+
+      setStatus(res)
+      setIsCapturing(true)
+      setCopilotActive(true)
+
+      // The config listener above will correct rate if backend reports different from guess.
+
+      // If no key was present at start time, Deepgram stream returns null and we fall back to no live transcription.
+      if (!deepgramWsRef.current) {
+        setStatus((prev) => (prev || '') + ' | (No Deepgram key at start — live transcription disabled)')
+      }
     } catch (err: any) {
       setStatus('Error: ' + (err?.message || err))
       // Cleanup on failure
@@ -370,74 +457,13 @@ export default function StealthCopilot() {
   toggleCaptureRef.current = toggleCapture
 
   // Convert collected f32 chunks + known sample rate into a playable mono WAV (PCM16)
-  const exportRecording = () => {
-    const data = recordedChunks.length > 0 ? recordedChunks : recordedChunksRef.current
-    if (data.length === 0) {
-      alert(t('copilot.noRecording'))
-      return
-    }
-
-    // Flatten all chunks into one Float32Array
-    const flatLength = data.reduce((sum, arr) => sum + arr.length, 0)
-    const flat = new Float32Array(flatLength)
-    let offset = 0
-    for (const chunk of data) {
-      flat.set(chunk, offset)
-      offset += chunk.length
-    }
-
-    const sampleRate = sampleRateRef.current || 16000
-    const numChannels = 1
-    const bytesPerSample = 2 // PCM16
-
-    // Build WAV header (standard PCM)
-    const blockAlign = numChannels * bytesPerSample
-    const byteRate = sampleRate * blockAlign
-    const dataSize = flat.length * bytesPerSample
-    const buffer = new ArrayBuffer(44 + dataSize)
-    const view = new DataView(buffer)
-
-    // RIFF chunk descriptor
-    writeString(view, 0, 'RIFF')
-    view.setUint32(4, 36 + dataSize, true)
-    writeString(view, 8, 'WAVE')
-
-    // fmt sub-chunk
-    writeString(view, 12, 'fmt ')
-    view.setUint32(16, 16, true) // PCM chunk size
-    view.setUint16(20, 1, true)  // Audio format = 1 (PCM)
-    view.setUint16(22, numChannels, true)
-    view.setUint32(24, sampleRate, true)
-    view.setUint32(28, byteRate, true)
-    view.setUint16(32, blockAlign, true)
-    view.setUint16(34, 16, true) // bits per sample
-
-    // data sub-chunk
-    writeString(view, 36, 'data')
-    view.setUint32(40, dataSize, true)
-
-    // Write PCM16 samples (convert f32 -1..1 to int16)
-    let pos = 44
-    for (let i = 0; i < flat.length; i++) {
-      const s = Math.max(-1, Math.min(1, flat[i]))
-      view.setInt16(pos, s < 0 ? s * 0x8000 : s * 0x7fff, true)
-      pos += 2
-    }
-
-    const blob = new Blob([buffer], { type: 'audio/wav' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `interview-recording-${Date.now()}.wav`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  function writeString(view: DataView, offset: number, str: string) {
-    for (let i = 0; i < str.length; i++) {
-      view.setUint8(offset + i, str.charCodeAt(i))
-    }
-  }
+  const exportRecording = () => performExportRecording({
+    t,
+    recordedChunks,
+    recordedChunksRef,
+    sampleRateRef,
+    buildExportWav,
+  })
 
   const ampBarWidth = Math.min(100, Math.round(copilot.amplitude * 140))
 
@@ -483,7 +509,7 @@ export default function StealthCopilot() {
               <input
                 type="checkbox"
                 checked={useSystemAudio}
-                onChange={(e) => setUseSystemAudio(e.target.checked)}
+                onChange={(e) => { const v = e.target.checked; setUseSystemAudio(v); persistAudioPrefs(v, useMicWithSystem) }}
                 disabled={isCapturing}
                 className="accent-[#6366f1]"
               />
@@ -495,7 +521,7 @@ export default function StealthCopilot() {
                   <input
                     type="checkbox"
                     checked={useMicWithSystem}
-                    onChange={(e) => setUseMicWithSystem(e.target.checked)}
+                    onChange={(e) => { const v = e.target.checked; setUseMicWithSystem(v); persistAudioPrefs(useSystemAudio, v) }}
                     disabled={isCapturing}
                     className="accent-[#6366f1]"
                   />
@@ -625,7 +651,7 @@ export default function StealthCopilot() {
 
           <button
             onClick={exportRecording}
-            disabled={!hasLiveRecording && recordedChunks.length === 0}
+            disabled={!hasLiveRecording && recordedChunks.length === 0 && !((window as any).__stealthMasterRecording?.chunks?.current?.length > 0)}
             className="text-xs py-1.5 border rounded-xl hover:bg-[#f8fafc] disabled:opacity-50"
           >
             {t('copilot.exportRecording')}

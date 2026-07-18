@@ -13,7 +13,8 @@
     "build:mac": "tauri build --target universal-apple-darwin",
     "build:win": "tauri build --target x86_64-pc-windows-msvc",
     "sign:mac": "echo 'Run: xcrun notarytool submit --keychain-profile \"AC_PASSWORD\" --wait dist/StealthPath.app.tar.gz'",
-    "package": "tauri build"
+    "package": "tauri build",
+    "verify:copilot": "node scripts/verify-copilot.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

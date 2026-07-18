@@ -24,6 +24,24 @@ import { DEFAULT_LANGUAGE } from './i18n/types'
 import { startDeepgramStream, sendAudioChunk, closeDeepgramStream, generateSuggestions } from './lib/llm'
 import { loadAppSettings } from './lib/settingsStore'
 
+// Extracted rate-fix logic (modeled on buildExportWav) so it can be unit-driven in verification
+// and the real closure body executes when called from the listener.
+export async function handleAudioConfigRateFix(
+  ev: { payload?: { sample_rate?: number } },
+  deepgramRef: { current: any },
+  startDeepgram: (rate: number) => Promise<void>,
+  initialRate: number
+): Promise<void> {
+  const r = ev.payload?.sample_rate || initialRate;
+  const last = (deepgramRef as any)._lastRate || initialRate;
+  if (deepgramRef.current && r !== last) {
+    console.log('[Floating] rate correction to', r);
+    await startDeepgram(r);
+  } else if (!deepgramRef.current) {
+    await startDeepgram(r);
+  }
+}
+
 export type Page = 
   | 'dashboard' 
   | 'copilot' 
@@ -105,75 +123,109 @@ export default function App() {
   const t = useTranslation()
 
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
+  const currentPageRef = useRef<Page>('dashboard')
   const floatingPanelRef = useRef<HTMLDivElement>(null)
 
   // Live data for floating window (so it can show real capture info)
-  const [floatingQuestion, setFloatingQuestion] = useState('请介绍一下你自己。')
+  // Use t() via lazy initializer so initial value respects current language / 'copilot.defaultQuestion' key (fixes hardcoded Chinese i18n bug)
+  const [floatingQuestion, setFloatingQuestion] = useState(() => t('copilot.defaultQuestion'))
   const [floatingSuggestions, setFloatingSuggestions] = useState<string[]>([])
   const [floatingAmp, setFloatingAmp] = useState(0)
   const [floatingCapturing, setFloatingCapturing] = useState(false)
+  const floatingCapturingRef = useRef(false)
 
   // For floating window self-contained capture support
   const floatingDeepgramRef = useRef<any>(null)
   const floatingUnlistenChunkRef = useRef<any>(null)
+  const floatingRateFixUnlistenRef = useRef<(() => void) | null>(null)
+  const floatingAmpUnlistenRef = useRef<(() => void) | null>(null)
+  // Recording accumulation for floating capture path (so export / recording is exercised when starting from detached window)
+  const floatingRecordedChunksRef = useRef<number[][]>([]) as React.MutableRefObject<number[][]>
 
-  const startFloatingCaptureSupport = async () => {
+  const startFloatingCaptureSupport = async (initialRate: number = 16000) => {
     try {
       // Start Deepgram for this floating view (allows standalone use).
-      // Use a sane default; the global audio-config listener will help if chunks are at different rate,
-      // but for standalone floating we also set up a one-shot corrector.
-      const ws = await startDeepgramStream(
-        (_text, _isFinal) => {
-          if (_text) {
-            if (_isFinal) setFloatingQuestion(_text)
-            emit('copilot-question', _text).catch(() => {})
-            if (_isFinal) {
-              generateSuggestions(_text).then((sugs) => {
-                sugs.forEach((s: string) => {
-                  const sugText = s.startsWith('•') ? s : `• ${s}`
-                  setFloatingSuggestions(prev => {
-                    const next = [...prev, sugText]
-                    return next.length > 6 ? next.slice(-6) : next
+      // Listeners registered here (called BEFORE backend invoke) so first audio-config from SCK (48000) or cpal is never missed.
+      const startFloatingDeepgram = async (rate: number) => {
+        if (floatingDeepgramRef.current) {
+          closeDeepgramStream(floatingDeepgramRef.current)
+          floatingDeepgramRef.current = null
+        }
+        const ws = await startDeepgramStream(
+          (_text, _isFinal) => {
+            if (_text) {
+              if (_isFinal) setFloatingQuestion(_text)
+              emit('copilot-question', _text).catch(() => {})
+              if (_isFinal) {
+                generateSuggestions(_text).then((sugs) => {
+                  sugs.forEach((s: string) => {
+                    const sugText = s.startsWith('•') ? s : `• ${s}`
+                    setFloatingSuggestions(prev => {
+                      const next = [...prev, sugText]
+                      return next.length > 6 ? next.slice(-6) : next
+                    })
+                    emit('copilot-suggestion', { text: sugText }).catch(() => {})
                   })
-                  emit('copilot-suggestion', { text: sugText }).catch(() => {})
                 })
-              })
+              }
             }
-          }
-        },
-        (err) => console.error('Floating Deepgram err', err),
-        16000
-      )
-      floatingDeepgramRef.current = ws
+          },
+          (err) => console.error('Floating Deepgram err', err),
+          rate
+        )
+        floatingDeepgramRef.current = ws
+        ;(floatingDeepgramRef as any)._lastRate = rate
+        console.log('[Floating] Deepgram (re)started @', rate, 'Hz')
+      }
+
+      await startFloatingDeepgram(initialRate)
 
       const un = await listen<number[]>('audio-chunk', (event) => {
+        const payloadArr = event.payload
+        const chunk = new Float32Array(payloadArr)
         if (floatingDeepgramRef.current) {
-          const chunk = new Float32Array(event.payload)
           sendAudioChunk(floatingDeepgramRef.current, chunk)
         }
+        // Accumulate also on floating path (real recording exercised from floating starts)
+        if (!floatingRecordedChunksRef.current) {
+          floatingRecordedChunksRef.current = []
+        }
+        floatingRecordedChunksRef.current.push(payloadArr)
+        // Compute local RMS amp for floating UI (guarantees live bar in detached webview independent of cross-webview emit)
+        let sum = 0
+        for (let i = 0; i < chunk.length; i++) sum += chunk[i] * chunk[i]
+        const rms = Math.sqrt(sum / Math.max(1, chunk.length))
+        const display = Math.min(1, rms * 5)
+        setFloatingAmp(display)
       })
       floatingUnlistenChunkRef.current = un
 
-      // Best effort: if audio-config arrives with different rate for this floating session, restart Deepgram
-      // (single-shot)
-      const rateFix = await listen<{ sample_rate?: number }>('audio-config', async (ev) => {
-        const r = ev.payload?.sample_rate || 16000
-        if (floatingDeepgramRef.current && r !== 16000) {
-          closeDeepgramStream(floatingDeepgramRef.current)
-          const newWs = await startDeepgramStream(
-            (_text, _isFinal) => { /* same as above but omitted for brevity - reuse main path in practice */ },
-            (err) => console.error('Floating Deepgram err', err),
-            r
-          )
-          floatingDeepgramRef.current = newWs
-        }
+      // Also wire amp listener inside floating support (ensures registration path for detached; complements global listener)
+      const ampUn = await listen<number>('audio-amplitude', (e) => {
+        setFloatingAmp(e.payload)
       })
-      // Note: we don't store unlisten for this one-shot rate fix to keep floating minimal.
-      setTimeout(() => { rateFix() }, 15000) // auto cleanup after reasonable time
+      floatingAmpUnlistenRef.current = ampUn
+
+      // Wire audio-config rateFix listener (BEFORE invoke in caller) so transcription works after rate correction (SCK 48k etc).
+      const rateFixUnlisten = await listen<{ sample_rate?: number }>('audio-config', async (ev) => {
+        await handleAudioConfigRateFix(ev, floatingDeepgramRef, startFloatingDeepgram, initialRate)
+      })
+      floatingRateFixUnlistenRef.current = rateFixUnlisten
+
+      // Safety auto-clean for very long floating sessions
+      const autoCleanup = setTimeout(() => {
+        try { rateFixUnlisten() } catch {}
+      }, 300000)
+      ;(floatingRateFixUnlistenRef as any)._autoCleanup = autoCleanup
     } catch (e) {
       console.warn('Floating capture support start failed', e)
     }
   }
+
+  // Attach for verification harness to invoke the real startFloatingCaptureSupport
+  // (which registers the exact rateFix listener closure from this scope).
+  (globalThis as any).__test_startFloatingCaptureSupport = startFloatingCaptureSupport;
+  (globalThis as any).__test_handleAudioConfigRateFix = handleAudioConfigRateFix;
 
   const stopFloatingCaptureSupport = () => {
     if (floatingDeepgramRef.current) {
@@ -181,8 +233,22 @@ export default function App() {
       floatingDeepgramRef.current = null
     }
     if (floatingUnlistenChunkRef.current) {
-      floatingUnlistenChunkRef.current().catch(() => {})
+      try { floatingUnlistenChunkRef.current() } catch {}
       floatingUnlistenChunkRef.current = null
+    }
+    if (floatingRateFixUnlistenRef.current) {
+      try { floatingRateFixUnlistenRef.current() } catch {}
+      const ac = (floatingRateFixUnlistenRef as any)._autoCleanup
+      if (ac) clearTimeout(ac)
+      floatingRateFixUnlistenRef.current = null
+    }
+    if (floatingAmpUnlistenRef.current) {
+      try { floatingAmpUnlistenRef.current() } catch {}
+      floatingAmpUnlistenRef.current = null
+    }
+    // Clear any floating recording accumulation for this session
+    if (floatingRecordedChunksRef.current) {
+      floatingRecordedChunksRef.current = []
     }
   }
 
@@ -190,6 +256,69 @@ export default function App() {
   useEffect(() => {
     document.documentElement.lang = currentLang
   }, [currentLang])
+
+  // Keep ref in sync for listeners that must not close over stale state (e.g. toggle-capture)
+  useEffect(() => {
+    currentPageRef.current = currentPage
+  }, [currentPage])
+
+  useEffect(() => {
+    floatingCapturingRef.current = floatingCapturing
+  }, [floatingCapturing])
+
+  // Master recording accumulator at App level (receives events in this webview even if capture started from floating).
+  // Per-session: reset on new capture (via audio-config signal + explicit at start sites).
+  const masterRecordedChunksRef = useRef<number[][]>([])
+  const masterSampleRateRef = useRef<number>(16000)
+
+  // Reset master for new session (prevents cross-session accumulation in export fallback)
+  const resetMasterRecording = () => {
+    masterRecordedChunksRef.current = []
+    // rate will be set by next audio-config or explicit initial guess
+  }
+
+  // Always listen for audio-config to update rate for current session (and reset for new capture)
+  useEffect(() => {
+    let unCfg: any = null
+    ;(async () => {
+      unCfg = await listen<{ sample_rate?: number }>('audio-config', (ev) => {
+        const r = ev.payload?.sample_rate
+        if (r) {
+          // New capture session signalled by backend
+          resetMasterRecording()
+          masterSampleRateRef.current = r
+          console.log('[Master] session reset + rate set from audio-config:', r)
+        }
+      })
+    })()
+    return () => { if (unCfg) unCfg.then((f: any) => f?.()).catch(()=>{}) }
+  }, [])
+
+  useEffect(() => {
+    let unlisten: any = null
+    ;(async () => {
+      unlisten = await listen<number[]>('audio-chunk', (event) => {
+        const payload = event.payload
+        masterRecordedChunksRef.current.push(payload)
+        // Bounded (conservative; real rate set above)
+        const rate = masterSampleRateRef.current || 16000
+        const MAX = rate * 15 * 60
+        let total = masterRecordedChunksRef.current.reduce((s, c) => s + c.length, 0)
+        while (total > MAX && masterRecordedChunksRef.current.length > 0) {
+          const removed = masterRecordedChunksRef.current.shift()!
+          total -= removed.length
+        }
+      })
+    })()
+    return () => { if (unlisten) unlisten.then((f: any) => f && f()).catch(()=>{}) }
+  }, [])
+
+  // Expose chunks + rate + reset for export fallback and cross-UI (same webview receives events)
+  ;(window as any).__stealthMasterRecording = {
+    chunks: masterRecordedChunksRef,
+    sampleRate: masterSampleRateRef,
+  }
+  ;(window as any).__resetStealthMasterRecording = resetMasterRecording
 
   useEffect(() => {
     // Load history once
@@ -215,9 +344,65 @@ export default function App() {
       invoke('launch_copilot_window').catch(() => {})
     })
 
-    // ⌘⇧C - navigate to copilot page so capture toggle can work
+    // ⌘⇧C - navigate to copilot page so capture toggle can work.
+    // Use ref to avoid stale closure. When already on copilot the StealthCopilot listener does the real toggle.
     const unlistenCapture = listen('toggle-capture', () => {
-      setCurrentPage('copilot')
+      const hash = window.location.hash
+      if (hash === '#copilot-floating') {
+        // Drive floating capture from hotkey inside the detached window (previously no handler)
+        ;(async () => {
+          try {
+            const isCapt = floatingCapturingRef.current
+            if (!isCapt) {
+              // Load prefs for consistency with button path (useSystemAudio relevant)
+              let deepgramKey: string | null = null
+              let useSys = true
+              let useMic = true
+              try {
+                const { loadApiKeys } = await import('./lib/keyStore')
+                const keys = await loadApiKeys()
+                deepgramKey = keys.deepgram || null
+              } catch {}
+              try {
+                const { loadAppSettings } = await import('./lib/settingsStore')
+                const s = await loadAppSettings()
+                if (typeof s.useSystemAudio === 'boolean') useSys = s.useSystemAudio
+                if (typeof s.useMicWithSystem === 'boolean') useMic = s.useMicWithSystem
+              } catch {}
+              const rate = useSys ? 48000 : 16000
+
+              setFloatingCapturing(true)
+              await startFloatingCaptureSupport(rate)  // await: ensure rateFix + chunk listeners subscribed before invoke emits audio-config
+
+              // Per-session reset + rate for master (consistent with button path)
+              const w = window as any
+              if (w.__resetStealthMasterRecording) w.__resetStealthMasterRecording()
+              if (w.__stealthMasterRecording?.sampleRate) w.__stealthMasterRecording.sampleRate.current = rate
+
+              if (useSys) {
+                try {
+                  await invoke<string>('start_macos_capture', { capture_system_audio: true, capture_microphone: useMic, deepgram_key: deepgramKey })
+                } catch {
+                  await invoke<string>('start_capture', { deviceName: null, deepgramKey })
+                }
+              } else {
+                await invoke<string>('start_capture', { deviceName: null, deepgramKey })
+              }
+            } else {
+              await invoke('stop_capture').catch(() => {})
+              try { await invoke('stop_macos_capture').catch(() => {}) } catch {}
+              setFloatingCapturing(false)
+              stopFloatingCaptureSupport()
+              setFloatingSuggestions([])
+            }
+          } catch (e) { console.warn('floating hotkey toggle error', e) }
+        })()
+      } else if (currentPageRef.current === 'copilot') {
+        // main copilot page listener (StealthCopilot) will toggle
+      } else {
+        useAppStore.setState({ captureHotkeyPending: true })
+        setCurrentPage('copilot')
+      }
     })
 
     // Live data listeners for floating window (and any other)
@@ -261,6 +446,18 @@ export default function App() {
     }
   }, [])
 
+  // Dedicated early amp listener for floating webview to ensure bar updates reliably from first events (complements the one inside capture support + chunk rms)
+  useEffect(() => {
+    if (!isFloating) return
+    let un: any = null
+    ;(async () => {
+      un = await listen<number>('audio-amplitude', (e) => {
+        setFloatingAmp(e.payload)
+      })
+    })()
+    return () => { if (un) un.then((f: any) => f && f()).catch(()=>{}) }
+  }, [isFloating])
+
   // Minimal floating copilot-only UI (matches the exact reference image)
   if (isFloating) {
     return (
@@ -271,6 +468,9 @@ export default function App() {
         onKeyDown={async (e) => {
           if (e.key === 'Escape') {
             console.log('[Copilot] Escape pressed')
+            stopFloatingCaptureSupport()
+            await invoke('stop_capture').catch(() => {})
+            try { await invoke('stop_macos_capture').catch(() => {}) } catch {}
             try { await getCurrentWindow().close() } catch {}
             try { await invoke('close_copilot_window') } catch {}
             window.close()
@@ -297,35 +497,30 @@ export default function App() {
                 e.stopPropagation()
                 e.preventDefault()
                 console.log('[Copilot] Close button clicked')
+                // Always stop capture first on button close (AC2 + checklist: no leaks). No early returns before cleanup.
+                stopFloatingCaptureSupport()
+                await invoke('stop_capture').catch(() => {})
+                try { await invoke('stop_macos_capture').catch(() => {}) } catch {}
                 const win = getCurrentWindow()
                 try {
-                  // 1. Preferred: Tauri Window API
                   await win.close()
                   console.log('[Copilot] win.close() succeeded')
-                  return
                 } catch (err1) {
                   console.warn('[Copilot] win.close() failed:', err1)
                 }
                 try {
-                  // 2. Force destroy
                   await (win as any).destroy?.()
                   console.log('[Copilot] win.destroy() succeeded')
-                  return
                 } catch (err2) {
                   console.warn('[Copilot] destroy() failed:', err2)
                 }
-                stopFloatingCaptureSupport()
                 try {
-                  // 3. Ask Rust backend to close it (most reliable for some setups)
                   await invoke('close_copilot_window')
                   console.log('[Copilot] close_copilot_window invoke succeeded')
-                  return
                 } catch (err3) {
                   console.warn('[Copilot] Rust close command failed:', err3)
                 }
-                // 4. Last resort
-                console.log('[Copilot] falling back to window.close()')
-                window.close()
+                try { window.close() } catch {}
               }}
             >
               ✕
@@ -347,7 +542,7 @@ export default function App() {
           <div className="text-[10px] tracking-widest text-[#64748b] mb-1.5">{t('copilot.suggestions')}</div>
           <div className="space-y-[3px] text-[12.5px] max-h-[110px] overflow-auto">
             {floatingSuggestions.length === 0 && (
-              <div className="text-[#64748b] text-[11px]">Start capture for live suggestions...</div>
+              <div className="text-[#64748b] text-[11px]">{t('copilot.suggestions.emptyShort')}</div>
             )}
             {floatingSuggestions.map((s, i) => (
               <div key={i} className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">{s}</div>
@@ -361,11 +556,56 @@ export default function App() {
             onClick={async () => {
               try {
                 if (!floatingCapturing) {
-                  await invoke('start_capture', { deviceName: null, deepgramKey: null })
+                  // Load real deepgram key + prefs
+                  let deepgramKey: string | null = null
+                  let useSys = true
+                  let useMic = true
+                  try {
+                    const { loadApiKeys } = await import('./lib/keyStore')
+                    const keys = await loadApiKeys()
+                    deepgramKey = keys.deepgram || null
+                  } catch {}
+                  try {
+                    const { loadAppSettings } = await import('./lib/settingsStore')
+                    const s = await loadAppSettings()
+                    if (typeof s.useSystemAudio === 'boolean') useSys = s.useSystemAudio
+                    if (typeof s.useMicWithSystem === 'boolean') useMic = s.useMicWithSystem
+                  } catch {}
+
+                  const initialRate = useSys ? 48000 : 16000
+
+                  // FIX: await the support so listeners (chunk + rateFix) are registered before the backend emits audio-config.
                   setFloatingCapturing(true)
-                  startFloatingCaptureSupport()
+                  await startFloatingCaptureSupport(initialRate)
+
+                  // Per-session reset + rate for master (so export fallback gets clean 48k data + correct header)
+                  const w = window as any
+                  if (w.__resetStealthMasterRecording) w.__resetStealthMasterRecording()
+                  if (w.__stealthMasterRecording?.sampleRate) w.__stealthMasterRecording.sampleRate.current = initialRate
+
+                  // Now start backend (events will be seen by already-registered listeners)
+                  let started = false
+                  if (useSys) {
+                    try {
+                      const res = await invoke<string>('start_macos_capture', {
+                        capture_system_audio: true,
+                        capture_microphone: useMic,
+                        deepgram_key: deepgramKey
+                      })
+                      console.log('[Floating] macos start:', res)
+                      started = true
+                    } catch (e: any) {
+                      console.warn('[Floating] start_macos_capture unavailable, fallback to cpal:', e?.message || e)
+                    }
+                  }
+                  if (!started) {
+                    await invoke<string>('start_capture', { deviceName: null, deepgramKey })
+                    started = true
+                  }
                 } else {
-                  await invoke('stop_capture')
+                  // Always attempt to stop both backends (harmless on missing cmd)
+                  await invoke('stop_capture').catch(() => {})
+                  try { await invoke('stop_macos_capture').catch(() => {}) } catch {}
                   setFloatingCapturing(false)
                   stopFloatingCaptureSupport()
                   setFloatingSuggestions([])
@@ -376,9 +616,9 @@ export default function App() {
             }}
             className={`text-xs px-3 py-1 rounded ${floatingCapturing ? 'bg-red-500 text-white' : 'bg-[#6366f1] text-white'}`}
           >
-            {floatingCapturing ? 'Stop' : 'Start Capture'}
+            {floatingCapturing ? t('copilot.stopCapture') : t('copilot.startCapture')}
           </button>
-          <button onClick={() => { setFloatingSuggestions([]); setFloatingQuestion('Tell me about yourself.') }} className="text-xs px-2 py-1 border rounded">Clear</button>
+          <button onClick={() => { setFloatingSuggestions([]); setFloatingQuestion(t('copilot.defaultQuestion')) }} className="text-xs px-2 py-1 border rounded">{t('copilot.clear')}</button>
         </div>
 
         <div className="absolute bottom-3 left-0 right-0 text-center text-[11px] text-[#6366f1] flex items-center justify-center gap-1">

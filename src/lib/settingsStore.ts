@@ -22,6 +22,9 @@ export interface AppSettings {
   // STT
   sttProvider: string;
   sttModel: string;
+  // Stealth Copilot capture mode (persisted so floating window + restarts respect choice)
+  useSystemAudio?: boolean;
+  useMicWithSystem?: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -40,6 +43,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   sttProvider: 'deepgram',
   sttModel: 'nova-2',
+  useSystemAudio: true,
+  useMicWithSystem: true,
 };
 
 export async function loadAppSettings(): Promise<AppSettings> {

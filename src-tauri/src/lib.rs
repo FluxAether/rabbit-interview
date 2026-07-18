@@ -2,7 +2,7 @@ mod audio;
 mod commands;
 mod db;
 
-use audio::{start_capture, stop_capture, list_audio_devices};
+use audio::{start_capture, stop_capture, list_audio_devices, stop_macos_capture};
 
 #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
 use audio::{start_macos_capture, check_screen_recording_permission, list_macos_sources, present_macos_content_picker};
@@ -61,6 +61,8 @@ pub fn run() {
             list_macos_sources,
             #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
             present_macos_content_picker,
+            // stop_macos_capture always registered (delegates to SCK or no-op)
+            stop_macos_capture,
         ])
         .setup(|app| {
             if let Err(e) = db::init_db(app) {
