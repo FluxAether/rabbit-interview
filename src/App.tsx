@@ -1,0 +1,183 @@
+import { useState, useEffect } from 'react'
+import { 
+  LayoutDashboard, 
+  Rocket, 
+  Mic, 
+  FileText, 
+  Clock, 
+  Settings as SettingsIcon,
+  Shield
+} from 'lucide-react'
+import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
+
+import Dashboard from './pages/Dashboard'
+import StealthCopilot from './pages/StealthCopilot'
+import MockInterview from './pages/MockInterview'
+import ResumeOptimizer from './pages/ResumeOptimizer'
+import History from './pages/History'
+import Settings from './pages/Settings'
+import { useAppStore } from './stores/useAppStore'
+
+export type Page = 
+  | 'dashboard' 
+  | 'copilot' 
+  | 'mock' 
+  | 'resume' 
+  | 'history' 
+  | 'settings'
+
+const navItems = [
+  { id: 'dashboard' as Page, label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'copilot' as Page, label: 'Stealth Copilot', icon: Rocket },
+  { id: 'mock' as Page, label: 'Mock Interview', icon: Mic },
+  { id: 'resume' as Page, label: 'Resume Optimizer', icon: FileText },
+  { id: 'history' as Page, label: 'History', icon: Clock },
+  { id: 'settings' as Page, label: 'Settings', icon: SettingsIcon },
+]
+
+function Sidebar({ currentPage, onNavigate }: { 
+  currentPage: Page; 
+  onNavigate: (page: Page) => void 
+}) {
+  return (
+    <div className="w-60 bg-[#f8fafc] border-r border-[#e2e8f0] h-screen flex flex-col p-4">
+      {/* Logo */}
+      <div className="flex items-center gap-3 px-3 py-4 mb-4">
+        <div className="w-8 h-8 rounded-xl bg-[#6366f1] flex items-center justify-center">
+          <Shield className="w-4.5 h-4.5 text-white" />
+        </div>
+        <div>
+          <div className="font-semibold text-lg tracking-tight">StealthPath</div>
+          <div className="text-[10px] text-[#64748b] -mt-1">即答侠</div>
+        </div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="space-y-0.5">
+        {navItems.map((item) => {
+          const Icon = item.icon
+          const isActive = currentPage === item.id
+          return (
+            <div
+              key={item.id}
+              onClick={() => onNavigate(item.id)}
+              className={`sidebar-item relative flex items-center gap-3 px-3 py-[9px] rounded-xl text-[13.5px] cursor-pointer select-none transition-all
+                ${isActive 
+                  ? 'bg-[#e0e7ff] text-[#4338ca] font-medium' 
+                  : 'text-[#475569] hover:bg-[#f1f5f9]'
+                }`}
+            >
+              {isActive && (
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-[#6366f1] rounded-r" />
+              )}
+              <Icon className="w-4 h-4" />
+              <span>{item.label}</span>
+            </div>
+          )
+        })}
+      </nav>
+
+      <div className="mt-auto px-3 pt-4">
+        <div className="flex items-center gap-2 text-xs text-[#64748b]">
+          <div className="w-6 h-6 rounded-full bg-[#6366f1] text-white flex items-center justify-center text-[10px] font-medium">AK</div>
+          <div>
+            <div className="text-[#0f172a] text-sm font-medium">Alex Morgan</div>
+            <div className="text-[10px]">Premium Plan</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function App() {
+  const isFloating = window.location.hash === '#copilot-floating'
+  const { loadHistory } = useAppStore()
+
+  const [currentPage, setCurrentPage] = useState<Page>('dashboard')
+
+  useEffect(() => {
+    // Load history once
+    invoke<any[]>('get_history').then((data) => {
+      if (data && data.length) loadHistory(data)
+    }).catch(() => {})
+
+    // Listen for global shortcut events from Rust
+    const unlisten = listen('toggle-copilot', () => {
+      setCurrentPage('copilot')
+      invoke('launch_copilot_window').catch(() => {})
+    })
+
+    return () => { unlisten.then(f => f()) }
+  }, [])
+
+  // Minimal floating copilot-only UI (matches the exact reference image)
+  if (isFloating) {
+    return (
+      <div className="floating-panel w-[400px] h-[360px] m-2 p-4 text-sm select-none overflow-hidden border border-[#e2e8f0]">
+        <div className="flex items-center justify-between mb-3 px-1" data-tauri-drag-region style={{ cursor: 'move' }}>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-[#6366f1] flex items-center justify-center">
+              <span className="text-white text-xs">🎤</span>
+            </div>
+            <span className="font-semibold tracking-tight">AI Interview Assistant</span>
+          </div>
+          <div className="flex items-center gap-3 text-[#64748b]">
+            <span className="cursor-pointer">📈</span>
+            <span className="cursor-pointer">✎</span>
+            <span className="cursor-pointer" onClick={() => window.close()}>✕</span>
+          </div>
+        </div>
+
+        <div className="mb-3">
+          <div className="text-[10px] tracking-widest text-[#64748b] mb-1">INTERVIEWER QUESTION</div>
+          <div className="text-[13px] leading-tight">Can you walk me through a project where you had to solve a complex problem under tight constraints?</div>
+        </div>
+
+        <div>
+          <div className="text-[10px] tracking-widest text-[#64748b] mb-1.5">AI SUGGESTIONS</div>
+          <div className="space-y-[3px] text-[12.5px]">
+            <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">• Situation: Briefly set the context and the challenge.</div>
+            <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">• Task: Explain your specific responsibility.</div>
+            <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">• Action: Detail the steps you took and trade-offs made.</div>
+            <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">• Result: Share the outcome and what you learned.</div>
+          </div>
+        </div>
+
+        <div className="absolute bottom-3 left-0 right-0 text-center text-[11px] text-[#6366f1] flex items-center justify-center gap-1">
+          <Shield className="w-3 h-3" /> Stealth Mode Active
+        </div>
+      </div>
+    )
+  }
+
+  const renderPage = () => {
+    switch (currentPage) {
+      case 'dashboard':
+        return <Dashboard onLaunchCopilot={() => setCurrentPage('copilot')} />
+      case 'copilot':
+        return <StealthCopilot />
+      case 'mock':
+        return <MockInterview />
+      case 'resume':
+        return <ResumeOptimizer />
+      case 'history':
+        return <History />
+      case 'settings':
+        return <Settings />
+      default:
+        return <Dashboard onLaunchCopilot={() => setCurrentPage('copilot')} />
+    }
+  }
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-[#f1f5f9] text-[#0f172a]">
+      <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
+      
+      <main className="flex-1 overflow-auto">
+        {renderPage()}
+      </main>
+    </div>
+  )
+}

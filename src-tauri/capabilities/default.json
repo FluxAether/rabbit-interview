@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for main app + floating copilot + plugins",
+  "windows": ["main", "copilot"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "sql:default",
+    "fs:default",
+    "dialog:default",
+    "global-shortcut:default",
+    "core:window:default",
+    "core:event:default",
+    "store:default"
+  ]
+}
