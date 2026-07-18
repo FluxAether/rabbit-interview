@@ -1,13 +1,16 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleRate, SupportedStreamConfigRange};
-use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::thread;
 use tauri::{AppHandle, Emitter};
-use tokio_tungstenite::{connect_async, tungstenite::client::IntoClientRequest, tungstenite::protocol::Message};
-use url::Url;
+
+#[cfg(target_os = "macos")]
+pub mod screencapturekit;
+
+#[cfg(target_os = "macos")]
+pub use screencapturekit::{start_macos_capture, check_screen_recording_permission, list_macos_sources, present_macos_content_picker};
 
 /// Control messages for the audio thread.
 enum AudioCommand {
@@ -15,9 +18,9 @@ enum AudioCommand {
 }
 
 #[derive(Serialize, Clone)]
-struct AudioConfigPayload {
-    sample_rate: u32,
-    device: String,
+pub struct AudioConfigPayload {
+    pub sample_rate: u32,
+    pub device: String,
 }
 
 /// Holds the handle to the background audio thread.
@@ -37,7 +40,7 @@ impl Default for AudioCapture {
 
 static AUDIO_STATE: once_cell::sync::Lazy<AudioCapture> = once_cell::sync::Lazy::new(|| AudioCapture::default());
 
-fn stop_capture_internal() {
+pub(crate) fn stop_capture_internal() {
     // Send stop signal to the audio thread (this wakes recv())
     if let Some(tx) = AUDIO_STATE.tx.lock().unwrap().take() {
         let _ = tx.send(AudioCommand::Stop);
@@ -51,6 +54,10 @@ fn stop_capture_internal() {
             let _ = handle.join();
         });
     }
+
+    // Also stop any active macOS ScreenCaptureKit session
+    #[cfg(target_os = "macos")]
+    crate::audio::screencapturekit::stop_macos_capture();
 }
 
 #[tauri::command]

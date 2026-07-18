@@ -35,3 +35,6 @@ tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 futures-util = "0.3"
 url = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+screencapturekit = { version = "8", features = ["async", "macos_15_0"] }
+

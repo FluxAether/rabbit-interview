@@ -3,6 +3,9 @@ mod commands;
 mod db;
 
 use audio::{start_capture, stop_capture, list_audio_devices};
+
+#[cfg(target_os = "macos")]
+use audio::{start_macos_capture, check_screen_recording_permission, list_macos_sources, present_macos_content_picker};
 use commands::{get_settings, save_settings, launch_copilot_window, hide_copilot_window, close_copilot_window, get_history, save_interview_record};
 use tauri::Emitter;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
@@ -48,7 +51,16 @@ pub fn run() {
             hide_copilot_window,
             close_copilot_window,
             get_history,
-            save_interview_record
+            save_interview_record,
+            // macOS native audio (ScreenCaptureKit) - no-op on other platforms
+            #[cfg(target_os = "macos")]
+            start_macos_capture,
+            #[cfg(target_os = "macos")]
+            check_screen_recording_permission,
+            #[cfg(target_os = "macos")]
+            list_macos_sources,
+            #[cfg(target_os = "macos")]
+            present_macos_content_picker,
         ])
         .setup(|app| {
             if let Err(e) = db::init_db(app) {

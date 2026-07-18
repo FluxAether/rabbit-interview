@@ -1,7 +1,8 @@
 // Real LLM + STT integration hooks using secure tauri-plugin-store
-import { loadApiKeys } from './keyStore';
+import { loadApiKeys, getLlmApiKey } from './keyStore';
+import { useAppStore } from '../stores/useAppStore';
 
-let cachedKeys: { groq: string; deepgram: string } | null = null;
+let cachedKeys: Awaited<ReturnType<typeof loadApiKeys>> | null = null;
 
 export function clearKeyCache() {
   cachedKeys = null;
@@ -14,11 +15,133 @@ async function getKeys() {
   return cachedKeys;
 }
 
-export async function generateSuggestions(question: string, transcriptSoFar?: string): Promise<string[]> {
-  const { groq: GROQ_API_KEY } = await getKeys();
+/**
+ * Resolve provider and concrete model id from the aiModel setting.
+ * Supported values (examples):
+ *   "groq-llama-3.1", "groq-llama-3.3-70b"
+ *   "gpt-4o", "gpt-4o-mini", "openai-gpt-4o"
+ *   "claude-3.5", "claude-3.5-sonnet"
+ *   "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"
+ */
+function resolveProviderAndModel(aiModel: string): { provider: 'groq' | 'openai' | 'anthropic' | 'gemini'; model: string } {
+  const m = (aiModel || 'groq-llama-3.1').toLowerCase();
 
-  if (!GROQ_API_KEY) {
-    // Fallback to smart mock
+  if (m.startsWith('gemini')) {
+    // gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash etc.
+    return { provider: 'gemini', model: aiModel };
+  }
+  if (m.includes('claude')) {
+    return { provider: 'anthropic', model: aiModel };
+  }
+  if (m.includes('gpt') || m.startsWith('openai')) {
+    return { provider: 'openai', model: aiModel.includes('gpt') ? aiModel : 'gpt-4o' };
+  }
+  // default + groq
+  return { provider: 'groq', model: 'llama-3.1-8b-instant' };
+}
+
+async function callGroq(prompt: string, model: string, apiKey: string): Promise<string> {
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format for the given interviewer question. Be specific and professional.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.6,
+      max_tokens: 220,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error?.message || `Groq error ${res.status}`);
+  }
+  return data.choices?.[0]?.message?.content || '';
+}
+
+async function callOpenAI(prompt: string, model: string, apiKey: string): Promise<string> {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: model.includes('gpt') ? model : 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format for the given interviewer question. Be specific and professional.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.6,
+      max_tokens: 220,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error?.message || `OpenAI error ${res.status}`);
+  }
+  return data.choices?.[0]?.message?.content || '';
+}
+
+async function callGemini(prompt: string, model: string, apiKey: string): Promise<string> {
+  // Gemini uses a different API shape. We map common aliases to stable model ids.
+  const modelId = model.toLowerCase().includes('1.5-pro') ? 'gemini-1.5-pro-latest'
+    : model.toLowerCase().includes('2.0') || model.toLowerCase().includes('gemini-2') ? 'gemini-2.0-flash'
+    : 'gemini-1.5-flash-latest';
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format for the given interviewer question. Be specific and professional.' }]
+      },
+      contents: [{
+        parts: [{ text: prompt }]
+      }],
+      generationConfig: {
+        temperature: 0.6,
+        maxOutputTokens: 220,
+      }
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    const msg = data?.error?.message || `Gemini error ${res.status}`;
+    throw new Error(msg);
+  }
+
+  // Gemini response shape: candidates[0].content.parts[0].text
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return text;
+}
+
+async function callAnthropic(_prompt: string, _model: string, _apiKey: string): Promise<string> {
+  // Placeholder — real Anthropic Messages API requires different headers/body.
+  // For now we fall back gracefully if key is present but not fully wired.
+  throw new Error('Anthropic/Claude direct support not yet implemented. Use Groq, OpenAI or Gemini.');
+}
+
+export async function generateSuggestions(question: string, transcriptSoFar?: string): Promise<string[]> {
+  // Read current selected model from the global store (works from plain modules)
+  const { settings } = useAppStore.getState();
+  const aiModel: string = settings?.aiModel || 'groq-llama-3.1';
+
+  const { provider, model } = resolveProviderAndModel(aiModel);
+  const apiKey = await getLlmApiKey(provider);
+
+  const userPrompt = `Interviewer question: ${question}\nPrevious context: ${transcriptSoFar || 'none'}`;
+
+  if (!apiKey) {
+    // Fallback to smart mock (same behavior as before)
     await new Promise(r => setTimeout(r, 120));
     return [
       `Situation: Briefly set the context for "${question.slice(0, 40)}...".`,
@@ -30,28 +153,25 @@ export async function generateSuggestions(question: string, transcriptSoFar?: st
   }
 
   try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
-        messages: [
-          { role: 'system', content: 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format for the given interviewer question. Be specific and professional.' },
-          { role: 'user', content: `Interviewer question: ${question}\nPrevious context: ${transcriptSoFar || 'none'}` }
-        ],
-        temperature: 0.6,
-        max_tokens: 220,
-      }),
-    });
+    let text = '';
+    if (provider === 'gemini') {
+      text = await callGemini(userPrompt, model, apiKey);
+    } else if (provider === 'openai') {
+      text = await callOpenAI(userPrompt, model, apiKey);
+    } else if (provider === 'anthropic') {
+      text = await callAnthropic(userPrompt, model, apiKey);
+    } else {
+      // groq (default)
+      text = await callGroq(userPrompt, model, apiKey);
+    }
 
-    const data = await res.json();
-    const text = data.choices?.[0]?.message?.content || '';
-    return text.split('\n').filter((l: string) => l.trim().length > 3).slice(0, 6);
-  } catch (e) {
-    return [`Error calling Groq: ${e}`];
+    return text
+      .split('\n')
+      .map((l: string) => l.trim())
+      .filter((l: string) => l.length > 3)
+      .slice(0, 6);
+  } catch (e: any) {
+    return [`Error calling ${provider}: ${e?.message || e}`];
   }
 }
 

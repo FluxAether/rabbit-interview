@@ -54,7 +54,7 @@ export default function ResumeOptimizer() {
 
   const analyze = async () => {
     setIsAnalyzing(true)
-    // Simulate LLM analysis (in real call Groq / Claude)
+    // Simulate LLM analysis (in real call Groq / OpenAI / Claude / Gemini)
     await new Promise(r => setTimeout(r, 850))
     
     const optimized = resumeOriginal ? 

@@ -32,7 +32,26 @@ npm run tauri build
 See the full phased plan in the session plan file for complete scope and milestones.
 
 ## Tech Stack
-Tauri 2 (Rust) • React 19 + TS • Tailwind • Framer Motion • Lucide • SQLite (planned) • Deepgram / Groq (planned)
+Tauri 2 (Rust) • React 19 + TS • Tailwind • Framer Motion • Lucide • SQLite (planned) • Deepgram (STT) + Groq / OpenAI / Claude / Google Gemini (LLM)
+
+## Audio Capture (Important for Interviews)
+
+The Stealth Copilot can capture **both your voice and the interviewer's voice** (system audio) for real-time transcription and suggestions.
+
+### Recommended on macOS (no BlackHole needed!)
+- In the **隐形助手 / Stealth Copilot** panel, enable **"Use system audio (macOS native — captures interviewer)"**.
+- This uses Apple's **ScreenCaptureKit** (via native `SCContentSharingPicker` support).
+- You will be prompted once for **Screen Recording** permission (this also enables system audio capture).
+- Optional: click "Open native picker" to precisely select a meeting window (Zoom / Teams / etc.) instead of the whole screen.
+- "Also capture microphone" is recommended.
+
+This completely removes the need to install BlackHole or create Aggregate Devices for most users.
+
+### Fallback / Other platforms
+- Microphone-only mode still uses `cpal` (select device in the UI).
+- On older macOS or Windows, you may still need virtual audio routing tools for system audio.
+
+See Settings > Audio Capture for more details.
 
 ## License
 Proprietary (internal project)

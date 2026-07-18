@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>StealthPath needs screen recording permission to capture system audio from meeting applications (Zoom, Microsoft Teams, Google Meet, etc.) for real-time interview assistance.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>StealthPath uses your microphone to capture your voice during mock and live interviews.</string>
+</dict>
+</plist>

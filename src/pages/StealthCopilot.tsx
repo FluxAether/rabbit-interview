@@ -15,6 +15,11 @@ export default function StealthCopilot() {
   const [devices, setDevices] = useState<string[]>([])
   const [selectedDevice, setSelectedDevice] = useState<string>('')
 
+  // New: macOS native capture (ScreenCaptureKit) for system audio + mic
+  const [useSystemAudio, setUseSystemAudio] = useState(true) // default on for better interview experience
+  const [useMicWithSystem, setUseMicWithSystem] = useState(true)
+  const [macosSources, setMacosSources] = useState<any>(null)
+
   const deepgramWsRef = useRef<WebSocket | null>(null)
   // Store unlisten functions so we can properly remove listeners on stop
   const unlistenAmpRef = useRef<(() => void) | null>(null)
@@ -53,6 +58,33 @@ export default function StealthCopilot() {
       }
     } catch (e) {
       console.warn('Failed to list devices', e)
+    }
+  }
+
+  const loadMacosSources = async () => {
+    try {
+      const sources = await invoke<any>('list_macos_sources')
+      setMacosSources(sources)
+    } catch (e) {
+      console.warn('Failed to list macOS sources', e)
+    }
+  }
+
+  const openNativePicker = async () => {
+    try {
+      await invoke('present_macos_content_picker')
+      setTimeout(loadMacosSources, 1200)
+    } catch (e) {
+      console.warn('Picker failed', e)
+    }
+  }
+
+  const requestScreenPermission = async () => {
+    try {
+      const ok = await invoke<boolean>('check_screen_recording_permission')
+      alert(ok ? 'Permission OK (or already granted)' : 'Please grant Screen Recording permission in System Settings > Privacy & Security')
+    } catch (e) {
+      alert('Error checking permission: ' + e)
     }
   }
 
@@ -161,10 +193,23 @@ export default function StealthCopilot() {
         const keys = await loadApiKeys()
         deepgramKey = keys.deepgram || null
       } catch {}
-      const res = await invoke<string>('start_capture', {
-        deviceName: selectedDevice || null,
-        deepgramKey
-      })
+      let res: string
+
+      // Prefer native macOS ScreenCaptureKit when system audio is desired
+      // This allows capturing the other person's voice without BlackHole
+      if (useSystemAudio) {
+        res = await invoke<string>('start_macos_capture', {
+          captureSystemAudio: true,
+          captureMicrophone: useMicWithSystem,
+          deepgramKey
+        })
+      } else {
+        res = await invoke<string>('start_capture', {
+          deviceName: selectedDevice || null,
+          deepgramKey
+        })
+      }
+
       setStatus(res)
       setIsCapturing(true)
       isCapturingRef.current = true
@@ -194,9 +239,11 @@ export default function StealthCopilot() {
             if (isFinal) {
               generateSuggestions(text).then((sugs) => {
                 if (!isCapturingRef.current) return
+                const { settings } = useAppStore.getState()
+                const modelLabel = (settings?.aiModel || 'groq').replace(/-/g, ' ')
                 sugs.forEach((s: string) => {
                   const sugText = s.startsWith('•') ? s : `• ${s}`
-                  addSuggestion({ text: sugText, category: 'Deepgram + Groq' })
+                  addSuggestion({ text: sugText, category: `Deepgram + ${modelLabel}` })
                   emit('copilot-suggestion', { text: sugText }).catch(() => {})
                 })
               })
@@ -352,22 +399,59 @@ export default function StealthCopilot() {
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
-            {/* Device selector */}
+            {/* Device selector + new macOS native option */}
             <div className="flex items-center gap-2 text-xs">
               <span className="text-[#64748b]">{t('copilot.device')}:</span>
               <select 
                 value={selectedDevice} 
                 onChange={(e) => setSelectedDevice(e.target.value)}
                 className="bg-white border border-[#e2e8f0] rounded px-2 py-0.5 text-xs max-w-[180px]"
-                disabled={isCapturing}
+                disabled={isCapturing || useSystemAudio}
               >
                 {devices.length === 0 && <option value="">{t('copilot.defaultDevice')}</option>}
                 {devices.map(d => (
                   <option key={d} value={d}>{d}</option>
                 ))}
               </select>
-              <button onClick={loadDevices} className="text-[#6366f1] hover:underline" disabled={isCapturing}>↻</button>
+              <button onClick={loadDevices} className="text-[#6366f1] hover:underline" disabled={isCapturing || useSystemAudio}>↻</button>
             </div>
+
+            {/* macOS ScreenCaptureKit toggle - the key improvement */}
+            <label className="flex items-center gap-1.5 text-[11px] text-[#475569] mt-0.5">
+              <input
+                type="checkbox"
+                checked={useSystemAudio}
+                onChange={(e) => setUseSystemAudio(e.target.checked)}
+                disabled={isCapturing}
+                className="accent-[#6366f1]"
+              />
+              <span>{t('copilot.useSystemAudio')}</span>
+            </label>
+            {useSystemAudio && (
+              <>
+                <label className="flex items-center gap-1.5 text-[11px] text-[#475569] -mt-0.5 ml-4">
+                  <input
+                    type="checkbox"
+                    checked={useMicWithSystem}
+                    onChange={(e) => setUseMicWithSystem(e.target.checked)}
+                    disabled={isCapturing}
+                    className="accent-[#6366f1]"
+                  />
+                  <span>{t('copilot.alsoCaptureMic')}</span>
+                </label>
+                <div className="flex gap-2 text-[11px] ml-4">
+                  <button onClick={loadMacosSources} className="text-[#6366f1] hover:underline" disabled={isCapturing}>{t('copilot.listSources')}</button>
+                  <button onClick={openNativePicker} className="text-[#6366f1] hover:underline" disabled={isCapturing}>{t('copilot.openPicker')}</button>
+                  <button onClick={requestScreenPermission} className="text-[#6366f1] hover:underline" disabled={isCapturing}>{t('copilot.requestPerm')}</button>
+                </div>
+                {macosSources && (
+                  <div className="text-[10px] text-[#64748b] ml-4 max-w-[220px]">
+                    Sources loaded: {macosSources.displays?.length || 0} displays, {macosSources.windows?.length || 0} windows.
+                    (Picker recommended for precise selection)
+                  </div>
+                )}
+              </>
+            )}
 
             <div className="flex gap-2">
               <button

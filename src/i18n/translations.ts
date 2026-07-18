@@ -181,6 +181,11 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.exportRecording': 'Export Recording',
     'copilot.noRecording': 'No audio recorded yet.',
     'copilot.sessionSaved': 'Session saved to History!',
+    'copilot.useSystemAudio': 'Use system audio (macOS native — captures interviewer)',
+    'copilot.alsoCaptureMic': 'Also capture microphone',
+    'copilot.listSources': 'List sources',
+    'copilot.openPicker': 'Open native picker',
+    'copilot.requestPerm': 'Request perm',
 
     // Feedback labels (used in mock)
     'feedback.clarity': 'Clarity',
@@ -373,6 +378,11 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.exportRecording': '导出录音',
     'copilot.noRecording': '尚未录制音频。',
     'copilot.sessionSaved': '会话已保存到历史！',
+    'copilot.useSystemAudio': '使用系统音频（macOS 原生 — 可捕获面试官声音）',
+    'copilot.alsoCaptureMic': '同时捕获麦克风',
+    'copilot.listSources': '列出来源',
+    'copilot.openPicker': '打开原生选择器',
+    'copilot.requestPerm': '请求权限',
 
     // Feedback labels
     'feedback.clarity': '清晰度',
