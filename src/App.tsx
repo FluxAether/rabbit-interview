@@ -23,6 +23,7 @@ import { useTranslation } from './i18n'
 import { DEFAULT_LANGUAGE } from './i18n/types'
 import { startDeepgramStream, sendAudioChunk, closeDeepgramStream, generateSuggestions } from './lib/llm'
 import { loadAppSettings } from './lib/settingsStore'
+import { checkScreenRecordingPermission, openScreenRecordingSettings, openMicrophoneSettings, tryRequestMicrophone } from './lib/permissions'
 
 // Extracted rate-fix logic (modeled on buildExportWav) so it can be unit-driven in verification
 // and the real closure body executes when called from the listener.
@@ -572,6 +573,29 @@ export default function App() {
                     if (typeof s.useMicWithSystem === 'boolean') useMic = s.useMicWithSystem
                   } catch {}
 
+                  // Check permissions before starting capture in floating window.
+                  // If missing: directly open the settings page (no "only prompt").
+                  if (useSys) {
+                    const hasScreen = await checkScreenRecordingPermission()
+                    if (!hasScreen) {
+                      await openScreenRecordingSettings()
+                      setFloatingQuestion(t('copilot.permInstruction'))
+                      setFloatingCapturing(false)
+                      return
+                    }
+                  }
+
+                  const needsMic = !useSys || useMic
+                  if (needsMic) {
+                    const hasMic = await tryRequestMicrophone()
+                    if (!hasMic) {
+                      await openMicrophoneSettings()
+                      setFloatingQuestion(t('copilot.micPermInstruction') || t('copilot.permInstruction'))
+                      setFloatingCapturing(false)
+                      return
+                    }
+                  }
+
                   const initialRate = useSys ? 48000 : 16000
 
                   // FIX: await the support so listeners (chunk + rateFix) are registered before the backend emits audio-config.
@@ -595,6 +619,13 @@ export default function App() {
                       console.log('[Floating] macos start:', res)
                       started = true
                     } catch (e: any) {
+                      const msg = String(e || '').toLowerCase()
+                      if (msg.includes('permission') || msg.includes('screen') || msg.includes('denied') || msg.includes('access')) {
+                        await openScreenRecordingSettings()
+                        setFloatingQuestion(t('copilot.permInstruction'))
+                        setFloatingCapturing(false)
+                        return
+                      }
                       console.warn('[Floating] start_macos_capture unavailable, fallback to cpal:', e?.message || e)
                     }
                   }

@@ -189,6 +189,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.permInstruction': 'Please go to System Settings → Privacy & Security → Screen Recording and enable permission for this app.',
     'copilot.permGranted': 'Permission already granted (or allowed).',
     'copilot.permMacOnly': 'Screen recording permission is only available when the app is built with macOS system audio support (macos-system-audio feature).',
+    'copilot.micPermInstruction': 'Please go to System Settings → Privacy & Security → Microphone and enable permission for this app.',
     // Floating-specific + action labels (used by detached copilot window)
     'copilot.startCapture': 'Start Capture',
     'copilot.stopCapture': 'Stop',
@@ -395,6 +396,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.permInstruction': '请前往「系统设置 → 隐私与安全性 → 屏幕录制」为本应用开启权限。',
     'copilot.permGranted': '权限已授予（或已允许）。',
     'copilot.permMacOnly': '仅在启用 macOS 系统音频支持（macos-system-audio 特性）时可用。',
+    'copilot.micPermInstruction': '请前往「系统设置 → 隐私与安全性 → 麦克风」为本应用开启权限。',
     // Floating-specific + action labels
     'copilot.startCapture': '开始捕获',
     'copilot.stopCapture': '停止',
@@ -564,6 +566,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.permInstruction': '請前往「系統設定 → 隱私與安全性 → 螢幕錄製」為本應用開啟權限。',
     'copilot.permGranted': '權限已授予（或已允許）。',
     'copilot.permMacOnly': '僅在啟用 macOS 系統音訊支援（macos-system-audio 特性）時可用。',
+    'copilot.micPermInstruction': '請前往「系統設定 → 隱私與安全性 → 麥克風」為本應用開啟權限。',
     'copilot.startCapture': '開始擷取',
     'copilot.stopCapture': '停止',
     'copilot.clear': '清除',

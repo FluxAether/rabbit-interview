@@ -7,6 +7,7 @@ import { useAppStore } from '../stores/useAppStore'
 import { generateSuggestions, startDeepgramStream, sendAudioChunk, closeDeepgramStream } from '../lib/llm'
 import { useTranslation } from '../i18n'
 import { buildExportWav } from '../lib/recording'
+import { checkScreenRecordingPermission, openScreenRecordingSettings, openMicrophoneSettings, tryRequestMicrophone } from '../lib/permissions'
 
 // Testable pure implementation of the export logic (computation via buildExportWav + side effects).
 // The component's exportRecording delegates to this so that node verification can literally invoke
@@ -284,6 +285,27 @@ export default function StealthCopilot() {
 
     // === START CAPTURE ===
     try {
+      // Check permissions BEFORE any native capture or listeners.
+      // If missing → directly open the System Settings page + show message + abort.
+      if (useSystemAudio) {
+        const hasScreen = await checkScreenRecordingPermission()
+        if (!hasScreen) {
+          setStatus(t('copilot.permInstruction'))
+          await openScreenRecordingSettings()
+          return
+        }
+      }
+
+      const needsMic = !useSystemAudio || useMicWithSystem
+      if (needsMic) {
+        const hasMic = await tryRequestMicrophone()
+        if (!hasMic) {
+          setStatus(t('copilot.micPermInstruction') || t('copilot.permInstruction'))
+          await openMicrophoneSettings()
+          return
+        }
+      }
+
       // Clean any stale listeners from previous (interrupted) session
       cleanupListeners()
       resetRecording()
@@ -416,6 +438,13 @@ export default function StealthCopilot() {
             deepgram_key: deepgramKey
           })
         } catch (e: any) {
+          const msg = String(e || '').toLowerCase()
+          if (msg.includes('permission') || msg.includes('screen') || msg.includes('denied') || msg.includes('access')) {
+            // Screen recording permission is missing — directly open System Settings for user to grant
+            setStatus(t('copilot.permInstruction'))
+            await openScreenRecordingSettings()
+            return
+          }
           // Fallback if the native command is not available (feature not enabled or non-mac)
           console.warn('start_macos_capture not available, falling back to mic-only:', e)
           res = await invoke<string>('start_capture', {
