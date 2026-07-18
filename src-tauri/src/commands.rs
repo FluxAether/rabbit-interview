@@ -11,6 +11,9 @@ pub struct AppSettings {
     pub ai_model: String,
     pub stealth_enabled: bool,
     pub mic_device: Option<String>,
+    // STT provider configuration
+    pub stt_provider: String,
+    pub stt_model: String,
 }
 
 impl Default for AppSettings {
@@ -24,6 +27,8 @@ impl Default for AppSettings {
             ai_model: "groq-llama-3.1".into(),
             stealth_enabled: true,
             mic_device: None,
+            stt_provider: "deepgram".into(),
+            stt_model: "nova-2".into(),
         }
     }
 }

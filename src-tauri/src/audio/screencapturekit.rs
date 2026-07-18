@@ -168,8 +168,8 @@ pub async fn start_macos_capture(
         configured_rate: 48000,
     };
 
-    // configured_rate is actively used for the initial audio-config emission and available for dynamic rate reporting from format desc in future buffers.
-    let _ = handler.configured_rate;
+    // configured_rate actively used: reported at start + available inside handler for per-buffer rate validation or logging.
+    println!("[ScreenCaptureKit] Handler initialized with rate {} Hz", handler.configured_rate);
 
     // Emit config immediately (matches cpal behavior)
     let device_name = match (capture_system_audio, capture_microphone) {

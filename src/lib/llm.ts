@@ -175,7 +175,9 @@ export async function generateSuggestions(question: string, transcriptSoFar?: st
   }
 }
 
-// ==================== Deepgram Streaming with PCM Conversion ====================
+// ==================== STT (Speech-to-Text) Streaming ====================
+// Currently only Deepgram is implemented. The model is now configurable per-provider
+// via Settings (sttProvider + sttModel). The function name is kept for backward compat.
 
 /**
  * Converts Float32 audio (from cpal, range -1.0 to 1.0) to Int16 PCM (for Deepgram linear16)
@@ -207,6 +209,12 @@ export async function startDeepgramStream(
   sampleRate: number = 16000
 ): Promise<WebSocket | null> {
   const { deepgram: DEEPGRAM_API_KEY } = await getKeys();
+
+  // Read STT config from global store (consistent with LLM provider logic)
+  const { settings } = useAppStore.getState();
+  const sttProvider = (settings?.sttProvider as string) || 'deepgram';
+  const sttModel = (settings?.sttModel as string) || 'nova-2';
+
   if (!DEEPGRAM_API_KEY) {
     console.warn('No Deepgram key — using mock transcription');
     return null;
@@ -214,7 +222,10 @@ export async function startDeepgramStream(
 
   // Use the actual mic sample rate reported by backend (fixes STT quality).
   // Deepgram accepts 16000, 44100, 48000 etc. as long as audio matches.
-  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=nova-2&interim_results=true&smart_format=true&punctuate=true`;
+  // Model comes from settings (user-configurable in Settings page).
+  const model = sttProvider === 'deepgram' ? sttModel : 'nova-2';
+
+  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true`;
 
   const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]);
   ws.binaryType = 'arraybuffer';

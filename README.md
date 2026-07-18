@@ -47,7 +47,18 @@ The Stealth Copilot can capture **both your voice and the interviewer's voice** 
 
 This completely removes the need to install BlackHole or create Aggregate Devices for most users.
 
-**Note on building**: Native ScreenCaptureKit support pulls in Swift-based dependencies (`apple-metal` etc.). You need a full Xcode installation for successful linking on macOS (see Packaging section below).
+**Note on building**: Native ScreenCaptureKit support pulls in Swift-based dependencies (`apple-metal` etc.). 
+
+- By default the app builds without the heavy dependency (`cargo build` / `npm run tauri dev` works with just microphone capture).
+- To enable system audio capture, build with the feature:
+  ```bash
+  cargo tauri build -- --features macos-system-audio
+  # or
+  npm run tauri build -- --features macos-system-audio
+  ```
+- You need a full Xcode installation (not only Command Line Tools) for the final link step when the feature is enabled.
+
+See Packaging section below for more details.
 
 ### Fallback / Other platforms
 - Microphone-only mode still uses `cpal` (select device in the UI).

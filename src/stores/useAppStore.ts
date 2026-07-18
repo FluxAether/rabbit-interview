@@ -70,6 +70,9 @@ export const useAppStore = create<AppState>((set) => ({
     stealthEnabled: true,
     aiModel: 'groq-llama-3.1', // also supports: gpt-4o, claude-3.5, gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash
     language: 'zh-CN' as const,
+    // STT (Speech-to-Text) provider for real-time transcription
+    sttProvider: 'deepgram',
+    sttModel: 'nova-2',
   },
 
   copilot: {

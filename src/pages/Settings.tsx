@@ -30,7 +30,12 @@ export default function Settings() {
     openai: false,
     anthropic: false,
     gemini: false,
+    deepgram: false,
   })
+
+  // STT (real-time speech-to-text) configuration
+  const [sttProvider, setSttProvider] = useState<'deepgram'>('deepgram')
+  const [sttModel, setSttModel] = useState('nova-2')
 
   // Initialize from store
   useEffect(() => {
@@ -43,17 +48,19 @@ export default function Settings() {
     (async () => {
       try {
         const { getApiKey } = await import('../lib/keyStore')
-        const [g, o, a, ge] = await Promise.all([
+        const [g, o, a, ge, dg] = await Promise.all([
           getApiKey('GROQ_API_KEY'),
           getApiKey('OPENAI_API_KEY'),
           getApiKey('ANTHROPIC_API_KEY'),
           getApiKey('GEMINI_API_KEY'),
+          getApiKey('DEEPGRAM_API_KEY'),
         ])
         setKeyStatus({
           groq: !!g,
           openai: !!o,
           anthropic: !!a,
           gemini: !!ge,
+          deepgram: !!dg,
         })
       } catch {}
     })()
@@ -78,6 +85,16 @@ export default function Settings() {
       setGroqModel(model)
     }
   }, [settings?.aiModel])
+
+  // Sync STT settings
+  useEffect(() => {
+    if (settings?.sttProvider) {
+      setSttProvider(settings.sttProvider as 'deepgram')
+    }
+    if (settings?.sttModel) {
+      setSttModel(settings.sttModel as string)
+    }
+  }, [settings?.sttProvider, settings?.sttModel])
 
   const handleLanguageChange = (newLang: SupportedLanguage) => {
     setLanguage(newLang)
@@ -110,12 +127,13 @@ export default function Settings() {
   }
 
   // Save an API key for a provider and refresh status
-  const saveProviderKey = async (provider: 'groq' | 'openai' | 'anthropic' | 'gemini', value: string) => {
+  const saveProviderKey = async (provider: 'groq' | 'openai' | 'anthropic' | 'gemini' | 'deepgram', value: string) => {
     const keyMap = {
       groq: 'GROQ_API_KEY',
       openai: 'OPENAI_API_KEY',
       anthropic: 'ANTHROPIC_API_KEY',
       gemini: 'GEMINI_API_KEY',
+      deepgram: 'DEEPGRAM_API_KEY',
     } as const
 
     const { setApiKey } = await import('../lib/keyStore')
@@ -127,8 +145,32 @@ export default function Settings() {
     setKeyStatus((prev) => ({ ...prev, [provider]: value.trim().length > 0 }))
   }
 
+  // Update STT provider/model and sync to global store immediately
+  const updateSttConfig = (provider: 'deepgram', model: string) => {
+    setSttProvider(provider)
+    setSttModel(model)
+
+    useAppStore.setState((s) => ({
+      settings: {
+        ...s.settings,
+        sttProvider: provider,
+        sttModel: model,
+      },
+    }))
+  }
+
   const save = async () => {
-    const payload = { theme, launchAtStartup, autoUpdate, updateChannel, language, aiModel, stealthEnabled: stealth }
+    const payload = {
+      theme,
+      launchAtStartup,
+      autoUpdate,
+      updateChannel,
+      language,
+      aiModel,
+      stealthEnabled: stealth,
+      sttProvider,
+      sttModel,
+    }
     await invoke('save_settings', { settings: payload })
   }
 
@@ -439,6 +481,57 @@ export default function Settings() {
 
           <div className="mt-3 text-[10px] text-[#64748b]">
             {t('settings.apiKeys.help')}
+          </div>
+        </div>
+
+        {/* Speech-to-Text (Real-time Transcription Provider) */}
+        <div className="card p-6 mb-4">
+          <div className="font-semibold text-[#6366f1] mb-1">Speech-to-Text</div>
+          <div className="text-xs text-[#64748b] mb-4">
+            Real-time transcription for Stealth Copilot. Currently powered by Deepgram (high accuracy, low latency).
+          </div>
+
+          <div className="space-y-4">
+            {/* Deepgram STT Provider */}
+            <div className="border border-[#6366f1] bg-[#f5f5ff] rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold">Deepgram</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-700">Real-time WS</span>
+                </div>
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">Active</span>
+              </div>
+
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-3">
+                  <span className="w-12 text-[#64748b] text-xs">Model</span>
+                  <select
+                    value={sttModel}
+                    onChange={(e) => updateSttConfig('deepgram', e.target.value)}
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
+                  >
+                    <option value="nova-2">nova-2 (Recommended - general)</option>
+                    <option value="nova-2-meeting">nova-2-meeting (Optimized for meetings)</option>
+                    <option value="nova-2-general">nova-2-general</option>
+                    <option value="nova-2-phonecall">nova-2-phonecall</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="w-12 text-[#64748b] text-xs">Key</span>
+                  <input
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
+                    placeholder={keyStatus.deepgram ? "•••••••• (configured)" : "DEEPGRAM_API_KEY"}
+                    onBlur={(e) => saveProviderKey('deepgram', e.target.value)}
+                    defaultValue=""
+                    type="password"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 text-[10px] text-[#64748b]">
+            The selected STT model is used for live transcription. Deepgram keys are separate from LLM keys.
           </div>
         </div>
 

@@ -4,7 +4,7 @@ mod db;
 
 use audio::{start_capture, stop_capture, list_audio_devices};
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
 use audio::{start_macos_capture, check_screen_recording_permission, list_macos_sources, present_macos_content_picker};
 use commands::{get_settings, save_settings, launch_copilot_window, hide_copilot_window, close_copilot_window, get_history, save_interview_record};
 use tauri::Emitter;
@@ -52,14 +52,14 @@ pub fn run() {
             close_copilot_window,
             get_history,
             save_interview_record,
-            // macOS native audio (ScreenCaptureKit) - no-op on other platforms
-            #[cfg(target_os = "macos")]
+            // macOS native audio (ScreenCaptureKit) — enabled with feature "macos-system-audio"
+            #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
             start_macos_capture,
-            #[cfg(target_os = "macos")]
+            #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
             check_screen_recording_permission,
-            #[cfg(target_os = "macos")]
+            #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
             list_macos_sources,
-            #[cfg(target_os = "macos")]
+            #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
             present_macos_content_picker,
         ])
         .setup(|app| {

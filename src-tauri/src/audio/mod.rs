@@ -6,10 +6,10 @@ use std::sync::Mutex;
 use std::thread;
 use tauri::{AppHandle, Emitter};
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
 pub mod screencapturekit;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
 pub use screencapturekit::{start_macos_capture, check_screen_recording_permission, list_macos_sources, present_macos_content_picker};
 
 /// Control messages for the audio thread.
@@ -56,7 +56,7 @@ pub(crate) fn stop_capture_internal() {
     }
 
     // Also stop any active macOS ScreenCaptureKit session
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
     crate::audio::screencapturekit::stop_macos_capture();
 }
 

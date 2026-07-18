@@ -66,7 +66,8 @@ export default function StealthCopilot() {
       const sources = await invoke<any>('list_macos_sources')
       setMacosSources(sources)
     } catch (e) {
-      console.warn('Failed to list macOS sources', e)
+      console.warn('list_macos_sources not available (feature macos-system-audio not enabled or non-mac)', e)
+      setMacosSources(null)
     }
   }
 
@@ -75,7 +76,8 @@ export default function StealthCopilot() {
       await invoke('present_macos_content_picker')
       setTimeout(loadMacosSources, 1200)
     } catch (e) {
-      console.warn('Picker failed', e)
+      console.warn('present_macos_content_picker not available', e)
+      alert('Native content picker is only available when the app was built with macOS system audio support.')
     }
   }
 
@@ -84,7 +86,7 @@ export default function StealthCopilot() {
       const ok = await invoke<boolean>('check_screen_recording_permission')
       alert(ok ? 'Permission OK (or already granted)' : 'Please grant Screen Recording permission in System Settings > Privacy & Security')
     } catch (e) {
-      alert('Error checking permission: ' + e)
+      alert('Screen recording permission check is only available with macOS system audio support enabled.')
     }
   }
 
@@ -196,13 +198,24 @@ export default function StealthCopilot() {
       let res: string
 
       // Prefer native macOS ScreenCaptureKit when system audio is desired
-      // This allows capturing the other person's voice without BlackHole
+      // This allows capturing the other person's voice without BlackHole.
+      // The command only exists when the crate was compiled with --features macos-system-audio
       if (useSystemAudio) {
-        res = await invoke<string>('start_macos_capture', {
-          captureSystemAudio: true,
-          captureMicrophone: useMicWithSystem,
-          deepgramKey
-        })
+        try {
+          res = await invoke<string>('start_macos_capture', {
+            captureSystemAudio: true,
+            captureMicrophone: useMicWithSystem,
+            deepgramKey
+          })
+        } catch (e: any) {
+          // Fallback if the native command is not available (feature not enabled or non-mac)
+          console.warn('start_macos_capture not available, falling back to mic-only:', e)
+          res = await invoke<string>('start_capture', {
+            deviceName: selectedDevice || null,
+            deepgramKey
+          })
+          setStatus('Native system audio unavailable — using mic only. ' + (res || ''))
+        }
       } else {
         res = await invoke<string>('start_capture', {
           deviceName: selectedDevice || null,
