@@ -6,9 +6,9 @@ export interface LanguageOption {
 }
 
 export const LANGUAGE_OPTIONS: LanguageOption[] = [
-  { code: 'en-US', label: 'English (United States)' },
   { code: 'zh-CN', label: '简体中文' },
   { code: 'zh-TW', label: '繁體中文' },
+  { code: 'en-US', label: 'English (United States)' },
 ]
 
-export const DEFAULT_LANGUAGE: SupportedLanguage = 'en-US'
+export const DEFAULT_LANGUAGE: SupportedLanguage = 'zh-CN'

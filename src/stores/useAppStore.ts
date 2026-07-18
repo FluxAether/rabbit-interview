@@ -69,15 +69,15 @@ export const useAppStore = create<AppState>((set) => ({
     launchAtStartup: true,
     stealthEnabled: true,
     aiModel: 'groq-llama-3.1',
-    language: 'en-US' as const,
+    language: 'zh-CN' as const,
   },
 
   copilot: {
     isActive: false,
-    currentQuestion: 'Tell me about yourself.',
+    currentQuestion: '请介绍一下你自己。',
     suggestions: [
-      { id: 1, text: 'Situation: Set clear context of the project.', category: 'STAR' },
-      { id: 2, text: 'Task: Describe your specific responsibility.', category: 'STAR' },
+      { id: 1, text: '情境：清晰描述项目背景。', category: 'STAR' },
+      { id: 2, text: '任务：说明你的具体职责。', category: 'STAR' },
     ],
     amplitude: 0,
     isStealth: true,

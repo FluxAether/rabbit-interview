@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Mic, Volume2, Edit3, X, Shield, ExternalLink, Play, Square } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { listen, emit } from '@tauri-apps/api/event'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useAppStore } from '../stores/useAppStore'
 import { generateSuggestions, startDeepgramStream, sendAudioChunk, closeDeepgramStream } from '../lib/llm'
@@ -154,8 +154,16 @@ export default function StealthCopilot() {
       resetRecording()
       sampleRateRef.current = 16000 // will be overwritten by audio-config event shortly
 
+      // Pass deepgram key to allow optional Rust-side forwarding (future enhancement / direct connection)
+      let deepgramKey: string | null = null
+      try {
+        const { loadApiKeys } = await import('../lib/keyStore')
+        const keys = await loadApiKeys()
+        deepgramKey = keys.deepgram || null
+      } catch {}
       const res = await invoke<string>('start_capture', {
-        deviceName: selectedDevice || null
+        deviceName: selectedDevice || null,
+        deepgramKey
       })
       setStatus(res)
       setIsCapturing(true)
@@ -179,6 +187,7 @@ export default function StealthCopilot() {
           if (text) {
             if (isFinal) {
               updateCopilotQuestion?.(text)
+              emit('copilot-question', text).catch(() => {})
             }
             // IMPORTANT: Only call LLM on FINAL results to avoid spamming the model on every interim.
             // This was one source of excessive work.
@@ -186,7 +195,9 @@ export default function StealthCopilot() {
               generateSuggestions(text).then((sugs) => {
                 if (!isCapturingRef.current) return
                 sugs.forEach((s: string) => {
-                  addSuggestion({ text: s.startsWith('•') ? s : `• ${s}`, category: 'Deepgram + Groq' })
+                  const sugText = s.startsWith('•') ? s : `• ${s}`
+                  addSuggestion({ text: sugText, category: 'Deepgram + Groq' })
+                  emit('copilot-suggestion', { text: sugText }).catch(() => {})
                 })
               })
             }
@@ -212,6 +223,17 @@ export default function StealthCopilot() {
         // Accumulate in ref only (no re-renders, prevents UI freeze)
         const wasEmpty = recordedChunksRef.current.length === 0
         recordedChunksRef.current.push(Array.from(chunk))
+
+        // BOUND MEMORY: keep only last ~15 minutes of audio (important fix for long sessions)
+        const MAX_DURATION_SEC = 15 * 60;
+        const rate = sampleRateRef.current || 16000;
+        const maxSamples = rate * MAX_DURATION_SEC;
+        let totalSamples = recordedChunksRef.current.reduce((sum, c) => sum + c.length, 0);
+        while (totalSamples > maxSamples && recordedChunksRef.current.length > 0) {
+          const removed = recordedChunksRef.current.shift()!;
+          totalSamples -= removed.length;
+        }
+
         if (wasEmpty) {
           // Light state update so Export button enables promptly during capture
           setHasLiveRecording(true)

@@ -3,7 +3,7 @@ import { Sun, Mic, Keyboard, Shield } from 'lucide-react'
 import { useAppStore } from '../stores/useAppStore'
 import { invoke } from '@tauri-apps/api/core'
 import { useTranslation } from '../i18n'
-import { LANGUAGE_OPTIONS, SupportedLanguage } from '../i18n/types'
+import { LANGUAGE_OPTIONS, SupportedLanguage, DEFAULT_LANGUAGE } from '../i18n/types'
 
 type SettingsTab = 'general' | 'ai' | 'stealth' | 'audio' | 'shortcuts' | 'privacy'
 
@@ -25,13 +25,13 @@ export default function Settings() {
   const [launchAtStartup, setLaunchAtStartup] = useState(true)
   const [autoUpdate, setAutoUpdate] = useState(true)
   const [updateChannel, setUpdateChannel] = useState<'Stable' | 'Beta'>('Stable')
-  const [language, setLanguage] = useState<SupportedLanguage>('en-US')
+  const [language, setLanguage] = useState<SupportedLanguage>(DEFAULT_LANGUAGE)
   const [aiModel, setAiModel] = useState('groq-llama-3.1')
   const [stealth, setStealth] = useState(true)
 
   // Initialize from store
   useEffect(() => {
-    const storedLang = (settings?.language as SupportedLanguage) || 'en-US'
+    const storedLang = (settings?.language as SupportedLanguage) || DEFAULT_LANGUAGE
     setLanguage(storedLang)
   }, [settings?.language])
 

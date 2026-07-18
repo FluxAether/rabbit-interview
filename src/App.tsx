@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { emit, listen } from '@tauri-apps/api/event'
 import { 
   LayoutDashboard, 
   Rocket, 
@@ -8,7 +9,6 @@ import {
   Settings as SettingsIcon,
   Shield
 } from 'lucide-react'
-import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
@@ -20,6 +20,8 @@ import History from './pages/History'
 import Settings from './pages/Settings'
 import { useAppStore } from './stores/useAppStore'
 import { useTranslation } from './i18n'
+import { DEFAULT_LANGUAGE } from './i18n/types'
+import { startDeepgramStream, sendAudioChunk, closeDeepgramStream, generateSuggestions } from './lib/llm'
 
 export type Page = 
   | 'dashboard' 
@@ -98,11 +100,70 @@ function Sidebar({ currentPage, onNavigate }: {
 export default function App() {
   const isFloating = window.location.hash === '#copilot-floating'
   const { loadHistory, settings } = useAppStore()
-  const currentLang = (settings?.language as string) || 'en-US'
+  const currentLang = (settings?.language as string) || DEFAULT_LANGUAGE
   const t = useTranslation()
 
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
   const floatingPanelRef = useRef<HTMLDivElement>(null)
+
+  // Live data for floating window (so it can show real capture info)
+  const [floatingQuestion, setFloatingQuestion] = useState('请介绍一下你自己。')
+  const [floatingSuggestions, setFloatingSuggestions] = useState<string[]>([])
+  const [floatingAmp, setFloatingAmp] = useState(0)
+  const [floatingCapturing, setFloatingCapturing] = useState(false)
+
+  // For floating window self-contained capture support
+  const floatingDeepgramRef = useRef<any>(null)
+  const floatingUnlistenChunkRef = useRef<any>(null)
+
+  const startFloatingCaptureSupport = async () => {
+    try {
+      // Start Deepgram for this floating view (allows standalone use)
+      const ws = await startDeepgramStream(
+        (text, isFinal) => {
+          if (text) {
+            if (isFinal) setFloatingQuestion(text)
+            emit('copilot-question', text).catch(() => {})
+            if (isFinal) {
+              generateSuggestions(text).then((sugs) => {
+                sugs.forEach((s: string) => {
+                  const sugText = s.startsWith('•') ? s : `• ${s}`
+                  setFloatingSuggestions(prev => {
+                    const next = [...prev, sugText]
+                    return next.length > 6 ? next.slice(-6) : next
+                  })
+                  emit('copilot-suggestion', { text: sugText }).catch(() => {})
+                })
+              })
+            }
+          }
+        },
+        (err) => console.error('Floating Deepgram err', err)
+      )
+      floatingDeepgramRef.current = ws
+
+      const un = await listen<number[]>('audio-chunk', (event) => {
+        if (floatingDeepgramRef.current) {
+          const chunk = new Float32Array(event.payload)
+          sendAudioChunk(floatingDeepgramRef.current, chunk)
+        }
+      })
+      floatingUnlistenChunkRef.current = un
+    } catch (e) {
+      console.warn('Floating capture support start failed', e)
+    }
+  }
+
+  const stopFloatingCaptureSupport = () => {
+    if (floatingDeepgramRef.current) {
+      closeDeepgramStream(floatingDeepgramRef.current)
+      floatingDeepgramRef.current = null
+    }
+    if (floatingUnlistenChunkRef.current) {
+      floatingUnlistenChunkRef.current().catch(() => {})
+      floatingUnlistenChunkRef.current = null
+    }
+  }
 
   // Keep <html lang> in sync with selected language
   useEffect(() => {
@@ -134,9 +195,26 @@ export default function App() {
       setCurrentPage('copilot')
     })
 
+    // Live data listeners for floating window (and any other)
+    const unlistenAmp = listen<number>('audio-amplitude', (e) => {
+      setFloatingAmp(e.payload)
+    })
+    const unlistenQ = listen<string>('copilot-question', (e) => {
+      setFloatingQuestion(e.payload)
+    })
+    const unlistenSug = listen<{text: string}>('copilot-suggestion', (e) => {
+      setFloatingSuggestions(prev => {
+        const next = [...prev, e.payload.text]
+        return next.length > 6 ? next.slice(-6) : next
+      })
+    })
+
     return () => {
       unlistenCopilot.then(f => f())
       unlistenCapture.then(f => f())
+      unlistenAmp.then(f => f()).catch(()=>{})
+      unlistenQ.then(f => f()).catch(()=>{})
+      unlistenSug.then(f => f()).catch(()=>{})
     }
   }, [])
 
@@ -150,6 +228,13 @@ export default function App() {
       return () => clearTimeout(t)
     }
   }, [isFloating])
+
+  // Cleanup floating capture support when leaving floating view
+  useEffect(() => {
+    return () => {
+      stopFloatingCaptureSupport()
+    }
+  }, [])
 
   // Minimal floating copilot-only UI (matches the exact reference image)
   if (isFloating) {
@@ -204,6 +289,7 @@ export default function App() {
                 } catch (err2) {
                   console.warn('[Copilot] destroy() failed:', err2)
                 }
+                stopFloatingCaptureSupport()
                 try {
                   // 3. Ask Rust backend to close it (most reliable for some setups)
                   await invoke('close_copilot_window')
@@ -222,19 +308,52 @@ export default function App() {
           </div>
         </div>
 
+        {/* Amplitude bar */}
+        <div className="h-1 bg-[#e2e8f0] rounded mb-3 overflow-hidden">
+          <div className="h-1 bg-[#6366f1] transition-all" style={{ width: `${Math.min(100, Math.round(floatingAmp * 140))}%` }} />
+        </div>
+
         <div className="mb-3">
           <div className="text-[10px] tracking-widest text-[#64748b] mb-1">{t('copilot.question')}</div>
-          <div className="text-[13px] leading-tight">Can you walk me through a project where you had to solve a complex problem under tight constraints?</div>
+          <div className="text-[13px] leading-tight min-h-[36px]">{floatingQuestion}</div>
         </div>
 
         <div>
           <div className="text-[10px] tracking-widest text-[#64748b] mb-1.5">{t('copilot.suggestions')}</div>
-          <div className="space-y-[3px] text-[12.5px]">
-            <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">• Situation: Briefly set the context and the challenge.</div>
-            <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">• Task: Explain your specific responsibility.</div>
-            <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">• Action: Detail the steps you took and trade-offs made.</div>
-            <div className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">• Result: Share the outcome and what you learned.</div>
+          <div className="space-y-[3px] text-[12.5px] max-h-[110px] overflow-auto">
+            {floatingSuggestions.length === 0 && (
+              <div className="text-[#64748b] text-[11px]">Start capture for live suggestions...</div>
+            )}
+            {floatingSuggestions.map((s, i) => (
+              <div key={i} className="bg-[#f8fafc] border border-[#e2e8f0] rounded-lg px-2.5 py-1">{s}</div>
+            ))}
           </div>
+        </div>
+
+        {/* Capture controls in floating */}
+        <div className="mt-3 flex gap-2">
+          <button
+            onClick={async () => {
+              try {
+                if (!floatingCapturing) {
+                  await invoke('start_capture', { deviceName: null, deepgramKey: null })
+                  setFloatingCapturing(true)
+                  startFloatingCaptureSupport()
+                } else {
+                  await invoke('stop_capture')
+                  setFloatingCapturing(false)
+                  stopFloatingCaptureSupport()
+                  setFloatingSuggestions([])
+                }
+              } catch (e) {
+                console.warn('Floating capture toggle error', e)
+              }
+            }}
+            className={`text-xs px-3 py-1 rounded ${floatingCapturing ? 'bg-red-500 text-white' : 'bg-[#6366f1] text-white'}`}
+          >
+            {floatingCapturing ? 'Stop' : 'Start Capture'}
+          </button>
+          <button onClick={() => { setFloatingSuggestions([]); setFloatingQuestion('Tell me about yourself.') }} className="text-xs px-2 py-1 border rounded">Clear</button>
         </div>
 
         <div className="absolute bottom-3 left-0 right-0 text-center text-[11px] text-[#6366f1] flex items-center justify-center gap-1">
