@@ -12,7 +12,10 @@ use screencapturekit::cm::CMSampleBuffer;
 #[cfg(target_os = "macos")]
 use screencapturekit::prelude::*;
 
-use std::sync::Mutex;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
 use tauri::{AppHandle, Emitter};
 
 use super::{stop_capture_internal, AudioConfigPayload};
@@ -28,8 +31,127 @@ static CURRENT_FILTER: once_cell::sync::Lazy<Mutex<Option<SCContentFilter>>> =
 #[derive(Clone)]
 struct AudioHandler {
     app: AppHandle,
-    // We report the configured sample rate
-    configured_rate: u32,
+    source: AudioSource,
+    mixer: Arc<Mutex<TimedAudioMixer>>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AudioSource {
+    System,
+    Microphone,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+struct MixedFrame {
+    system: Option<f32>,
+    microphone: Option<f32>,
+}
+
+#[cfg(target_os = "macos")]
+struct TimedAudioMixer {
+    system_enabled: bool,
+    microphone_enabled: bool,
+    sample_rate: u32,
+    first_system_frame: Option<i64>,
+    first_microphone_frame: Option<i64>,
+    system_progress: Option<i64>,
+    microphone_progress: Option<i64>,
+    next_frame: Option<i64>,
+    pending: BTreeMap<i64, MixedFrame>,
+}
+
+#[cfg(target_os = "macos")]
+impl TimedAudioMixer {
+    fn new(system_enabled: bool, microphone_enabled: bool, sample_rate: u32) -> Self {
+        Self {
+            system_enabled,
+            microphone_enabled,
+            sample_rate,
+            first_system_frame: None,
+            first_microphone_frame: None,
+            system_progress: None,
+            microphone_progress: None,
+            next_frame: None,
+            pending: BTreeMap::new(),
+        }
+    }
+
+    fn push(&mut self, source: AudioSource, timestamp_seconds: f64, samples: Vec<f32>) -> Vec<f32> {
+        if samples.is_empty() || !timestamp_seconds.is_finite() {
+            return Vec::new();
+        }
+
+        let start_frame = (timestamp_seconds * f64::from(self.sample_rate)).round() as i64;
+        let end_frame = start_frame + samples.len() as i64;
+
+        match source {
+            AudioSource::System => {
+                self.first_system_frame.get_or_insert(start_frame);
+                self.system_progress =
+                    Some(self.system_progress.map_or(end_frame, |p| p.max(end_frame)));
+            }
+            AudioSource::Microphone => {
+                self.first_microphone_frame.get_or_insert(start_frame);
+                self.microphone_progress = Some(
+                    self.microphone_progress
+                        .map_or(end_frame, |p| p.max(end_frame)),
+                );
+            }
+        }
+
+        for (offset, sample) in samples.into_iter().enumerate() {
+            let frame_number = start_frame + offset as i64;
+            if self.next_frame.is_some_and(|next| frame_number < next) {
+                continue;
+            }
+            let frame = self.pending.entry(frame_number).or_default();
+            match source {
+                AudioSource::System => frame.system = Some(sample),
+                AudioSource::Microphone => frame.microphone = Some(sample),
+            }
+        }
+
+        let all_sources_started = (!self.system_enabled || self.first_system_frame.is_some())
+            && (!self.microphone_enabled || self.first_microphone_frame.is_some());
+        if !all_sources_started {
+            return Vec::new();
+        }
+
+        let first_frame = match (self.system_enabled, self.microphone_enabled) {
+            (true, true) => self
+                .first_system_frame
+                .unwrap()
+                .min(self.first_microphone_frame.unwrap()),
+            (true, false) => self.first_system_frame.unwrap(),
+            (false, true) => self.first_microphone_frame.unwrap(),
+            (false, false) => return Vec::new(),
+        };
+        let next_frame = *self.next_frame.get_or_insert(first_frame);
+
+        let completed_through = match (self.system_enabled, self.microphone_enabled) {
+            (true, true) => self
+                .system_progress
+                .unwrap()
+                .min(self.microphone_progress.unwrap()),
+            (true, false) => self.system_progress.unwrap(),
+            (false, true) => self.microphone_progress.unwrap(),
+            (false, false) => return Vec::new(),
+        };
+        if completed_through <= next_frame {
+            return Vec::new();
+        }
+
+        let mut mixed = Vec::with_capacity((completed_through - next_frame) as usize);
+        for frame_number in next_frame..completed_through {
+            let frame = self.pending.remove(&frame_number).unwrap_or_default();
+            let sample = frame.system.unwrap_or(0.0) + frame.microphone.unwrap_or(0.0);
+            mixed.push(sample.clamp(-0.98, 0.98));
+        }
+        self.next_frame = Some(completed_through);
+        mixed
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -74,15 +196,70 @@ fn decode_pcm_to_mono(
         return samples;
     }
 
+    let frame_count = samples.len() / channels;
+    if frame_count == 0 {
+        return Vec::new();
+    }
+
+    let mut channel_energy = vec![0.0f32; channels];
+    for frame in samples.chunks_exact(channels) {
+        for (channel, sample) in frame.iter().enumerate() {
+            channel_energy[channel] += sample * sample;
+        }
+    }
+    let (dominant_channel, dominant_energy) = channel_energy
+        .iter()
+        .copied()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .unwrap();
+    let second_energy = channel_energy
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(channel, _)| *channel != dominant_channel)
+        .map(|(_, energy)| energy)
+        .fold(0.0f32, f32::max);
+    let use_dominant_channel = dominant_energy > 1.0e-10 && dominant_energy > second_energy * 64.0;
+
     samples
         .chunks_exact(channels)
-        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+        .map(|frame| {
+            if use_dominant_channel {
+                frame[dominant_channel]
+            } else {
+                frame.iter().sum::<f32>() / channels as f32
+            }
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn resample_linear(samples: Vec<f32>, input_rate: f64, output_rate: f64) -> Vec<f32> {
+    if samples.is_empty()
+        || input_rate <= 0.0
+        || output_rate <= 0.0
+        || (input_rate - output_rate).abs() < 1.0
+    {
+        return samples;
+    }
+
+    let output_len =
+        ((samples.len() as f64 * output_rate / input_rate).round() as usize).max(1);
+    (0..output_len)
+        .map(|index| {
+            let source_position = index as f64 * input_rate / output_rate;
+            let left = (source_position.floor() as usize).min(samples.len() - 1);
+            let right = (left + 1).min(samples.len() - 1);
+            let fraction = (source_position - left as f64) as f32;
+            samples[left] + (samples[right] - samples[left]) * fraction
+        })
         .collect()
 }
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::decode_pcm_to_mono;
+    use super::{decode_pcm_to_mono, resample_linear, AudioSource, TimedAudioMixer};
 
     #[test]
     fn downmixes_three_interleaved_channels_to_mono() {
@@ -93,17 +270,63 @@ mod tests {
             .flat_map(f32::to_le_bytes)
             .collect();
 
+        assert_eq!(decode_pcm_to_mono(&bytes, 32, true, 3), vec![0.5, -0.5]);
+    }
+
+    #[test]
+    fn averages_balanced_interleaved_channels() {
+        let frames = [[0.6f32, 0.2], [-0.2, -0.6]];
+        let bytes: Vec<u8> = frames
+            .into_iter()
+            .flatten()
+            .flat_map(f32::to_le_bytes)
+            .collect();
+
+        assert_eq!(decode_pcm_to_mono(&bytes, 32, true, 2), vec![0.4, -0.4]);
+    }
+
+    #[test]
+    fn mixes_system_and_microphone_on_the_same_timeline() {
+        let mut mixer = TimedAudioMixer::new(true, true, 48_000);
+
+        assert!(mixer
+            .push(AudioSource::System, 1.0, vec![0.2, 0.2])
+            .is_empty());
+        let mixed = mixer.push(AudioSource::Microphone, 1.0, vec![0.3, -0.3]);
+        assert_eq!(mixed.len(), 2);
+        assert!((mixed[0] - 0.5).abs() < 1.0e-6);
+        assert!((mixed[1] + 0.1).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn preserves_quiet_single_source_audio() {
+        let mut mixer = TimedAudioMixer::new(false, true, 48_000);
+
         assert_eq!(
-            decode_pcm_to_mono(&bytes, 32, true, 3),
-            vec![1.0 / 6.0, -1.0 / 6.0]
+            mixer.push(AudioSource::Microphone, 1.0, vec![0.001, -0.001]),
+            vec![0.001, -0.001]
         );
+    }
+
+    #[test]
+    fn resamples_airpods_microphone_to_the_mix_rate() {
+        let input = vec![0.25; 480];
+        let output = resample_linear(input, 24_000.0, 48_000.0);
+
+        assert_eq!(output.len(), 960);
+        assert!(output.iter().all(|sample| (*sample - 0.25).abs() < 1.0e-6));
     }
 }
 
 #[cfg(target_os = "macos")]
 impl SCStreamOutputTrait for AudioHandler {
     fn did_output_sample_buffer(&self, sample: CMSampleBuffer, of_type: SCStreamOutputType) {
-        if of_type != SCStreamOutputType::Audio && of_type != SCStreamOutputType::Microphone {
+        let source = match of_type {
+            SCStreamOutputType::Audio => AudioSource::System,
+            SCStreamOutputType::Microphone => AudioSource::Microphone,
+            _ => return,
+        };
+        if source != self.source {
             return;
         }
 
@@ -117,6 +340,10 @@ impl SCStreamOutputTrait for AudioHandler {
             .as_ref()
             .and_then(|desc| desc.audio_bits_per_channel())
             .unwrap_or(32);
+        let input_rate = format_desc
+            .as_ref()
+            .and_then(|desc| desc.audio_sample_rate())
+            .unwrap_or(48_000.0);
         let is_float = format_desc
             .as_ref()
             .is_some_and(|desc| desc.audio_is_float());
@@ -142,29 +369,23 @@ impl SCStreamOutputTrait for AudioHandler {
             return;
         }
 
-        // Apply same processing as cpal path for consistency
+        let samples = resample_linear(samples, input_rate, 48_000.0);
+
         let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+        let timestamp_seconds = sample.presentation_timestamp().as_seconds();
+        let mixed = timestamp_seconds
+            .and_then(|timestamp| {
+                self.mixer
+                    .lock()
+                    .ok()
+                    .map(|mut mixer| mixer.push(source, timestamp, samples))
+            })
+            .unwrap_or_default();
 
-        let mut processed = samples;
-        let gate = 0.015f32;
-        let target = 0.18f32;
-
-        if rms > gate {
-            let mut gain = target / rms.max(0.001);
-            gain = gain.clamp(0.5, 5.0);
-            for s in &mut processed {
-                *s = (*s * gain).clamp(-0.98, 0.98);
-            }
-        } else {
-            for s in &mut processed {
-                *s *= 0.15;
-            }
+        let _ = self.app.emit("audio-amplitude", rms.min(1.0));
+        if !mixed.is_empty() {
+            let _ = self.app.emit("audio-chunk", mixed);
         }
-
-        let display_rms = if rms > gate { rms.min(1.0) } else { 0.0 };
-
-        let _ = self.app.emit("audio-amplitude", display_rms);
-        let _ = self.app.emit("audio-chunk", processed);
     }
 }
 
@@ -201,13 +422,13 @@ pub async fn start_macos_capture(
         config
     };
 
-    let handler = AudioHandler {
-        app: app.clone(),
-        configured_rate: 48000,
-    };
+    let mixer = Arc::new(Mutex::new(TimedAudioMixer::new(
+        capture_system_audio,
+        capture_microphone,
+        48000,
+    )));
 
-    // configured_rate actively used: reported at start + available inside handler for per-buffer rate validation or logging.
-    println!("[ScreenCaptureKit] Handler initialized with rate {} Hz", handler.configured_rate);
+    println!("[ScreenCaptureKit] Handler initialized with rate 48000 Hz");
 
     // Emit config immediately (matches cpal behavior)
     let device_name = match (capture_system_audio, capture_microphone) {
@@ -228,10 +449,24 @@ pub async fn start_macos_capture(
     let mut stream = SCStream::new(&filter, &config);
 
     if capture_system_audio {
-        stream.add_output_handler(handler.clone(), SCStreamOutputType::Audio);
+        stream.add_output_handler(
+            AudioHandler {
+                app: app.clone(),
+                source: AudioSource::System,
+                mixer: mixer.clone(),
+            },
+            SCStreamOutputType::Audio,
+        );
     }
     if capture_microphone {
-        stream.add_output_handler(handler, SCStreamOutputType::Microphone);
+        stream.add_output_handler(
+            AudioHandler {
+                app: app.clone(),
+                source: AudioSource::Microphone,
+                mixer,
+            },
+            SCStreamOutputType::Microphone,
+        );
     }
 
     stream
