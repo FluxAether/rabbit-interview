@@ -20,7 +20,13 @@ use tauri::{AppHandle, Emitter};
 
 use super::{stop_capture_internal, AudioConfigPayload};
 
-static SCK_STREAM: once_cell::sync::Lazy<Mutex<Option<SCStream>>> =
+struct ActiveCapture {
+    stream: SCStream,
+    mixer: Arc<Mutex<TimedAudioMixer>>,
+    app: AppHandle,
+}
+
+static SCK_CAPTURE: once_cell::sync::Lazy<Mutex<Option<ActiveCapture>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
 
 #[cfg(target_os = "macos")]
@@ -113,17 +119,23 @@ impl TimedAudioMixer {
             }
         }
 
-        let all_sources_started = (!self.system_enabled || self.first_system_frame.is_some())
-            && (!self.microphone_enabled || self.first_microphone_frame.is_some());
-        if !all_sources_started {
-            return Vec::new();
-        }
-
+        let max_source_lag = i64::from((self.sample_rate / 10).max(1));
         let first_frame = match (self.system_enabled, self.microphone_enabled) {
-            (true, true) => self
-                .first_system_frame
-                .unwrap()
-                .min(self.first_microphone_frame.unwrap()),
+            (true, true) => match (self.first_system_frame, self.first_microphone_frame) {
+                (Some(system), Some(microphone)) => system.min(microphone),
+                (Some(system), None)
+                    if self.system_progress.unwrap_or(system) - system >= max_source_lag =>
+                {
+                    system
+                }
+                (None, Some(microphone))
+                    if self.microphone_progress.unwrap_or(microphone) - microphone
+                        >= max_source_lag =>
+                {
+                    microphone
+                }
+                _ => return Vec::new(),
+            },
             (true, false) => self.first_system_frame.unwrap(),
             (false, true) => self.first_microphone_frame.unwrap(),
             (false, false) => return Vec::new(),
@@ -131,10 +143,14 @@ impl TimedAudioMixer {
         let next_frame = *self.next_frame.get_or_insert(first_frame);
 
         let completed_through = match (self.system_enabled, self.microphone_enabled) {
-            (true, true) => self
-                .system_progress
-                .unwrap()
-                .min(self.microphone_progress.unwrap()),
+            (true, true) => match (self.system_progress, self.microphone_progress) {
+                (Some(system), Some(microphone)) => system
+                    .min(microphone)
+                    .max(system.max(microphone).saturating_sub(max_source_lag)),
+                (Some(system), None) => system.saturating_sub(max_source_lag),
+                (None, Some(microphone)) => microphone.saturating_sub(max_source_lag),
+                (None, None) => return Vec::new(),
+            },
             (true, false) => self.system_progress.unwrap(),
             (false, true) => self.microphone_progress.unwrap(),
             (false, false) => return Vec::new(),
@@ -143,10 +159,43 @@ impl TimedAudioMixer {
             return Vec::new();
         }
 
+        self.drain_until(completed_through)
+    }
+
+    fn flush(&mut self) -> Vec<f32> {
+        if self.next_frame.is_none() {
+            self.next_frame = match (self.first_system_frame, self.first_microphone_frame) {
+                (Some(system), Some(microphone)) => Some(system.min(microphone)),
+                (Some(system), None) => Some(system),
+                (None, Some(microphone)) => Some(microphone),
+                (None, None) => None,
+            };
+        }
+        let completed_through = match (self.system_progress, self.microphone_progress) {
+            (Some(system), Some(microphone)) => system.max(microphone),
+            (Some(system), None) => system,
+            (None, Some(microphone)) => microphone,
+            (None, None) => return Vec::new(),
+        };
+        self.drain_until(completed_through)
+    }
+
+    fn drain_until(&mut self, completed_through: i64) -> Vec<f32> {
+        let Some(next_frame) = self.next_frame else {
+            return Vec::new();
+        };
+        if completed_through <= next_frame {
+            return Vec::new();
+        }
         let mut mixed = Vec::with_capacity((completed_through - next_frame) as usize);
         for frame_number in next_frame..completed_through {
             let frame = self.pending.remove(&frame_number).unwrap_or_default();
-            let sample = frame.system.unwrap_or(0.0) + frame.microphone.unwrap_or(0.0);
+            let sample = match (frame.system, frame.microphone) {
+                (Some(system), Some(microphone)) => (system + microphone) * 0.5,
+                (Some(system), None) => system,
+                (None, Some(microphone)) => microphone,
+                (None, None) => 0.0,
+            };
             mixed.push(sample.clamp(-0.98, 0.98));
         }
         self.next_frame = Some(completed_through);
@@ -166,7 +215,11 @@ fn decode_pcm_to_mono(
             .chunks_exact(4)
             .map(|chunk| {
                 let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                if sample.is_finite() { sample } else { 0.0 }
+                if sample.is_finite() {
+                    sample
+                } else {
+                    0.0
+                }
             })
             .collect()
     } else if bits_per_channel == 16 && bytes.len() % 2 == 0 {
@@ -179,7 +232,11 @@ fn decode_pcm_to_mono(
             .chunks_exact(4)
             .map(|chunk| {
                 let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                if sample.is_finite() { sample } else { 0.0 }
+                if sample.is_finite() {
+                    sample
+                } else {
+                    0.0
+                }
             })
             .collect()
     } else if bytes.len() % 2 == 0 {
@@ -235,21 +292,34 @@ fn decode_pcm_to_mono(
 }
 
 #[cfg(target_os = "macos")]
-fn resample_linear(samples: Vec<f32>, input_rate: f64, output_rate: f64) -> Vec<f32> {
+fn resample_linear(
+    samples: Vec<f32>,
+    input_rate: f64,
+    output_rate: f64,
+    timestamp_seconds: f64,
+) -> Vec<f32> {
     if samples.is_empty()
         || input_rate <= 0.0
         || output_rate <= 0.0
+        || !timestamp_seconds.is_finite()
         || (input_rate - output_rate).abs() < 1.0
     {
         return samples;
     }
 
-    let output_len =
-        ((samples.len() as f64 * output_rate / input_rate).round() as usize).max(1);
+    let first_output_frame = (timestamp_seconds * output_rate).round();
+    let end_timestamp = timestamp_seconds + samples.len() as f64 / input_rate;
+    let output_len = ((end_timestamp * output_rate).round() - first_output_frame).max(1.0) as usize;
     (0..output_len)
         .map(|index| {
-            let source_position = index as f64 * input_rate / output_rate;
-            let left = (source_position.floor() as usize).min(samples.len() - 1);
+            let output_timestamp = (first_output_frame + index as f64) / output_rate;
+            let source_position = (output_timestamp - timestamp_seconds) * input_rate;
+            let last = samples.len() - 1;
+            if last > 0 && source_position > last as f64 {
+                let fraction = (source_position - last as f64) as f32;
+                return samples[last] + (samples[last] - samples[last - 1]) * fraction;
+            }
+            let left = (source_position.floor() as usize).min(last);
             let right = (left + 1).min(samples.len() - 1);
             let fraction = (source_position - left as f64) as f32;
             samples[left] + (samples[right] - samples[left]) * fraction
@@ -294,8 +364,29 @@ mod tests {
             .is_empty());
         let mixed = mixer.push(AudioSource::Microphone, 1.0, vec![0.3, -0.3]);
         assert_eq!(mixed.len(), 2);
-        assert!((mixed[0] - 0.5).abs() < 1.0e-6);
-        assert!((mixed[1] + 0.1).abs() < 1.0e-6);
+        assert!((mixed[0] - 0.25).abs() < 1.0e-6);
+        assert!((mixed[1] + 0.05).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn continues_when_one_source_stalls() {
+        let mut mixer = TimedAudioMixer::new(true, true, 100);
+
+        let mixed = mixer.push(AudioSource::System, 0.0, vec![0.2; 20]);
+
+        assert_eq!(mixed, vec![0.2; 10]);
+        assert_eq!(mixer.flush(), vec![0.2; 10]);
+    }
+
+    #[test]
+    fn reserves_headroom_when_sources_overlap() {
+        let mut mixer = TimedAudioMixer::new(true, true, 100);
+
+        assert!(mixer.push(AudioSource::System, 0.0, vec![0.8]).is_empty());
+        assert_eq!(
+            mixer.push(AudioSource::Microphone, 0.0, vec![0.8]),
+            vec![0.8]
+        );
     }
 
     #[test]
@@ -311,10 +402,26 @@ mod tests {
     #[test]
     fn resamples_airpods_microphone_to_the_mix_rate() {
         let input = vec![0.25; 480];
-        let output = resample_linear(input, 24_000.0, 48_000.0);
+        let output = resample_linear(input, 24_000.0, 48_000.0, 0.0);
 
         assert_eq!(output.len(), 960);
         assert!(output.iter().all(|sample| (*sample - 0.25).abs() < 1.0e-6));
+    }
+
+    #[test]
+    fn interpolates_the_last_upsampled_frame() {
+        let input: Vec<f32> = (0..480).map(|sample| sample as f32 / 480.0).collect();
+        let output = resample_linear(input, 24_000.0, 48_000.0, 0.0);
+
+        assert!((output[959] - 479.5 / 480.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn keeps_fractional_resampling_aligned_to_timestamps() {
+        let first = resample_linear(vec![0.0; 512], 44_100.0, 48_000.0, 0.0);
+        let second = resample_linear(vec![0.0; 512], 44_100.0, 48_000.0, 512.0 / 44_100.0);
+
+        assert_eq!(first.len() + second.len(), 1_115);
     }
 }
 
@@ -369,10 +476,15 @@ impl SCStreamOutputTrait for AudioHandler {
             return;
         }
 
-        let samples = resample_linear(samples, input_rate, 48_000.0);
+        let timestamp_seconds = sample.presentation_timestamp().as_seconds();
+        let samples = resample_linear(
+            samples,
+            input_rate,
+            48_000.0,
+            timestamp_seconds.unwrap_or_default(),
+        );
 
         let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
-        let timestamp_seconds = sample.presentation_timestamp().as_seconds();
         let mixed = timestamp_seconds
             .and_then(|timestamp| {
                 self.mixer
@@ -463,7 +575,7 @@ pub async fn start_macos_capture(
             AudioHandler {
                 app: app.clone(),
                 source: AudioSource::Microphone,
-                mixer,
+                mixer: mixer.clone(),
             },
             SCStreamOutputType::Microphone,
         );
@@ -474,8 +586,12 @@ pub async fn start_macos_capture(
         .map_err(|e| format!("start_capture failed: {:?}", e))?;
 
     {
-        let mut guard = SCK_STREAM.lock().unwrap();
-        *guard = Some(stream);
+        let mut guard = SCK_CAPTURE.lock().unwrap();
+        *guard = Some(ActiveCapture {
+            stream,
+            mixer,
+            app: app.clone(),
+        });
     }
 
     let desc = if capture_system_audio && capture_microphone {
@@ -492,8 +608,14 @@ pub async fn start_macos_capture(
 
 #[cfg(target_os = "macos")]
 fn stop_macos_capture_internal() {
-    if let Some(stream) = SCK_STREAM.lock().unwrap().take() {
-        let _ = stream.stop_capture();
+    if let Some(capture) = SCK_CAPTURE.lock().unwrap().take() {
+        let _ = capture.stream.stop_capture();
+        if let Ok(mut mixer) = capture.mixer.lock() {
+            let tail = mixer.flush();
+            if !tail.is_empty() {
+                let _ = capture.app.emit("audio-chunk", tail);
+            }
+        }
         println!("[ScreenCaptureKit] Stopped");
     }
 }
@@ -543,7 +665,10 @@ pub async fn list_macos_sources() -> Result<serde_json::Value, String> {
         .take(30) // limit for UI
         .map(|w| {
             let title = w.title().unwrap_or_else(|| "Untitled Window".to_string());
-            let app = w.owning_application().map(|a| a.application_name()).unwrap_or_else(|| "".to_string());
+            let app = w
+                .owning_application()
+                .map(|a| a.application_name())
+                .unwrap_or_else(|| "".to_string());
             serde_json::json!({
                 "id": format!("window-{}", w.window_id()),
                 "type": "window",
@@ -579,28 +704,37 @@ pub async fn list_macos_sources() -> Result<serde_json::Value, String> {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn present_macos_content_picker(app: AppHandle) -> Result<String, String> {
-    use screencapturekit::content_sharing_picker::{SCContentSharingPicker, SCContentSharingPickerConfiguration, SCPickerOutcome};
+    use screencapturekit::content_sharing_picker::{
+        SCContentSharingPicker, SCContentSharingPickerConfiguration, SCPickerOutcome,
+    };
 
     let config = SCContentSharingPickerConfiguration::new();
     // We can customize modes here if wanted, e.g. allow SingleWindow + SingleDisplay
 
-    SCContentSharingPicker::show(&config, move |outcome| {
-        match outcome {
-            SCPickerOutcome::Picked(result) => {
-                let filter = result.filter();
-                {
-                    let mut guard = CURRENT_FILTER.lock().unwrap();
-                    *guard = Some(filter);
-                }
-                let _ = app.emit("macos-source-picked", serde_json::json!({ "success": true }));
-                println!("[ScreenCaptureKit] Content picked via native picker");
+    SCContentSharingPicker::show(&config, move |outcome| match outcome {
+        SCPickerOutcome::Picked(result) => {
+            let filter = result.filter();
+            {
+                let mut guard = CURRENT_FILTER.lock().unwrap();
+                *guard = Some(filter);
             }
-            SCPickerOutcome::Cancelled => {
-                let _ = app.emit("macos-source-picked", serde_json::json!({ "cancelled": true }));
-            }
-            SCPickerOutcome::Error(e) => {
-                let _ = app.emit("macos-source-picked", serde_json::json!({ "error": e.to_string() }));
-            }
+            let _ = app.emit(
+                "macos-source-picked",
+                serde_json::json!({ "success": true }),
+            );
+            println!("[ScreenCaptureKit] Content picked via native picker");
+        }
+        SCPickerOutcome::Cancelled => {
+            let _ = app.emit(
+                "macos-source-picked",
+                serde_json::json!({ "cancelled": true }),
+            );
+        }
+        SCPickerOutcome::Error(e) => {
+            let _ = app.emit(
+                "macos-source-picked",
+                serde_json::json!({ "error": e.to_string() }),
+            );
         }
     });
 
