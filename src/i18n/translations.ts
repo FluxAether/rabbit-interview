@@ -88,8 +88,8 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'settings.aiModel': 'AI Model',
     'settings.aiModel.current': 'Current model',
     'settings.aiModel.lowLatency': 'Lower latency recommended for real-time Copilot.',
-    'settings.apiKeys': 'API Keys (localStorage - for development)',
-    'settings.apiKeys.help': 'Reload app after setting keys. Use Settings for production secure storage.',
+    'settings.apiKeys': 'API Keys',
+    'settings.apiKeys.help': 'Keys are saved immediately in the app data store. Leave a configured field blank to keep its current key.',
     'settings.stealth.title': 'Stealth Mode',
     'settings.stealth.desc': 'Hide from screen recordings & screen sharing (where supported)',
     'settings.stealth.note': 'On macOS full system stealth has limitations. Use the floating utility window + hotkey for best results.',
@@ -139,6 +139,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'history.search': 'Search by job role or company...',
     'history.empty': 'No records yet. Complete a Mock Interview or Copilot session.',
     'history.overall': 'Overall Score',
+    'history.notScored': 'Not scored',
     'history.replayModal.title': 'Replay',
     'history.replayModal.duration': 'Duration',
     'history.transcriptPlaceholder': 'Full transcript would play here synchronized with audio.',
@@ -195,6 +196,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.stopCapture': 'Stop',
     'copilot.clear': 'Clear',
     'copilot.suggestions.emptyShort': 'Start capture for live suggestions...',
+    'copilot.question.empty': 'Waiting for an interviewer question...',
     'copilot.defaultQuestion': 'Tell me about yourself.',
 
     // Feedback labels (used in mock)
@@ -295,8 +297,8 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'settings.aiModel': 'AI 模型',
     'settings.aiModel.current': '当前模型',
     'settings.aiModel.lowLatency': '实时助手推荐使用低延迟模型。',
-    'settings.apiKeys': 'API 密钥（localStorage - 仅开发用）',
-    'settings.apiKeys.help': '设置密钥后请重新加载应用。生产环境请使用安全存储。',
+    'settings.apiKeys': 'API 密钥',
+    'settings.apiKeys.help': '密钥会立即保存到应用数据目录；已配置的输入框留空不会清除现有密钥。',
     'settings.stealth.title': '隐形模式',
     'settings.stealth.desc': '在录屏和屏幕共享中隐藏（若支持）',
     'settings.stealth.note': 'macOS 下系统级隐形存在限制。建议使用浮动工具窗口 + 快捷键获得最佳效果。',
@@ -346,6 +348,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'history.search': '按职位或公司搜索...',
     'history.empty': '暂无记录。请完成一次模拟面试或助手会话。',
     'history.overall': '总分',
+    'history.notScored': '未评分',
     'history.replayModal.title': '回放',
     'history.replayModal.duration': '时长',
     'history.transcriptPlaceholder': '完整转录文本将与音频同步播放。',
@@ -402,6 +405,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.stopCapture': '停止',
     'copilot.clear': '清除',
     'copilot.suggestions.emptyShort': '开始捕获以获取实时建议...',
+    'copilot.question.empty': '正在等待面试官问题...',
     'copilot.defaultQuestion': '请介绍一下你自己。',
 
     // Feedback labels
@@ -528,6 +532,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'history.search': '依職位或公司搜尋...',
     'history.empty': '尚無記錄。請完成一次模擬面試或助手會話。',
     'history.overall': '總分',
+    'history.notScored': '未評分',
 
     'resume.title': 'ResumeAI 優化',
     'resume.badge': 'AI 驅動',
@@ -570,6 +575,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.startCapture': '開始擷取',
     'copilot.stopCapture': '停止',
     'copilot.clear': '清除',
+    'copilot.question.empty': '正在等待面試官問題...',
     'copilot.defaultQuestion': '請介紹一下你自己。',
 
     'feedback.clarity': '清晰度',

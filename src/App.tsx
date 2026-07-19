@@ -24,6 +24,7 @@ import { DEFAULT_LANGUAGE } from './i18n/types'
 import { startDeepgramStream, sendAudioChunk, closeDeepgramStream, generateSuggestions } from './lib/llm'
 import { loadAppSettings } from './lib/settingsStore'
 import { checkScreenRecordingPermission, openScreenRecordingSettings, openMicrophoneSettings, tryRequestMicrophone } from './lib/permissions'
+import { loadHistory as loadInterviewHistory } from './lib/db'
 
 // Extracted rate-fix logic (modeled on buildExportWav) so it can be unit-driven in verification
 // and the real closure body executes when called from the listener.
@@ -128,8 +129,7 @@ export default function App() {
   const floatingPanelRef = useRef<HTMLDivElement>(null)
 
   // Live data for floating window (so it can show real capture info)
-  // Use t() via lazy initializer so initial value respects current language / 'copilot.defaultQuestion' key (fixes hardcoded Chinese i18n bug)
-  const [floatingQuestion, setFloatingQuestion] = useState(() => t('copilot.defaultQuestion'))
+  const [floatingQuestion, setFloatingQuestion] = useState('')
   const [floatingSuggestions, setFloatingSuggestions] = useState<string[]>([])
   const [floatingAmp, setFloatingAmp] = useState(0)
   const [floatingCapturing, setFloatingCapturing] = useState(false)
@@ -140,6 +140,9 @@ export default function App() {
   const floatingUnlistenChunkRef = useRef<any>(null)
   const floatingRateFixUnlistenRef = useRef<(() => void) | null>(null)
   const floatingAmpUnlistenRef = useRef<(() => void) | null>(null)
+  const floatingErrorUnlistenRef = useRef<(() => void) | null>(null)
+  const floatingToggleRef = useRef<() => Promise<void>>(async () => {})
+  const floatingOperationRef = useRef(false)
   // Recording accumulation for floating capture path (so export / recording is exercised when starting from detached window)
   const floatingRecordedChunksRef = useRef<number[][]>([]) as React.MutableRefObject<number[][]>
 
@@ -207,19 +210,26 @@ export default function App() {
       })
       floatingAmpUnlistenRef.current = ampUn
 
+      const errorUn = await listen<string>('audio-error', (event) => {
+        floatingCapturingRef.current = false
+        setFloatingCapturing(false)
+        setFloatingQuestion(event.payload)
+        stopFloatingCaptureSupport()
+        invoke('stop_capture').catch(() => {})
+        invoke('stop_macos_capture').catch(() => {})
+      })
+      floatingErrorUnlistenRef.current = errorUn
+
       // Wire audio-config rateFix listener (BEFORE invoke in caller) so transcription works after rate correction (SCK 48k etc).
       const rateFixUnlisten = await listen<{ sample_rate?: number }>('audio-config', async (ev) => {
         await handleAudioConfigRateFix(ev, floatingDeepgramRef, startFloatingDeepgram, initialRate)
       })
       floatingRateFixUnlistenRef.current = rateFixUnlisten
 
-      // Safety auto-clean for very long floating sessions
-      const autoCleanup = setTimeout(() => {
-        try { rateFixUnlisten() } catch {}
-      }, 300000)
-      ;(floatingRateFixUnlistenRef as any)._autoCleanup = autoCleanup
     } catch (e) {
       console.warn('Floating capture support start failed', e)
+      stopFloatingCaptureSupport()
+      throw e
     }
   }
 
@@ -239,19 +249,110 @@ export default function App() {
     }
     if (floatingRateFixUnlistenRef.current) {
       try { floatingRateFixUnlistenRef.current() } catch {}
-      const ac = (floatingRateFixUnlistenRef as any)._autoCleanup
-      if (ac) clearTimeout(ac)
       floatingRateFixUnlistenRef.current = null
     }
     if (floatingAmpUnlistenRef.current) {
       try { floatingAmpUnlistenRef.current() } catch {}
       floatingAmpUnlistenRef.current = null
     }
+    if (floatingErrorUnlistenRef.current) {
+      try { floatingErrorUnlistenRef.current() } catch {}
+      floatingErrorUnlistenRef.current = null
+    }
     // Clear any floating recording accumulation for this session
     if (floatingRecordedChunksRef.current) {
       floatingRecordedChunksRef.current = []
     }
   }
+
+  const stopFloatingCapture = async () => {
+    floatingCapturingRef.current = false
+    setFloatingCapturing(false)
+    await invoke('stop_capture').catch(() => {})
+    await invoke('stop_macos_capture').catch(() => {})
+    stopFloatingCaptureSupport()
+    setFloatingSuggestions([])
+  }
+
+  const startFloatingCapture = async (): Promise<boolean> => {
+    let deepgramKey: string | null = null
+    let useSystemAudio = true
+    let useMic = true
+
+    try {
+      const { loadApiKeys } = await import('./lib/keyStore')
+      const keys = await loadApiKeys()
+      deepgramKey = keys.deepgram || null
+    } catch {}
+    try {
+      const saved = await loadAppSettings()
+      if (typeof saved.useSystemAudio === 'boolean') useSystemAudio = saved.useSystemAudio
+      if (typeof saved.useMicWithSystem === 'boolean') useMic = saved.useMicWithSystem
+    } catch {}
+
+    if (useSystemAudio && !(await checkScreenRecordingPermission())) {
+      await openScreenRecordingSettings()
+      setFloatingQuestion(t('copilot.permInstruction'))
+      return false
+    }
+    if ((!useSystemAudio || useMic) && !(await tryRequestMicrophone())) {
+      await openMicrophoneSettings()
+      setFloatingQuestion(t('copilot.micPermInstruction') || t('copilot.permInstruction'))
+      return false
+    }
+
+    const initialRate = useSystemAudio ? 48000 : 16000
+    try {
+      await startFloatingCaptureSupport(initialRate)
+
+      const master = window as any
+      master.__resetStealthMasterRecording?.()
+      if (master.__stealthMasterRecording?.sampleRate) {
+        master.__stealthMasterRecording.sampleRate.current = initialRate
+      }
+
+      let started = false
+      if (useSystemAudio) {
+        try {
+          await invoke<string>('start_macos_capture', {
+            captureSystemAudio: true,
+            captureMicrophone: useMic,
+          })
+          started = true
+        } catch (e) {
+          const message = String(e || '').toLowerCase()
+          if (/permission|screen|denied|access/.test(message)) {
+            await openScreenRecordingSettings()
+            throw new Error(t('copilot.permInstruction'))
+          }
+          console.warn('[Floating] start_macos_capture unavailable, fallback to microphone:', e)
+        }
+      }
+      if (!started) {
+        await invoke<string>('start_capture', { deviceName: null, deepgramKey })
+      }
+
+      floatingCapturingRef.current = true
+      setFloatingCapturing(true)
+      return true
+    } catch (e) {
+      await stopFloatingCapture()
+      setFloatingQuestion(String((e as any)?.message || e))
+      throw e
+    }
+  }
+
+  const toggleFloatingCapture = async () => {
+    if (floatingOperationRef.current) return
+    floatingOperationRef.current = true
+    try {
+      if (floatingCapturingRef.current) await stopFloatingCapture()
+      else await startFloatingCapture()
+    } finally {
+      floatingOperationRef.current = false
+    }
+  }
+  floatingToggleRef.current = toggleFloatingCapture
 
   // Keep <html lang> in sync with selected language
   useEffect(() => {
@@ -322,10 +423,9 @@ export default function App() {
   ;(window as any).__resetStealthMasterRecording = resetMasterRecording
 
   useEffect(() => {
-    // Load history once
-    invoke<any[]>('get_history').then((data) => {
-      if (data && data.length) loadHistory(data)
-    }).catch(() => {})
+    loadInterviewHistory().then(loadHistory).catch((e) => {
+      console.warn('Failed to load interview history', e)
+    })
 
     // Load persisted app settings (theme, aiModel, sttModel, language, etc.)
     loadAppSettings().then((saved) => {
@@ -350,54 +450,7 @@ export default function App() {
     const unlistenCapture = listen('toggle-capture', () => {
       const hash = window.location.hash
       if (hash === '#copilot-floating') {
-        // Drive floating capture from hotkey inside the detached window (previously no handler)
-        ;(async () => {
-          try {
-            const isCapt = floatingCapturingRef.current
-            if (!isCapt) {
-              // Load prefs for consistency with button path (useSystemAudio relevant)
-              let deepgramKey: string | null = null
-              let useSys = true
-              let useMic = true
-              try {
-                const { loadApiKeys } = await import('./lib/keyStore')
-                const keys = await loadApiKeys()
-                deepgramKey = keys.deepgram || null
-              } catch {}
-              try {
-                const { loadAppSettings } = await import('./lib/settingsStore')
-                const s = await loadAppSettings()
-                if (typeof s.useSystemAudio === 'boolean') useSys = s.useSystemAudio
-                if (typeof s.useMicWithSystem === 'boolean') useMic = s.useMicWithSystem
-              } catch {}
-              const rate = useSys ? 48000 : 16000
-
-              setFloatingCapturing(true)
-              await startFloatingCaptureSupport(rate)  // await: ensure rateFix + chunk listeners subscribed before invoke emits audio-config
-
-              // Per-session reset + rate for master (consistent with button path)
-              const w = window as any
-              if (w.__resetStealthMasterRecording) w.__resetStealthMasterRecording()
-              if (w.__stealthMasterRecording?.sampleRate) w.__stealthMasterRecording.sampleRate.current = rate
-
-              if (useSys) {
-                try {
-                  await invoke<string>('start_macos_capture', { capture_system_audio: true, capture_microphone: useMic, deepgram_key: deepgramKey })
-                } catch {
-                  await invoke<string>('start_capture', { deviceName: null, deepgramKey })
-                }
-              } else {
-                await invoke<string>('start_capture', { deviceName: null, deepgramKey })
-              }
-            } else {
-              await invoke('stop_capture').catch(() => {})
-              try { await invoke('stop_macos_capture').catch(() => {}) } catch {}
-              setFloatingCapturing(false)
-              stopFloatingCaptureSupport()
-              setFloatingSuggestions([])
-            }
-          } catch (e) { console.warn('floating hotkey toggle error', e) }
-        })()
+        floatingToggleRef.current().catch((e) => console.warn('floating hotkey toggle error', e))
       } else if (currentPageRef.current === 'copilot') {
         // main copilot page listener (StealthCopilot) will toggle
       } else {
@@ -444,6 +497,8 @@ export default function App() {
   useEffect(() => {
     return () => {
       stopFloatingCaptureSupport()
+      invoke('stop_capture').catch(() => {})
+      invoke('stop_macos_capture').catch(() => {})
     }
   }, [])
 
@@ -469,9 +524,7 @@ export default function App() {
         onKeyDown={async (e) => {
           if (e.key === 'Escape') {
             console.log('[Copilot] Escape pressed')
-            stopFloatingCaptureSupport()
-            await invoke('stop_capture').catch(() => {})
-            try { await invoke('stop_macos_capture').catch(() => {}) } catch {}
+            await stopFloatingCapture()
             try { await getCurrentWindow().close() } catch {}
             try { await invoke('close_copilot_window') } catch {}
             window.close()
@@ -486,10 +539,8 @@ export default function App() {
             </div>
             <span className="font-semibold tracking-tight">{t('copilot.floating.title')}</span>
           </div>
-          {/* Controls are explicitly non-draggable and have dedicated click handlers */}
+          {/* Close is explicitly non-draggable and stops capture before closing. */}
           <div className="flex items-center gap-3 text-[#64748b]">
-            <span className="cursor-pointer select-none" data-tauri-drag-region="false">📈</span>
-            <span className="cursor-pointer select-none" data-tauri-drag-region="false">✎</span>
             <button 
               type="button"
               className="cursor-pointer hover:text-[#334155] px-1.5 py-0.5 rounded hover:bg-[#f1f5f9] select-none text-base leading-none" 
@@ -498,10 +549,7 @@ export default function App() {
                 e.stopPropagation()
                 e.preventDefault()
                 console.log('[Copilot] Close button clicked')
-                // Always stop capture first on button close (AC2 + checklist: no leaks). No early returns before cleanup.
-                stopFloatingCaptureSupport()
-                await invoke('stop_capture').catch(() => {})
-                try { await invoke('stop_macos_capture').catch(() => {}) } catch {}
+                await stopFloatingCapture()
                 const win = getCurrentWindow()
                 try {
                   await win.close()
@@ -536,7 +584,9 @@ export default function App() {
 
         <div className="mb-3">
           <div className="text-[10px] tracking-widest text-[#64748b] mb-1">{t('copilot.question')}</div>
-          <div className="text-[13px] leading-tight min-h-[36px]">{floatingQuestion}</div>
+          <div className="text-[13px] leading-tight min-h-[36px]">
+            {floatingQuestion || <span className="text-[#64748b] text-[11px]">{t('copilot.question.empty')}</span>}
+          </div>
         </div>
 
         <div>
@@ -554,102 +604,12 @@ export default function App() {
         {/* Capture controls in floating */}
         <div className="mt-3 flex gap-2">
           <button
-            onClick={async () => {
-              try {
-                if (!floatingCapturing) {
-                  // Load real deepgram key + prefs
-                  let deepgramKey: string | null = null
-                  let useSys = true
-                  let useMic = true
-                  try {
-                    const { loadApiKeys } = await import('./lib/keyStore')
-                    const keys = await loadApiKeys()
-                    deepgramKey = keys.deepgram || null
-                  } catch {}
-                  try {
-                    const { loadAppSettings } = await import('./lib/settingsStore')
-                    const s = await loadAppSettings()
-                    if (typeof s.useSystemAudio === 'boolean') useSys = s.useSystemAudio
-                    if (typeof s.useMicWithSystem === 'boolean') useMic = s.useMicWithSystem
-                  } catch {}
-
-                  // Check permissions before starting capture in floating window.
-                  // If missing: directly open the settings page (no "only prompt").
-                  if (useSys) {
-                    const hasScreen = await checkScreenRecordingPermission()
-                    if (!hasScreen) {
-                      await openScreenRecordingSettings()
-                      setFloatingQuestion(t('copilot.permInstruction'))
-                      setFloatingCapturing(false)
-                      return
-                    }
-                  }
-
-                  const needsMic = !useSys || useMic
-                  if (needsMic) {
-                    const hasMic = await tryRequestMicrophone()
-                    if (!hasMic) {
-                      await openMicrophoneSettings()
-                      setFloatingQuestion(t('copilot.micPermInstruction') || t('copilot.permInstruction'))
-                      setFloatingCapturing(false)
-                      return
-                    }
-                  }
-
-                  const initialRate = useSys ? 48000 : 16000
-
-                  // FIX: await the support so listeners (chunk + rateFix) are registered before the backend emits audio-config.
-                  setFloatingCapturing(true)
-                  await startFloatingCaptureSupport(initialRate)
-
-                  // Per-session reset + rate for master (so export fallback gets clean 48k data + correct header)
-                  const w = window as any
-                  if (w.__resetStealthMasterRecording) w.__resetStealthMasterRecording()
-                  if (w.__stealthMasterRecording?.sampleRate) w.__stealthMasterRecording.sampleRate.current = initialRate
-
-                  // Now start backend (events will be seen by already-registered listeners)
-                  let started = false
-                  if (useSys) {
-                    try {
-                      const res = await invoke<string>('start_macos_capture', {
-                        capture_system_audio: true,
-                        capture_microphone: useMic,
-                        deepgram_key: deepgramKey
-                      })
-                      console.log('[Floating] macos start:', res)
-                      started = true
-                    } catch (e: any) {
-                      const msg = String(e || '').toLowerCase()
-                      if (msg.includes('permission') || msg.includes('screen') || msg.includes('denied') || msg.includes('access')) {
-                        await openScreenRecordingSettings()
-                        setFloatingQuestion(t('copilot.permInstruction'))
-                        setFloatingCapturing(false)
-                        return
-                      }
-                      console.warn('[Floating] start_macos_capture unavailable, fallback to cpal:', e?.message || e)
-                    }
-                  }
-                  if (!started) {
-                    await invoke<string>('start_capture', { deviceName: null, deepgramKey })
-                    started = true
-                  }
-                } else {
-                  // Always attempt to stop both backends (harmless on missing cmd)
-                  await invoke('stop_capture').catch(() => {})
-                  try { await invoke('stop_macos_capture').catch(() => {}) } catch {}
-                  setFloatingCapturing(false)
-                  stopFloatingCaptureSupport()
-                  setFloatingSuggestions([])
-                }
-              } catch (e) {
-                console.warn('Floating capture toggle error', e)
-              }
-            }}
+            onClick={() => floatingToggleRef.current().catch((e) => console.warn('Floating capture toggle error', e))}
             className={`text-xs px-3 py-1 rounded ${floatingCapturing ? 'bg-red-500 text-white' : 'bg-[#6366f1] text-white'}`}
           >
             {floatingCapturing ? t('copilot.stopCapture') : t('copilot.startCapture')}
           </button>
-          <button onClick={() => { setFloatingSuggestions([]); setFloatingQuestion(t('copilot.defaultQuestion')) }} className="text-xs px-2 py-1 border rounded">{t('copilot.clear')}</button>
+          <button onClick={() => { setFloatingSuggestions([]); setFloatingQuestion('') }} className="text-xs px-2 py-1 border rounded">{t('copilot.clear')}</button>
         </div>
 
         <div className="absolute bottom-3 left-0 right-0 text-center text-[11px] text-[#6366f1] flex items-center justify-center gap-1">

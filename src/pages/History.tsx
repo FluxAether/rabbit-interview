@@ -109,13 +109,13 @@ export default function History() {
                       cx="26" cy="26" r="22" fill="none" 
                       stroke="#6366f1" strokeWidth="5" 
                       strokeDasharray={138} 
-                      strokeDashoffset={138 - (item.score / 100 * 138)} 
+                      strokeDashoffset={item.score == null ? 138 : 138 - (item.score / 100 * 138)}
                     />
                   </svg>
                 </div>
                 <div>
-                  <div className="text-xl font-semibold leading-none">{item.score}</div>
-                  <div className="text-[10px] text-[#64748b]">{t('history.overall')}</div>
+                  <div className="text-xl font-semibold leading-none">{item.score ?? '—'}</div>
+                  <div className="text-[10px] text-[#64748b]">{item.score == null ? t('history.notScored') : t('history.overall')}</div>
                 </div>
               </div>
 
@@ -132,7 +132,7 @@ export default function History() {
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={() => setSelected(null)}>
           <div className="card w-[620px] p-6" onClick={e => e.stopPropagation()}>
             <div className="font-semibold mb-2">{t('history.replayModal.title')} — {selected.role} @ {selected.company}</div>
-            <div className="text-sm mb-3">{t('misc.score')}: <span className="font-semibold text-[#6366f1]">{selected.score}</span> • {t('history.replayModal.duration')}: {Math.floor(selected.duration/60)}m</div>
+            <div className="text-sm mb-3">{t('misc.score')}: <span className="font-semibold text-[#6366f1]">{selected.score ?? t('history.notScored')}</span> • {t('history.replayModal.duration')}: {Math.floor(selected.duration/60)}m</div>
             
             <div className="bg-[#f8fafc] p-4 rounded-xl h-48 overflow-auto text-sm mb-3 whitespace-pre-wrap font-mono">
               {selected.transcript || t('history.transcriptPlaceholder')}

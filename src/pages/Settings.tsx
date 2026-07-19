@@ -20,8 +20,8 @@ export default function Settings() {
   // Per-provider model selections (so each provider can remember its own model)
   const [activeProvider, setActiveProvider] = useState<'groq' | 'openai' | 'anthropic' | 'gemini'>('groq')
   const [groqModel, setGroqModel] = useState('llama-3.1-8b-instant')
-  const [openaiModel, setOpenaiModel] = useState('gpt-4o')
-  const [anthropicModel, setAnthropicModel] = useState('claude-3-5-sonnet-20241022')
+  const [openaiModel, setOpenaiModel] = useState('gpt-5.6-luna')
+  const [anthropicModel, setAnthropicModel] = useState('claude-haiku-4-5')
   const [geminiModel, setGeminiModel] = useState('gemini-3.5-flash')
 
   // Track which API keys are already configured (without exposing the actual keys)
@@ -35,7 +35,7 @@ export default function Settings() {
 
   // STT (real-time speech-to-text) configuration
   const [sttProvider, setSttProvider] = useState<'deepgram'>('deepgram')
-  const [sttModel, setSttModel] = useState('nova-2')
+  const [sttModel, setSttModel] = useState('nova-3')
 
   // --- Auto-save implementation ---
   const saveTimeoutRef = useRef<number | null>(null)
@@ -155,6 +155,8 @@ export default function Settings() {
       setActiveProvider('gemini')
     } else if (currentAiModel.includes('claude')) {
       setActiveProvider('anthropic')
+    } else if (currentAiModel.startsWith('groq:')) {
+      setActiveProvider('groq')
     } else if (currentAiModel.includes('gpt') || currentAiModel.startsWith('openai')) {
       setActiveProvider('openai')
     } else {
@@ -226,6 +228,8 @@ export default function Settings() {
 
   // Save an API key for a provider and refresh status
   const saveProviderKey = async (provider: 'groq' | 'openai' | 'anthropic' | 'gemini' | 'deepgram', value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) return
     const keyMap = {
       groq: 'GROQ_API_KEY',
       openai: 'OPENAI_API_KEY',
@@ -236,11 +240,11 @@ export default function Settings() {
 
     const { setApiKey } = await import('../lib/keyStore')
     const { clearKeyCache } = await import('../lib/llm')
-    await setApiKey(keyMap[provider], value)
+    await setApiKey(keyMap[provider], trimmed)
     clearKeyCache()
 
     // Update visual status
-    setKeyStatus((prev) => ({ ...prev, [provider]: value.trim().length > 0 }))
+    setKeyStatus((prev) => ({ ...prev, [provider]: true }))
   }
 
   // Update STT provider/model and sync to global store immediately
@@ -422,7 +426,7 @@ export default function Settings() {
                   >
                     <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant</option>
                     <option value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile</option>
-                    <option value="gemma2-9b-it">Gemma 2 9B IT</option>
+                    <option value="groq:openai/gpt-oss-20b">GPT-OSS 20B</option>
                   </select>
                 </div>
                 <div className="flex items-center gap-3">
@@ -465,9 +469,9 @@ export default function Settings() {
                     onChange={(e) => updateProviderModel('openai', e.target.value)}
                     className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
                   >
-                    <option value="gpt-4o">GPT-4o</option>
-                    <option value="gpt-4o-mini">GPT-4o mini</option>
-                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                    <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
+                    <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+                    <option value="gpt-5.6-sol">GPT-5.6 Sol</option>
                   </select>
                 </div>
                 <div className="flex items-center gap-3">
@@ -510,9 +514,9 @@ export default function Settings() {
                     onChange={(e) => updateProviderModel('anthropic', e.target.value)}
                     className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
                   >
-                    <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (2024-10)</option>
-                    <option value="claude-3-5-sonnet-latest">Claude 3.5 Sonnet (Latest)</option>
-                    <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                    <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+                    <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+                    <option value="claude-sonnet-5">Claude Sonnet 5</option>
                   </select>
                 </div>
                 <div className="flex items-center gap-3">
@@ -599,7 +603,8 @@ export default function Settings() {
                     onChange={(e) => updateSttConfig('deepgram', e.target.value)}
                     className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
                   >
-                    <option value="nova-2">nova-2 (Recommended - general)</option>
+                    <option value="nova-3">nova-3 (Recommended - multilingual)</option>
+                    <option value="nova-2">nova-2 (general)</option>
                     <option value="nova-2-meeting">nova-2-meeting (Optimized for meetings)</option>
                     <option value="nova-2-general">nova-2-general</option>
                     <option value="nova-2-phonecall">nova-2-phonecall</option>

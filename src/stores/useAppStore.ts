@@ -6,7 +6,7 @@ export interface InterviewRecord {
   date: string
   role: string
   company: string
-  score: number
+  score: number | null
   transcript: string
   duration: number
   mode: string
@@ -77,23 +77,20 @@ export const useAppStore = create<AppState>((set) => ({
     aiModel: 'groq-llama-3.1',
     aiModels: {
       groq: 'llama-3.1-8b-instant',
-      openai: 'gpt-4o',
-      anthropic: 'claude-3-5-sonnet-20241022',
+      openai: 'gpt-5.6-luna',
+      anthropic: 'claude-haiku-4-5',
       gemini: 'gemini-3.5-flash',
     },
     language: 'zh-CN' as const,
     // STT (Speech-to-Text) provider for real-time transcription
     sttProvider: 'deepgram',
-    sttModel: 'nova-2',
+    sttModel: 'nova-3',
   },
 
   copilot: {
     isActive: false,
-    currentQuestion: 'Tell me about yourself.',
-    suggestions: [
-      { id: 1, text: 'Situation: Briefly set the context.', category: 'STAR' },
-      { id: 2, text: 'Task: State your specific responsibility.', category: 'STAR' },
-    ],
+    currentQuestion: '',
+    suggestions: [],
     amplitude: 0,
     isStealth: true,
   },

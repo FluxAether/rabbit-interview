@@ -24,20 +24,29 @@ async function getKeys(forceReload = false) {
  *   "gemini-3.5-flash" (only supported Gemini model)
  */
 function resolveProviderAndModel(aiModel: string): { provider: 'groq' | 'openai' | 'anthropic' | 'gemini'; model: string } {
-  const m = (aiModel || 'groq-llama-3.1').toLowerCase();
+  const configured = aiModel || 'llama-3.1-8b-instant';
+  const m = configured.toLowerCase();
 
   if (m.startsWith('gemini')) {
     // Only gemini-3.5-flash is supported for Gemini (latest)
     return { provider: 'gemini', model: 'gemini-3.5-flash' };
   }
   if (m.includes('claude')) {
-    return { provider: 'anthropic', model: aiModel };
+    return { provider: 'anthropic', model: configured };
+  }
+  if (m.startsWith('groq:')) {
+    return { provider: 'groq', model: configured.slice('groq:'.length) };
   }
   if (m.includes('gpt') || m.startsWith('openai')) {
-    return { provider: 'openai', model: aiModel.includes('gpt') ? aiModel : 'gpt-4o' };
+    return { provider: 'openai', model: configured.replace(/^openai-/, '') };
   }
-  // default + groq
-  return { provider: 'groq', model: 'llama-3.1-8b-instant' };
+  const groqModel = configured.replace(/^groq-/, '');
+  return {
+    provider: 'groq',
+    model: groqModel === 'llama-3.1' || groqModel === 'gemma2-9b-it'
+      ? 'llama-3.1-8b-instant'
+      : groqModel,
+  };
 }
 
 async function callGroq(prompt: string, model: string, apiKey: string): Promise<string> {
@@ -72,13 +81,12 @@ async function callOpenAI(prompt: string, model: string, apiKey: string): Promis
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: model.includes('gpt') ? model : 'gpt-4o',
+      model,
       messages: [
         { role: 'system', content: 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format for the given interviewer question. Be specific and professional.' },
         { role: 'user', content: prompt }
       ],
-      temperature: 0.6,
-      max_tokens: 220,
+      max_completion_tokens: 220,
     }),
   });
   const data = await res.json();
@@ -93,11 +101,14 @@ async function callGemini(prompt: string, _model: string, apiKey: string): Promi
   const modelId = 'gemini-3.5-flash';
 
   // Use v1 endpoint with the exact model name requested by user.
-  const url = `https://generativelanguage.googleapis.com/v1/models/${modelId}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`;
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    },
     body: JSON.stringify({
       systemInstruction: {
         parts: [{ text: 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format for the given interviewer question. Be specific and professional.' }]
@@ -123,10 +134,30 @@ async function callGemini(prompt: string, _model: string, apiKey: string): Promi
   return text;
 }
 
-async function callAnthropic(_prompt: string, _model: string, _apiKey: string): Promise<string> {
-  // Placeholder — real Anthropic Messages API requires different headers/body.
-  // For now we fall back gracefully if key is present but not fully wired.
-  throw new Error('Anthropic/Claude direct support not yet implemented. Use Groq, OpenAI or Gemini.');
+async function callAnthropic(prompt: string, model: string, apiKey: string): Promise<string> {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 220,
+      system: 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format for the given interviewer question. Be specific and professional.',
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error?.message || `Anthropic error ${res.status}`);
+  }
+  return (data?.content || [])
+    .filter((block: any) => block?.type === 'text')
+    .map((block: any) => block.text)
+    .join('\n');
 }
 
 export async function generateSuggestions(question: string, transcriptSoFar?: string): Promise<string[]> {
@@ -147,7 +178,13 @@ export async function generateSuggestions(question: string, transcriptSoFar?: st
       if (k) {
         provider = cand;
         // Use a reasonable default model per provider when auto-falling back
-        model = cand === 'gemini' ? 'gemini-3.5-flash' : (cand === 'openai' ? 'gpt-4o' : 'llama-3.1-8b-instant');
+        model = cand === 'gemini'
+          ? 'gemini-3.5-flash'
+          : cand === 'openai'
+            ? 'gpt-5.6-luna'
+            : cand === 'anthropic'
+              ? 'claude-haiku-4-5'
+              : 'llama-3.1-8b-instant';
         apiKey = k;
         console.log('[LLM] Auto-selected provider with key:', provider);
         break;
@@ -231,23 +268,23 @@ export async function startDeepgramStream(
   // Read STT config from global store (consistent with LLM provider logic)
   const { settings } = useAppStore.getState();
   const sttProvider = (settings?.sttProvider as string) || 'deepgram';
-  const sttModel = (settings?.sttModel as string) || 'nova-2';
+  const sttModel = (settings?.sttModel as string) || 'nova-3';
 
   if (!DEEPGRAM_API_KEY) {
-    console.warn('No Deepgram key — using mock transcription');
+    console.warn('No Deepgram key — live transcription disabled');
     return null;
   }
 
   // Use the actual mic sample rate reported by backend (fixes STT quality).
   // Deepgram accepts 16000, 44100, 48000 etc. as long as audio matches.
   // Model comes from settings (user-configurable in Settings page).
-  const model = sttProvider === 'deepgram' ? sttModel : 'nova-2';
+  const model = sttProvider === 'deepgram' ? sttModel : 'nova-3';
 
-  // Use token in query param for maximum browser/webview compatibility.
-  // (The Sec-WebSocket-Protocol subprotocol method also works but query is more reliable across envs.)
-  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true&token=${encodeURIComponent(DEEPGRAM_API_KEY)}`;
+  // Browser/WebView clients authenticate with Deepgram's token WebSocket subprotocol.
+  const language = model === 'nova-3' ? '&language=multi&endpointing=100' : '';
+  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true${language}`;
 
-  const ws = new WebSocket(wsUrl);
+  const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]);
   ws.binaryType = 'arraybuffer';
 
   ws.onopen = () => {
@@ -259,7 +296,7 @@ export async function startDeepgramStream(
       const data = JSON.parse(event.data);
       const transcript = data.channel?.alternatives?.[0]?.transcript?.trim();
       if (transcript) {
-        onTranscript(transcript, !!data.is_final);
+        onTranscript(transcript, data.speech_final ?? !!data.is_final);
       }
     } catch (e) {
       onError?.(e);

@@ -29,13 +29,24 @@ const llmPath = path.join(ROOT, 'src/lib/llm.ts');
 const llmSrc = readFileSync(llmPath, 'utf8');
 pass('loaded real llm.ts source (' + llmSrc.length + ' bytes)');
 
+const copilotPageSrc = readFileSync(path.join(ROOT, 'src/pages/StealthCopilot.tsx'), 'utf8');
+const appStoreSrc = readFileSync(path.join(ROOT, 'src/stores/useAppStore.ts'), 'utf8');
+if (!copilotPageSrc.includes('Math.random()') &&
+    copilotPageSrc.includes('score: null') &&
+    copilotPageSrc.includes('recordedSamples / (sampleRateRef.current || 16000)')) {
+  pass('saved Copilot sessions use real recording duration and no fabricated score');
+}
+if (appStoreSrc.includes("currentQuestion: ''") && appStoreSrc.includes('suggestions: []')) {
+  pass('Copilot starts without demo question or suggestions');
+}
+
 // 2-4. Actually CALL the real exported functions (transpile the shipped source + mock ONLY network + store).
 // This satisfies driving the real entry points (not hardcoded arrays).
 let realFnsOk = false;
 try {
   // Prepare a version of the real source with imports stubbed (only for drive harness; executes the function bodies from the real llm.ts)
   let driveSrc = llmSrc
-    .replace(/import .* from ['"].*keyStore['"];?/g, 'const loadApiKeys = async () => ({}); const getLlmApiKey = async () => "";')
+    .replace(/import .* from ['"].*keyStore['"];?/g, 'const loadApiKeys = async () => (globalThis.__verifyKeys || {}); const getLlmApiKey = async (provider) => globalThis.__verifyKeys?.[provider] || "";')
     .replace(/import .* from ['"].*useAppStore['"];?/g, '')
     .replace(/import .* from ['"].*settingsStore['"];?/g, '')
     .replace(/export (async )?function /g, '$1function ');  // strip export so eval can bind the fns
@@ -45,13 +56,28 @@ try {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, esModuleInterop: true }
   }).outputText;
 
-  const mockStoreState = { settings: { aiModel: 'groq-llama-3.1', sttProvider: 'deepgram', sttModel: 'nova-2' } };
+  const mockStoreState = { settings: { aiModel: 'groq-llama-3.1', sttProvider: 'deepgram', sttModel: 'nova-3' } };
   const useAppStoreMock = { getState: () => mockStoreState };
+  class VerifyWebSocket {
+    static OPEN = 1;
+    static CONNECTING = 0;
+    constructor(url, protocols) {
+      this.url = url;
+      this.protocols = protocols;
+      this.readyState = VerifyWebSocket.CONNECTING;
+      globalThis.__verifySocket = this;
+    }
+    close() {}
+  }
+  globalThis.__VerifyWebSocket = VerifyWebSocket;
+  globalThis.__verifyKeys = {};
+  globalThis.__verifyFetch = async () => { throw new Error('network disabled in verify'); };
 
   const moduleCode = `
     const exports = {}; const module = { exports };
     const useAppStore = useAppStoreMock;
-    const fetch = async () => { throw new Error('network disabled in verify'); };
+    const fetch = (...args) => globalThis.__verifyFetch(...args);
+    const WebSocket = globalThis.__VerifyWebSocket;
     ${transpiled}
     return { float32ToInt16, generateSuggestions, startDeepgramStream };
   `;
@@ -68,6 +94,47 @@ try {
   const ws = await evaluated.startDeepgramStream(() => {}, () => {}, 16000);
   if (ws === null) pass('startDeepgramStream (real exported fn) returned null (no-key mock path)');
 
+  globalThis.__verifyKeys = { deepgram: 'verify-deepgram-key' };
+  const liveWs = await evaluated.startDeepgramStream(() => {}, () => {}, 48000);
+  if (liveWs?.protocols?.[0] === 'token' && liveWs.protocols[1] === 'verify-deepgram-key' &&
+      /language=multi/.test(liveWs.url) && !/[?&]token=/.test(liveWs.url)) {
+    pass('Deepgram WebSocket uses token subprotocol + multilingual Nova-3 URL');
+  } else {
+    fail('Deepgram WebSocket authentication or multilingual URL is incorrect');
+  }
+
+  let request = null;
+  globalThis.__verifyFetch = async (url, options) => {
+    request = { url, options, body: JSON.parse(options.body) };
+    return {
+      ok: true,
+      json: async () => url.includes('anthropic')
+        ? { content: [{ type: 'text', text: 'Situation: verified' }] }
+        : { choices: [{ message: { content: 'Situation: verified' } }] },
+    };
+  };
+  mockStoreState.settings.aiModel = 'claude-haiku-4-5';
+  globalThis.__verifyKeys = { anthropic: 'verify-anthropic-key' };
+  await evaluated.generateSuggestions('Verify Claude');
+  if (request?.url === 'https://api.anthropic.com/v1/messages' &&
+      request.options.headers['anthropic-dangerous-direct-browser-access'] === 'true' &&
+      request.body.model === 'claude-haiku-4-5') {
+    pass('Anthropic Messages request uses current model and required browser headers');
+  } else {
+    fail('Anthropic Messages request contract is incorrect');
+  }
+
+  mockStoreState.settings.aiModel = 'groq:openai/gpt-oss-20b';
+  globalThis.__verifyKeys = { groq: 'verify-groq-key' };
+  await evaluated.generateSuggestions('Verify Groq routing');
+  if (request?.url.includes('api.groq.com') && request.body.model === 'openai/gpt-oss-20b') {
+    pass('Groq-hosted GPT-OSS model routes to Groq with the concrete model id');
+  } else {
+    fail('Groq-hosted GPT-OSS model routing is incorrect');
+  }
+
+  globalThis.__verifyKeys = {};
+
   realFnsOk = true;
 } catch (e) {
   console.warn('Real fn drive (transpile+call) issue (non-fatal for structural):', String(e).slice(0,120));
@@ -82,6 +149,10 @@ const copSrc = readFileSync(path.join(ROOT, 'src/pages/StealthCopilot.tsx'), 'ut
 
 if (/start_macos_capture/.test(appSrc) && /start_macos_capture/.test(copSrc)) {
   pass('macos start path invoked from both main copilot and floating');
+}
+if (/captureSystemAudio:\s*true/.test(appSrc) && /captureSystemAudio:\s*true/.test(copSrc) &&
+    !/capture_system_audio:\s*true/.test(appSrc + copSrc)) {
+  pass('macOS capture invoke arguments use Tauri camelCase command keys');
 }
 if (/audio-config.*rateFix|rate correction|startFloatingDeepgram/.test(appSrc)) {
   pass('audio-config rateFix listener wired in floating (fixes transcription after 48k correction)');

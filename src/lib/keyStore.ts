@@ -4,7 +4,7 @@ let store: Store | null = null;
 
 async function getStore(): Promise<Store> {
   if (!store) {
-    store = await Store.load('keys.json'); // Stored in app data dir, more secure than localStorage
+    store = await Store.load('keys.json'); // Stored in the app data directory; the file is not encrypted.
   }
   return store;
 }

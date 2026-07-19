@@ -8,8 +8,6 @@
 //   - audio-chunk (Vec<f32>)
 
 #[cfg(target_os = "macos")]
-use screencapturekit::cm::ffi as cm_ffi;
-#[cfg(target_os = "macos")]
 use screencapturekit::cm::CMSampleBuffer;
 #[cfg(target_os = "macos")]
 use screencapturekit::prelude::*;
@@ -35,6 +33,74 @@ struct AudioHandler {
 }
 
 #[cfg(target_os = "macos")]
+fn decode_pcm_to_mono(
+    bytes: &[u8],
+    bits_per_channel: u32,
+    is_float: bool,
+    channels: usize,
+) -> Vec<f32> {
+    let samples: Vec<f32> = if is_float && bits_per_channel == 32 && bytes.len() % 4 == 0 {
+        bytes
+            .chunks_exact(4)
+            .map(|chunk| {
+                let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                if sample.is_finite() { sample } else { 0.0 }
+            })
+            .collect()
+    } else if bits_per_channel == 16 && bytes.len() % 2 == 0 {
+        bytes
+            .chunks_exact(2)
+            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
+            .collect()
+    } else if bits_per_channel == 32 && bytes.len() % 4 == 0 {
+        bytes
+            .chunks_exact(4)
+            .map(|chunk| {
+                let sample = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                if sample.is_finite() { sample } else { 0.0 }
+            })
+            .collect()
+    } else if bytes.len() % 2 == 0 {
+        bytes
+            .chunks_exact(2)
+            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let channels = channels.max(1);
+    if channels == 1 {
+        return samples;
+    }
+
+    samples
+        .chunks_exact(channels)
+        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+        .collect()
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::decode_pcm_to_mono;
+
+    #[test]
+    fn downmixes_three_interleaved_channels_to_mono() {
+        let frames = [[0.5f32, 0.0, 0.0], [-0.5, 0.0, 0.0]];
+        let bytes: Vec<u8> = frames
+            .into_iter()
+            .flatten()
+            .flat_map(f32::to_le_bytes)
+            .collect();
+
+        assert_eq!(
+            decode_pcm_to_mono(&bytes, 32, true, 3),
+            vec![1.0 / 6.0, -1.0 / 6.0]
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
 impl SCStreamOutputTrait for AudioHandler {
     fn did_output_sample_buffer(&self, sample: CMSampleBuffer, of_type: SCStreamOutputType) {
         if of_type != SCStreamOutputType::Audio && of_type != SCStreamOutputType::Microphone {
@@ -46,20 +112,14 @@ impl SCStreamOutputTrait for AudioHandler {
             return;
         };
 
-        // Get format info for robust conversion
-        let format_desc = unsafe { cm_ffi::cm_sample_buffer_get_format_description(sample.as_ptr()) };
-        let bits_per_channel = if !format_desc.is_null() {
-            unsafe { cm_ffi::cm_format_description_get_audio_bits_per_channel(format_desc) as u32 }
-        } else {
-            32
-        };
-        let format_flags = if !format_desc.is_null() {
-            unsafe { cm_ffi::cm_format_description_get_audio_format_flags(format_desc) }
-        } else {
-            0
-        };
-        // kAudioFormatFlagIsFloat is usually 1 << 0
-        let is_float = (bits_per_channel == 32) && (format_flags & 1 != 0);
+        let format_desc = sample.format_description();
+        let bits_per_channel = format_desc
+            .as_ref()
+            .and_then(|desc| desc.audio_bits_per_channel())
+            .unwrap_or(32);
+        let is_float = format_desc
+            .as_ref()
+            .is_some_and(|desc| desc.audio_is_float());
 
         let mut samples: Vec<f32> = Vec::new();
 
@@ -69,33 +129,12 @@ impl SCStreamOutputTrait for AudioHandler {
                 continue;
             }
 
-            if is_float && bits_per_channel == 32 && bytes.len() % 4 == 0 {
-                for chunk in bytes.chunks_exact(4) {
-                    let v = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                    if v.is_finite() {
-                        samples.push(v);
-                    }
-                }
-            } else if bits_per_channel == 16 && bytes.len() % 2 == 0 {
-                for chunk in bytes.chunks_exact(2) {
-                    let i = i16::from_le_bytes([chunk[0], chunk[1]]);
-                    samples.push(i as f32 / 32768.0);
-                }
-            } else if bits_per_channel == 32 && bytes.len() % 4 == 0 {
-                // Fallback: treat 32-bit as float (common for SCK)
-                for chunk in bytes.chunks_exact(4) {
-                    let v = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                    if v.is_finite() {
-                        samples.push(v);
-                    }
-                }
-            } else if bytes.len() % 2 == 0 {
-                // Last resort i16
-                for chunk in bytes.chunks_exact(2) {
-                    let i = i16::from_le_bytes([chunk[0], chunk[1]]);
-                    samples.push(i as f32 / 32768.0);
-                }
-            }
+            samples.extend(decode_pcm_to_mono(
+                bytes,
+                bits_per_channel,
+                is_float,
+                buffer.number_channels.max(1) as usize,
+            ));
         }
 
         if samples.is_empty() {
@@ -139,7 +178,6 @@ pub async fn start_macos_capture(
     app: AppHandle,
     capture_system_audio: bool,
     capture_microphone: bool,
-    _deepgram_key: Option<String>, // kept for future direct streaming parity
 ) -> Result<String, String> {
     stop_capture_internal();
     stop_macos_capture_internal();

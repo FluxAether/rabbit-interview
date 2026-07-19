@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Mic, Volume2, Edit3, X, Shield, ExternalLink, Play, Square } from 'lucide-react'
+import { Mic, Shield, ExternalLink, Play, Square } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
@@ -8,6 +8,7 @@ import { generateSuggestions, startDeepgramStream, sendAudioChunk, closeDeepgram
 import { useTranslation } from '../i18n'
 import { buildExportWav } from '../lib/recording'
 import { checkScreenRecordingPermission, openScreenRecordingSettings, openMicrophoneSettings, tryRequestMicrophone } from '../lib/permissions'
+import { saveInterview } from '../lib/db'
 
 // Testable pure implementation of the export logic (computation via buildExportWav + side effects).
 // The component's exportRecording delegates to this so that node verification can literally invoke
@@ -71,6 +72,7 @@ export default function StealthCopilot() {
   const unlistenAmpRef = useRef<(() => void) | null>(null)
   const unlistenChunkRef = useRef<(() => void) | null>(null)
   const unlistenConfigRef = useRef<(() => void) | null>(null)
+  const unlistenErrorRef = useRef<(() => void) | null>(null)
   // Accumulate recorded audio in a ref to avoid flooding React state on every audio buffer
   const recordedChunksRef = useRef<number[][]>([])
   // Used to guard async callbacks (transcription etc.) after we've stopped
@@ -92,6 +94,10 @@ export default function StealthCopilot() {
     if (unlistenConfigRef.current) {
       try { unlistenConfigRef.current() } catch {}
       unlistenConfigRef.current = null
+    }
+    if (unlistenErrorRef.current) {
+      try { unlistenErrorRef.current() } catch {}
+      unlistenErrorRef.current = null
     }
   }
 
@@ -254,7 +260,7 @@ export default function StealthCopilot() {
 
   const toggleCapture = async () => {
     // If currently capturing, stop first (do this outside try so UI feels responsive)
-    if (isCapturing) {
+    if (isCapturingRef.current) {
       // Flip UI state immediately so button and status respond
       setIsCapturing(false)
       isCapturingRef.current = false
@@ -423,6 +429,20 @@ export default function StealthCopilot() {
       })
       unlistenChunkRef.current = unlistenChunk
 
+      const unlistenError = await listen<string>('audio-error', (event) => {
+        if (!isCapturingRef.current) return
+        isCapturingRef.current = false
+        setIsCapturing(false)
+        setCopilotActive(false)
+        setStatus('Audio error: ' + event.payload)
+        closeDeepgramStream(deepgramWsRef.current)
+        deepgramWsRef.current = null
+        cleanupListeners()
+        invoke('stop_capture').catch(() => {})
+        invoke('stop_macos_capture').catch(() => {})
+      })
+      unlistenErrorRef.current = unlistenError
+
       // Mark capturing ref early so pre-registered listeners accept first events
       isCapturingRef.current = true
 
@@ -432,10 +452,8 @@ export default function StealthCopilot() {
       if (useSystemAudio) {
         try {
           res = await invoke<string>('start_macos_capture', {
-            // Must match exact Rust parameter names (snake_case) defined in screencapturekit.rs
-            capture_system_audio: true,
-            capture_microphone: useMicWithSystem,
-            deepgram_key: deepgramKey
+            captureSystemAudio: true,
+            captureMicrophone: useMicWithSystem,
           })
         } catch (e: any) {
           const msg = String(e || '').toLowerCase()
@@ -443,7 +461,7 @@ export default function StealthCopilot() {
             // Screen recording permission is missing — directly open System Settings for user to grant
             setStatus(t('copilot.permInstruction'))
             await openScreenRecordingSettings()
-            return
+            throw new Error(t('copilot.permInstruction'))
           }
           // Fallback if the native command is not available (feature not enabled or non-mac)
           console.warn('start_macos_capture not available, falling back to mic-only:', e)
@@ -596,18 +614,6 @@ export default function StealthCopilot() {
               </div>
               <span className="font-semibold tracking-tight">{t('copilot.floating.title')}</span>
             </div>
-            <div className="flex items-center gap-3 text-[#64748b]">
-              <Volume2 className="w-4 h-4 cursor-pointer" data-tauri-drag-region="false" />
-              <Edit3 className="w-4 h-4 cursor-pointer" data-tauri-drag-region="false" />
-              <X 
-                className="w-4 h-4 cursor-pointer hover:text-[#334155] px-1 py-0.5 rounded hover:bg-[#f1f5f9]" 
-                data-tauri-drag-region="false"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setCopilotActive(false)
-                }} 
-              />
-            </div>
           </div>
 
           <div className="h-1 bg-[#e2e8f0] rounded mb-3 overflow-hidden">
@@ -658,22 +664,30 @@ export default function StealthCopilot() {
 
         <div className="mt-3 grid grid-cols-2 gap-2">
           <button
-            onClick={() => {
+            onClick={async () => {
               const { copilot, addHistory } = useAppStore.getState()
               if (copilot.currentQuestion) {
-                addHistory({
+                const recordedSamples = recordedChunksRef.current.reduce((total, chunk) => total + chunk.length, 0)
+                const record = {
                   date: new Date().toISOString().slice(0,16).replace('T',' '),
                   role: 'Live Interview',
                   company: 'Real-time',
-                  score: 80 + Math.floor(Math.random() * 15),
+                  score: null,
                   transcript: `Q: ${copilot.currentQuestion}\nSuggestions: ${copilot.suggestions.map(s => s.text).join('; ')}`,
-                  duration: 420,
+                  duration: Math.round(recordedSamples / (sampleRateRef.current || 16000)),
                   mode: 'copilot'
-                })
-                alert(t('copilot.sessionSaved'))
+                }
+                try {
+                  const id = await saveInterview(record)
+                  addHistory({ ...record, id })
+                  alert(t('copilot.sessionSaved'))
+                } catch (e) {
+                  setStatus('Error saving session: ' + String((e as any)?.message || e))
+                }
               }
             }}
-            className="text-xs py-1.5 border rounded-xl hover:bg-[#f8fafc]"
+            disabled={!copilot.currentQuestion}
+            className="text-xs py-1.5 border rounded-xl hover:bg-[#f8fafc] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {t('copilot.saveSession')}
           </button>

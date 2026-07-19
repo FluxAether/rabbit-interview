@@ -37,12 +37,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   stealthEnabled: true,
   aiModels: {
     groq: 'llama-3.1-8b-instant',
-    openai: 'gpt-4o',
-    anthropic: 'claude-3-5-sonnet-20241022',
+    openai: 'gpt-5.6-luna',
+    anthropic: 'claude-haiku-4-5',
     gemini: 'gemini-3.5-flash',
   },
   sttProvider: 'deepgram',
-  sttModel: 'nova-2',
+  sttModel: 'nova-3',
   useSystemAudio: true,
   useMicWithSystem: true,
 };
@@ -50,14 +50,26 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export async function loadAppSettings(): Promise<AppSettings> {
   const s = await getStore();
   const saved = await s.get<Partial<AppSettings>>('settings');
+  const savedModels = saved?.aiModels || {};
+  const aiModels = {
+    ...DEFAULT_SETTINGS.aiModels,
+    ...savedModels,
+  };
+  if (aiModels.anthropic?.startsWith('claude-3')) aiModels.anthropic = 'claude-haiku-4-5';
+  if (aiModels.openai?.startsWith('gpt-4')) aiModels.openai = 'gpt-5.6-luna';
+  if (aiModels.groq === 'gemma2-9b-it') aiModels.groq = 'llama-3.1-8b-instant';
+
+  let aiModel = saved?.aiModel || DEFAULT_SETTINGS.aiModel;
+  if (aiModel.startsWith('claude-3')) aiModel = 'claude-haiku-4-5';
+  if (aiModel.startsWith('gpt-4')) aiModel = 'gpt-5.6-luna';
+  if (aiModel === 'gemma2-9b-it') aiModel = 'llama-3.1-8b-instant';
+  const sttModel = saved?.sttModel === 'nova-2' ? 'nova-3' : (saved?.sttModel || DEFAULT_SETTINGS.sttModel);
   return {
     ...DEFAULT_SETTINGS,
     ...saved,
-    // merge aiModels deeply
-    aiModels: {
-      ...DEFAULT_SETTINGS.aiModels,
-      ...(saved?.aiModels || {}),
-    },
+    aiModel,
+    aiModels,
+    sttModel,
   } as AppSettings;
 }
 
