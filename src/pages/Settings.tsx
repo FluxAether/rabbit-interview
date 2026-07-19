@@ -433,20 +433,6 @@ export default function Settings() {
                   </select>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Language</span>
-                  <select
-                    aria-label="Deepgram language"
-                    value={sttLanguage}
-                    onChange={(e) => setSttLanguage(e.target.value as SttLanguage)}
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
-                  >
-                    <option value="zh-CN">简体中文</option>
-                    <option value="zh-TW">繁體中文</option>
-                    <option value="en-US">English</option>
-                    <option value="multi">多语言自动识别</option>
-                  </select>
-                </div>
-                <div className="flex items-center gap-3">
                   <span className="w-12 text-[#64748b] text-xs">Key</span>
                   <input
                     className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
@@ -625,6 +611,20 @@ export default function Settings() {
                     <option value="nova-2-meeting">nova-2-meeting (Optimized for meetings)</option>
                     <option value="nova-2-general">nova-2-general</option>
                     <option value="nova-2-phonecall">nova-2-phonecall</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="w-12 text-[#64748b] text-xs">Language</span>
+                  <select
+                    aria-label="Deepgram language"
+                    value={sttLanguage}
+                    onChange={(e) => setSttLanguage(e.target.value as SttLanguage)}
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
+                  >
+                    <option value="zh-CN">简体中文</option>
+                    <option value="zh-TW">繁體中文</option>
+                    <option value="en-US">English</option>
+                    <option value="multi">多语言自动识别</option>
                   </select>
                 </div>
                 <div className="flex items-center gap-3">

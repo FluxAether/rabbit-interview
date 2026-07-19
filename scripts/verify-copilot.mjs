@@ -33,6 +33,10 @@ const copilotPageSrc = readFileSync(path.join(ROOT, 'src/pages/StealthCopilot.ts
 const appStoreSrc = readFileSync(path.join(ROOT, 'src/stores/useAppStore.ts'), 'utf8');
 const settingsPageSrc = readFileSync(path.join(ROOT, 'src/pages/Settings.tsx'), 'utf8');
 const settingsStoreSrc = readFileSync(path.join(ROOT, 'src/lib/settingsStore.ts'), 'utf8');
+const deepgramSettingsSrc = settingsPageSrc.slice(
+  settingsPageSrc.indexOf('{/* Speech-to-Text'),
+  settingsPageSrc.indexOf('{/* Stealth Mode */}')
+);
 if (!copilotPageSrc.includes('Math.random()') &&
     copilotPageSrc.includes('score: null') &&
     copilotPageSrc.includes('recordedSamples / (sampleRateRef.current || 16000)')) {
@@ -41,12 +45,13 @@ if (!copilotPageSrc.includes('Math.random()') &&
 if (appStoreSrc.includes("currentQuestion: ''") && appStoreSrc.includes('suggestions: []')) {
   pass('Copilot starts without demo question or suggestions');
 }
-if (settingsPageSrc.includes('value={sttLanguage}') &&
-    settingsPageSrc.includes('aria-label="Deepgram language"') &&
+if (deepgramSettingsSrc.includes('value={sttLanguage}') &&
+    deepgramSettingsSrc.includes('aria-label="Deepgram language"') &&
+    (settingsPageSrc.match(/value={sttLanguage}/g) || []).length === 1 &&
     settingsStoreSrc.includes("sttLanguage: 'zh-CN'")) {
-  pass('Deepgram language is selectable and defaults to Simplified Chinese');
+  pass('Deepgram language selector is in the STT card and defaults to Simplified Chinese');
 } else {
-  fail('Deepgram language selector or Simplified Chinese default is missing');
+  fail('Deepgram language selector is missing, duplicated, or outside the STT card');
 }
 
 // 2-4. Actually CALL the real exported functions (transpile the shipped source + mock ONLY network + store).
