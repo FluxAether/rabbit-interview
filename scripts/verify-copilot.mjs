@@ -31,6 +31,8 @@ pass('loaded real llm.ts source (' + llmSrc.length + ' bytes)');
 
 const copilotPageSrc = readFileSync(path.join(ROOT, 'src/pages/StealthCopilot.tsx'), 'utf8');
 const appStoreSrc = readFileSync(path.join(ROOT, 'src/stores/useAppStore.ts'), 'utf8');
+const settingsPageSrc = readFileSync(path.join(ROOT, 'src/pages/Settings.tsx'), 'utf8');
+const settingsStoreSrc = readFileSync(path.join(ROOT, 'src/lib/settingsStore.ts'), 'utf8');
 if (!copilotPageSrc.includes('Math.random()') &&
     copilotPageSrc.includes('score: null') &&
     copilotPageSrc.includes('recordedSamples / (sampleRateRef.current || 16000)')) {
@@ -38,6 +40,13 @@ if (!copilotPageSrc.includes('Math.random()') &&
 }
 if (appStoreSrc.includes("currentQuestion: ''") && appStoreSrc.includes('suggestions: []')) {
   pass('Copilot starts without demo question or suggestions');
+}
+if (settingsPageSrc.includes('value={sttLanguage}') &&
+    settingsPageSrc.includes('aria-label="Deepgram language"') &&
+    settingsStoreSrc.includes("sttLanguage: 'zh-CN'")) {
+  pass('Deepgram language is selectable and defaults to Simplified Chinese');
+} else {
+  fail('Deepgram language selector or Simplified Chinese default is missing');
 }
 
 // 2-4. Actually CALL the real exported functions (transpile the shipped source + mock ONLY network + store).
@@ -56,7 +65,7 @@ try {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, esModuleInterop: true }
   }).outputText;
 
-  const mockStoreState = { settings: { aiModel: 'groq-llama-3.1', sttProvider: 'deepgram', sttModel: 'nova-3' } };
+  const mockStoreState = { settings: { aiModel: 'groq-llama-3.1', sttProvider: 'deepgram', sttModel: 'nova-3', sttLanguage: 'zh-CN' } };
   const useAppStoreMock = { getState: () => mockStoreState };
   class VerifyWebSocket {
     static OPEN = 1;
@@ -97,10 +106,27 @@ try {
   globalThis.__verifyKeys = { deepgram: 'verify-deepgram-key' };
   const liveWs = await evaluated.startDeepgramStream(() => {}, () => {}, 48000);
   if (liveWs?.protocols?.[0] === 'token' && liveWs.protocols[1] === 'verify-deepgram-key' &&
-      /language=multi/.test(liveWs.url) && !/[?&]token=/.test(liveWs.url)) {
-    pass('Deepgram WebSocket uses token subprotocol + multilingual Nova-3 URL');
+      /language=zh-CN/.test(liveWs.url) && /endpointing=100/.test(liveWs.url) &&
+      !/[?&]token=/.test(liveWs.url)) {
+    pass('Deepgram WebSocket uses token subprotocol + selected Simplified Chinese language');
   } else {
-    fail('Deepgram WebSocket authentication or multilingual URL is incorrect');
+    fail('Deepgram WebSocket authentication or selected language is incorrect');
+  }
+
+  mockStoreState.settings.sttLanguage = 'multi';
+  const multilingualWs = await evaluated.startDeepgramStream(() => {}, () => {}, 48000);
+  if (/language=multi/.test(multilingualWs?.url) && /endpointing=100/.test(multilingualWs?.url)) {
+    pass('Deepgram multilingual mode keeps recommended endpointing');
+  } else {
+    fail('Deepgram multilingual mode URL is incorrect');
+  }
+
+  mockStoreState.settings.sttModel = 'nova-2-meeting';
+  const nova2Ws = await evaluated.startDeepgramStream(() => {}, () => {}, 48000);
+  if (/language=multi/.test(nova2Ws?.url) && !/endpointing=100/.test(nova2Ws?.url)) {
+    pass('Deepgram endpointing policy remains scoped to Nova-3');
+  } else {
+    fail('Deepgram endpointing policy changed for non-Nova-3 models');
   }
 
   let request = null;
@@ -115,13 +141,19 @@ try {
   };
   mockStoreState.settings.aiModel = 'claude-haiku-4-5';
   globalThis.__verifyKeys = { anthropic: 'verify-anthropic-key' };
-  await evaluated.generateSuggestions('Verify Claude');
+  await evaluated.generateSuggestions('请介绍一下你最近完成的项目');
   if (request?.url === 'https://api.anthropic.com/v1/messages' &&
       request.options.headers['anthropic-dangerous-direct-browser-access'] === 'true' &&
       request.body.model === 'claude-haiku-4-5') {
     pass('Anthropic Messages request uses current model and required browser headers');
   } else {
     fail('Anthropic Messages request contract is incorrect');
+  }
+  if (request?.body?.messages?.[0]?.content?.includes('respond in the same language') &&
+      request.body.messages[0].content.includes('请介绍一下你最近完成的项目')) {
+    pass('AI suggestion prompt requests an answer in the detected question language');
+  } else {
+    fail('AI suggestion prompt does not request a same-language answer');
   }
 
   mockStoreState.settings.aiModel = 'groq:openai/gpt-oss-20b';

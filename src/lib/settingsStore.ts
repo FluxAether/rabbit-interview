@@ -2,6 +2,8 @@ import { Store } from '@tauri-apps/plugin-store';
 
 let store: Store | null = null;
 
+export type SttLanguage = 'zh-CN' | 'zh-TW' | 'en-US' | 'multi';
+
 async function getStore(): Promise<Store> {
   if (!store) {
     store = await Store.load('app-settings.json');
@@ -22,6 +24,7 @@ export interface AppSettings {
   // STT
   sttProvider: string;
   sttModel: string;
+  sttLanguage: SttLanguage;
   // Stealth Copilot capture mode (persisted so floating window + restarts respect choice)
   useSystemAudio?: boolean;
   useMicWithSystem?: boolean;
@@ -43,6 +46,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   sttProvider: 'deepgram',
   sttModel: 'nova-3',
+  sttLanguage: 'zh-CN',
   useSystemAudio: true,
   useMicWithSystem: true,
 };

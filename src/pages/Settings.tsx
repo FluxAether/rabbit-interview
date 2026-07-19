@@ -3,7 +3,7 @@ import { Sun, Mic, Shield } from 'lucide-react'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
 import { LANGUAGE_OPTIONS, SupportedLanguage, DEFAULT_LANGUAGE } from '../i18n/types'
-import { saveAppSettings, type AppSettings as PersistedSettings } from '../lib/settingsStore'
+import { saveAppSettings, type AppSettings as PersistedSettings, type SttLanguage } from '../lib/settingsStore'
 
 export default function Settings() {
   const { settings, setLanguage: setStoreLanguage } = useAppStore()
@@ -36,6 +36,7 @@ export default function Settings() {
   // STT (real-time speech-to-text) configuration
   const [sttProvider, setSttProvider] = useState<'deepgram'>('deepgram')
   const [sttModel, setSttModel] = useState('nova-3')
+  const [sttLanguage, setSttLanguage] = useState<SttLanguage>('zh-CN')
 
   // --- Auto-save implementation ---
   const saveTimeoutRef = useRef<number | null>(null)
@@ -58,6 +59,7 @@ export default function Settings() {
     },
     sttProvider,
     sttModel,
+    sttLanguage,
   })
 
   const persistToDisk = async (payload: ReturnType<typeof buildPayload>) => {
@@ -97,7 +99,7 @@ export default function Settings() {
     theme, launchAtStartup, autoUpdate, updateChannel,
     language, aiModel, stealth,
     groqModel, openaiModel, anthropicModel, geminiModel,
-    sttProvider, sttModel,
+    sttProvider, sttModel, sttLanguage,
   ])
 
   // Load key configuration status (presence only)
@@ -166,6 +168,7 @@ export default function Settings() {
     // STT
     if (settings.sttProvider) setSttProvider(settings.sttProvider as 'deepgram')
     if (settings.sttModel) setSttModel(settings.sttModel as string)
+    if (settings.sttLanguage) setSttLanguage(settings.sttLanguage as SttLanguage)
   }, [settings])
 
   // Mark as hydrated after the first settings load so we don't auto-save during initial population
@@ -427,6 +430,20 @@ export default function Settings() {
                     <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant</option>
                     <option value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile</option>
                     <option value="groq:openai/gpt-oss-20b">GPT-OSS 20B</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="w-12 text-[#64748b] text-xs">Language</span>
+                  <select
+                    aria-label="Deepgram language"
+                    value={sttLanguage}
+                    onChange={(e) => setSttLanguage(e.target.value as SttLanguage)}
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
+                  >
+                    <option value="zh-CN">简体中文</option>
+                    <option value="zh-TW">繁體中文</option>
+                    <option value="en-US">English</option>
+                    <option value="multi">多语言自动识别</option>
                   </select>
                 </div>
                 <div className="flex items-center gap-3">

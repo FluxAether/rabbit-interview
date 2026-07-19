@@ -85,6 +85,7 @@ export const useAppStore = create<AppState>((set) => ({
     // STT (Speech-to-Text) provider for real-time transcription
     sttProvider: 'deepgram',
     sttModel: 'nova-3',
+    sttLanguage: 'zh-CN',
   },
 
   copilot: {

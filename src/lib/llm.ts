@@ -192,7 +192,7 @@ export async function generateSuggestions(question: string, transcriptSoFar?: st
     }
   }
 
-  const userPrompt = `Interviewer question: ${question}\nPrevious context: ${transcriptSoFar || 'none'}`;
+  const userPrompt = `Detect the language used in the interviewer question and respond in the same language. Return concise interview suggestions, one per line.\nInterviewer question: ${question}\nPrevious context: ${transcriptSoFar || 'none'}`;
 
   if (!apiKey) {
     // Fallback to smart mock (same behavior as before)
@@ -269,6 +269,7 @@ export async function startDeepgramStream(
   const { settings } = useAppStore.getState();
   const sttProvider = (settings?.sttProvider as string) || 'deepgram';
   const sttModel = (settings?.sttModel as string) || 'nova-3';
+  const sttLanguage = (settings?.sttLanguage as string) || 'zh-CN';
 
   if (!DEEPGRAM_API_KEY) {
     console.warn('No Deepgram key — live transcription disabled');
@@ -281,8 +282,9 @@ export async function startDeepgramStream(
   const model = sttProvider === 'deepgram' ? sttModel : 'nova-3';
 
   // Browser/WebView clients authenticate with Deepgram's token WebSocket subprotocol.
-  const language = model === 'nova-3' ? '&language=multi&endpointing=100' : '';
-  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true${language}`;
+  const language = `&language=${encodeURIComponent(sttLanguage)}`;
+  const endpointing = model === 'nova-3' ? '&endpointing=100' : '';
+  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true${language}${endpointing}`;
 
   const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]);
   ws.binaryType = 'arraybuffer';
