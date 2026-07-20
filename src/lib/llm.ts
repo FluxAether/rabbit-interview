@@ -451,15 +451,11 @@ export async function startDeepgramStream(
 
   // Browser/WebView clients authenticate with Deepgram's token WebSocket subprotocol.
   const language = `&language=${encodeURIComponent(sttLanguage)}`;
-  const endpointing = model === 'nova-3' ? '&endpointing=100' : '';
-  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true&utterance_end_ms=1000${language}${endpointing}`;
+  const endpointing = sttLanguage === 'multi' ? 100 : 300;
+  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true&utterance_end_ms=1000&vad_events=true${language}&endpointing=${endpointing}`;
 
   const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]);
   ws.binaryType = 'arraybuffer';
-
-  ws.onopen = () => {
-    console.log('[Deepgram] Connected');
-  };
 
   ws.onmessage = (event) => {
     try {
@@ -478,16 +474,36 @@ export async function startDeepgramStream(
     }
   };
 
-  ws.onerror = (event) => {
-    console.error('[Deepgram] WS error', event);
-    onError?.(event);
-  };
+  return new Promise<WebSocket>((resolve, reject) => {
+    let opened = false;
+    const timeout = globalThis.setTimeout(() => {
+      ws.close();
+      reject(new Error('Deepgram connection timed out'));
+    }, 10_000);
 
-  ws.onclose = () => {
-    console.log('[Deepgram] Connection closed');
-  };
+    ws.onopen = () => {
+      opened = true;
+      globalThis.clearTimeout(timeout);
+      console.log('[Deepgram] Connected');
+      resolve(ws);
+    };
 
-  return ws;
+    ws.onerror = (event) => {
+      console.error('[Deepgram] WS error', event);
+      if (!opened) {
+        globalThis.clearTimeout(timeout);
+        reject(new Error('Deepgram connection failed'));
+      } else {
+        onError?.(event);
+      }
+    };
+
+    ws.onclose = () => {
+      globalThis.clearTimeout(timeout);
+      console.log('[Deepgram] Connection closed');
+      if (!opened) reject(new Error('Deepgram connection closed before it was ready'));
+    };
+  });
 }
 
 /**

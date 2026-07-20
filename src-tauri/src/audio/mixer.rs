@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-const SYSTEM_GAIN_WHEN_MIXED: f32 = 0.35;
+const SYSTEM_GAIN_WHEN_MIXED: f32 = 1.0;
+const MICROPHONE_GAIN_WHEN_MIXED: f32 = 0.25;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AudioSource {
@@ -84,10 +85,12 @@ impl TimedAudioMixer {
             }
         }
 
-        let max_source_lag = i64::from((self.sample_rate / 10).max(1));
+        let max_source_lag = i64::from((self.sample_rate / 2).max(1));
         let first_frame = match (self.system_enabled, self.microphone_enabled) {
             (true, true) => match (self.first_system_frame, self.first_microphone_frame) {
-                (Some(system), Some(microphone)) => system.min(microphone),
+                (Some(system), Some(microphone)) => system
+                    .min(microphone)
+                    .max(system.max(microphone).saturating_sub(max_source_lag)),
                 (Some(system), None)
                     if self.system_progress.unwrap_or(system) - system >= max_source_lag =>
                 {
@@ -109,9 +112,7 @@ impl TimedAudioMixer {
 
         let completed_through = match (self.system_enabled, self.microphone_enabled) {
             (true, true) => match (self.system_progress, self.microphone_progress) {
-                (Some(system), Some(microphone)) => system
-                    .min(microphone)
-                    .max(system.max(microphone).saturating_sub(max_source_lag)),
+                (Some(system), Some(microphone)) => system.min(microphone),
                 (Some(system), None) => system.saturating_sub(max_source_lag),
                 (None, Some(microphone)) => microphone.saturating_sub(max_source_lag),
                 (None, None) => return Vec::new(),
@@ -156,7 +157,9 @@ impl TimedAudioMixer {
         for frame_number in next_frame..completed_through {
             let frame = self.pending.remove(&frame_number).unwrap_or_default();
             let sample = match (frame.system, frame.microphone) {
-                (Some(system), Some(microphone)) => system * SYSTEM_GAIN_WHEN_MIXED + microphone,
+                (Some(system), Some(microphone)) => {
+                    system * SYSTEM_GAIN_WHEN_MIXED + microphone * MICROPHONE_GAIN_WHEN_MIXED
+                }
                 (Some(system), None) => system,
                 (None, Some(microphone)) => microphone,
                 (None, None) => 0.0,
@@ -179,7 +182,7 @@ mod tests {
             .push(AudioSource::System, 0.0, vec![0.8, 0.8])
             .is_empty());
         let mixed = mixer.push(AudioSource::Microphone, 0.0, vec![0.4, 0.4]);
-        assert_eq!(mixed, vec![0.68, 0.68]);
+        assert!(mixed.iter().all(|sample| (*sample - 0.9).abs() < 0.000_001));
     }
 
     #[test]
@@ -191,7 +194,27 @@ mod tests {
         }
 
         let microphone_contribution = mixed_sample(0.2) - mixed_sample(0.0);
-        assert!((microphone_contribution - 0.2).abs() < 0.000_001);
+        assert!((microphone_contribution - 0.05).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn delayed_system_audio_is_not_dropped_from_an_active_mix() {
+        let mut mixer = TimedAudioMixer::new(true, true, 100);
+        assert!(mixer
+            .push(AudioSource::System, 0.0, vec![0.5; 10])
+            .is_empty());
+        assert_eq!(
+            mixer.push(AudioSource::Microphone, 0.0, vec![0.0; 10]),
+            vec![0.5; 10]
+        );
+
+        assert!(mixer
+            .push(AudioSource::Microphone, 0.1, vec![0.0; 20])
+            .is_empty());
+        assert_eq!(
+            mixer.push(AudioSource::System, 0.1, vec![0.5; 20]),
+            vec![0.5; 20]
+        );
     }
 
     #[test]

@@ -69,12 +69,15 @@ export default function StealthCopilot() {
 
   const saveSession = async () => {
     if (!copilot.question) return
+    const roleLabels = { interviewer: 'Interviewer', assistant: 'AI', me: 'Me' }
     const record = {
       date: new Date().toISOString().slice(0, 16).replace('T', ' '),
       role: 'Live Interview',
       company: 'Real-time',
       score: null,
-      transcript: `Q: ${copilot.question}\nSuggestions: ${copilot.suggestions.map((suggestion) => suggestion.text).join('; ')}`,
+      transcript: copilot.messages
+        .map((message) => `${roleLabels[message.role]}: ${message.text}`)
+        .join('\n'),
       duration: getCopilotRecordingDuration(),
       mode: 'copilot',
     }
@@ -85,7 +88,7 @@ export default function StealthCopilot() {
 
   return (
     <div className="p-8">
-      <div className="mx-auto max-w-[900px]">
+      <div className="max-w-[1100px]">
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold">{t('copilot.title')}</h1>

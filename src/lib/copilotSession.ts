@@ -4,9 +4,11 @@ import { closeDeepgramStream, generateSuggestionsStream, sendAudioChunk, startDe
 import { chunksToWavBuffer } from './wav'
 import { loadAppSettings } from './settingsStore'
 import { openMicrophoneSettings, tryRequestMicrophone } from './permissions'
+import { upsertCopilotMessage } from './db'
 import {
   createInitialSnapshot,
   reduceCopilotSnapshot,
+  type CopilotMessage,
   type CopilotSnapshot,
   type CopilotSnapshotAction,
 } from './copilotSessionState'
@@ -33,6 +35,23 @@ export interface CopilotStartConfig {
   deviceName?: string | null
 }
 
+type CopilotAudioSource = 'system' | 'microphone'
+
+interface AudioSourceChunk {
+  source: CopilotAudioSource
+  samples: number[]
+}
+
+interface TranscriptState {
+  finalParts: string[]
+  lastFinal: string
+  lastFinalAt: number
+}
+
+function createTranscriptState(): TranscriptState {
+  return { finalParts: [], lastFinal: '', lastFinalAt: 0 }
+}
+
 export type CopilotSessionCommand =
   | { type: 'start'; config?: CopilotStartConfig }
   | { type: 'stop' }
@@ -57,16 +76,24 @@ class CopilotSessionHost {
   private snapshot: CopilotSnapshot = createInitialSnapshot()
   private sessionSequence = 0
   private answerSequence = 0
-  private deepgram: WebSocket | null = null
+  private messageSequence = 0
+  private deepgrams: Record<CopilotAudioSource, WebSocket | null> = {
+    system: null,
+    microphone: null,
+  }
+  private enabledSources: CopilotAudioSource[] = []
+  private transcripts: Record<CopilotAudioSource, TranscriptState> = {
+    system: createTranscriptState(),
+    microphone: createTranscriptState(),
+  }
   private unlisteners: UnlistenFn[] = []
   private commandUnlisten: UnlistenFn | null = null
   private recording: number[][] = []
   private sampleRate = 16_000
   private abortController: AbortController | null = null
   private stopPromise: Promise<void> | null = null
-  private lastFinal = ''
-  private lastFinalAt = 0
-  private finalTranscriptParts: string[] = []
+  private persistenceSessionId: string | null = null
+  private persistenceQueue: Promise<void> = Promise.resolve()
   private previousTurn = ''
 
   async mount(): Promise<void> {
@@ -91,10 +118,50 @@ class CopilotSessionHost {
   }
 
   private transition(action: CopilotSnapshotAction): void {
-    const next = reduceCopilotSnapshot(this.snapshot, action)
-    if (next === this.snapshot) return
+    const previous = this.snapshot
+    const next = reduceCopilotSnapshot(previous, action)
+    if (next === previous) return
     this.snapshot = next
+    this.queueMessagePersistence(previous.messages, next.messages, next.sessionId)
     void this.publish()
+  }
+
+  private queueMessagePersistence(
+    previousMessages: CopilotMessage[],
+    nextMessages: CopilotMessage[],
+    sessionId: number | null,
+  ): void {
+    const persistenceSessionId = this.persistenceSessionId
+    if (!persistenceSessionId || sessionId === null || previousMessages === nextMessages) return
+
+    const previousById = new Map(previousMessages.map((message) => [message.id, message]))
+    const changedMessages = nextMessages.flatMap((message, messageOrder) => {
+      const previous = previousById.get(message.id)
+      return !previous
+        || previous.role !== message.role
+        || previous.source !== message.source
+        || previous.text !== message.text
+        ? [{ message, messageOrder }]
+        : []
+    })
+    if (changedMessages.length === 0) return
+
+    this.persistenceQueue = this.persistenceQueue
+      .then(async () => {
+        for (const { message, messageOrder } of changedMessages) {
+          await upsertCopilotMessage(persistenceSessionId, message, messageOrder)
+        }
+      })
+      .catch((error) => {
+        console.error('[Copilot] Failed to persist chat messages', error)
+        if (this.isCurrent(sessionId)) {
+          this.transition({
+            type: 'recoverable-error',
+            sessionId,
+            error: `Failed to save chat messages: ${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
+      })
   }
 
   private async publish(force = false): Promise<void> {
@@ -131,8 +198,20 @@ class CopilotSessionHost {
         break
       case 'follow-up':
         if (this.snapshot.sessionId !== null && command.text.trim()) {
-          this.transition({ type: 'question', sessionId: this.snapshot.sessionId, question: command.text.trim() })
-          void this.answer(this.snapshot.sessionId, command.text.trim())
+          const text = command.text.trim()
+          const sessionId = this.snapshot.sessionId
+          this.transition({ type: 'question', sessionId, question: text })
+          this.transition({
+            type: 'message',
+            sessionId,
+            message: {
+              id: -(sessionId * 1_000_000 + ++this.messageSequence),
+              role: 'me',
+              source: 'follow-up',
+              text,
+            },
+          })
+          void this.answer(sessionId, text)
         }
         break
       case 'request-snapshot':
@@ -147,12 +226,15 @@ class CopilotSessionHost {
     }
 
     const sessionId = ++this.sessionSequence
+    this.persistenceSessionId = globalThis.crypto.randomUUID()
     this.transition({ type: 'start', sessionId })
     this.recording = []
     this.sampleRate = 16_000
-    this.lastFinal = ''
-    this.lastFinalAt = 0
-    this.finalTranscriptParts = []
+    this.messageSequence = 0
+    this.transcripts = {
+      system: createTranscriptState(),
+      microphone: createTranscriptState(),
+    }
     this.previousTurn = ''
 
     try {
@@ -189,7 +271,11 @@ class CopilotSessionHost {
       }
 
       await this.installAudioListeners(sessionId)
-      await this.startDeepgram(sessionId, capabilities.sample_rate || 16_000)
+      const sources: CopilotAudioSource[] = [
+        ...(useSystemAudio ? ['system' as const] : []),
+        ...(useMicrophone ? ['microphone' as const] : []),
+      ]
+      await this.startDeepgrams(sessionId, sources, capabilities.sample_rate || 16_000)
       if (!this.isCurrent(sessionId)) {
         await this.cleanupRuntime()
         return
@@ -227,11 +313,12 @@ class CopilotSessionHost {
     this.stopPromise = (async () => {
       this.abortController?.abort()
       this.abortController = null
-      closeDeepgramStream(this.deepgram)
-      this.deepgram = null
+      this.closeDeepgrams()
       await invoke('stop_audio_capture').catch(() => {})
       await this.cleanupRuntime()
+      await this.persistenceQueue
       this.transition({ type: 'stopped' })
+      this.persistenceSessionId = null
     })().finally(() => {
       this.stopPromise = null
     })
@@ -239,9 +326,16 @@ class CopilotSessionHost {
   }
 
   private async cleanupRuntime(): Promise<void> {
-    closeDeepgramStream(this.deepgram)
-    this.deepgram = null
+    this.closeDeepgrams()
+    this.enabledSources = []
     this.unlisteners.splice(0).forEach((unlisten) => unlisten())
+  }
+
+  private closeDeepgrams(): void {
+    closeDeepgramStream(this.deepgrams.system)
+    closeDeepgramStream(this.deepgrams.microphone)
+    this.deepgrams.system = null
+    this.deepgrams.microphone = null
   }
 
   private async installAudioListeners(sessionId: number): Promise<void> {
@@ -252,7 +346,7 @@ class CopilotSessionHost {
         const nextRate = event.payload.sample_rate || 16_000
         if (nextRate !== this.sampleRate) {
           this.sampleRate = nextRate
-          void this.startDeepgram(sessionId, nextRate).catch((error) => {
+          void this.startDeepgrams(sessionId, this.enabledSources, nextRate).catch((error) => {
             if (this.isCurrent(sessionId)) void this.fail(sessionId, String(error))
           })
         }
@@ -267,7 +361,10 @@ class CopilotSessionHost {
           samples -= this.recording.shift()?.length || 0
         }
         this.transition({ type: 'recording', sessionId })
-        sendAudioChunk(this.deepgram, new Float32Array(payload))
+      }),
+      await listen<AudioSourceChunk>('audio-source-chunk', (event) => {
+        if (!this.isCurrent(sessionId)) return
+        sendAudioChunk(this.deepgrams[event.payload.source], new Float32Array(event.payload.samples))
       }),
       await listen<number>('audio-amplitude', (event) => {
         if (this.isCurrent(sessionId)) {
@@ -281,28 +378,52 @@ class CopilotSessionHost {
     )
   }
 
-  private async startDeepgram(sessionId: number, sampleRate: number): Promise<void> {
-    closeDeepgramStream(this.deepgram)
-    this.deepgram = await startDeepgramStream(
+  private async startDeepgrams(
+    sessionId: number,
+    sources: CopilotAudioSource[],
+    sampleRate: number,
+  ): Promise<void> {
+    this.enabledSources = sources
+    await Promise.all(sources.map((source) => this.startDeepgram(sessionId, source, sampleRate)))
+  }
+
+  private async startDeepgram(
+    sessionId: number,
+    source: CopilotAudioSource,
+    sampleRate: number,
+  ): Promise<void> {
+    closeDeepgramStream(this.deepgrams[source])
+    this.transcripts[source] = createTranscriptState()
+    this.deepgrams[source] = await startDeepgramStream(
       (event) => {
         if (!this.isCurrent(sessionId)) return
+        const transcript = this.transcripts[source]
         if (
           event.isFinal
           && event.text
-          && this.finalTranscriptParts[this.finalTranscriptParts.length - 1] !== event.text
+          && transcript.finalParts[transcript.finalParts.length - 1] !== event.text
         ) {
-          this.finalTranscriptParts.push(event.text)
+          transcript.finalParts.push(event.text)
         }
         if (!event.isUtteranceFinal) return
-        const text = (this.finalTranscriptParts.join(' ') || event.text).trim()
-        this.finalTranscriptParts = []
+        const text = (transcript.finalParts.join(' ') || event.text).trim()
+        transcript.finalParts = []
         if (!text) return
         const now = Date.now()
-        if (text === this.lastFinal && now - this.lastFinalAt < 2_000) return
-        this.lastFinal = text
-        this.lastFinalAt = now
-        this.transition({ type: 'question', sessionId, question: text })
-        void this.answer(sessionId, text)
+        if (text === transcript.lastFinal && now - transcript.lastFinalAt < 2_000) return
+        transcript.lastFinal = text
+        transcript.lastFinalAt = now
+        this.transition({
+          type: 'message',
+          sessionId,
+          message: {
+            id: -(sessionId * 1_000_000 + ++this.messageSequence),
+            role: source === 'system' ? 'interviewer' : 'me',
+            source: source === 'system' ? 'system-stt' : 'microphone-stt',
+            text,
+          },
+        })
+        if (source === 'system') void this.answer(sessionId, text)
       },
       (error) => {
         if (this.isCurrent(sessionId)) void this.fail(sessionId, String(error))
@@ -371,6 +492,10 @@ class CopilotSessionHost {
     await this.cleanupRuntime()
     this.transition({ type: 'error', sessionId, error })
   }
+
+  async dispatch(command: CopilotSessionCommand): Promise<void> {
+    await this.handle(command)
+  }
 }
 
 let activeHost: CopilotSessionHost | null = null
@@ -413,6 +538,11 @@ export async function mountCopilotSessionClient(): Promise<() => void> {
 }
 
 export async function sendCopilotCommand(command: CopilotSessionCommand): Promise<void> {
+  if (activeHostPromise) {
+    const host = await activeHostPromise
+    await host.dispatch(command)
+    return
+  }
   await emit(COMMAND_EVENT, command)
 }
 

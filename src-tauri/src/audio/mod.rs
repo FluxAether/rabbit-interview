@@ -30,6 +30,12 @@ pub struct AudioConfigPayload {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct AudioSourceChunkPayload {
+    source: &'static str,
+    samples: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct AudioCapabilities {
     pub system_audio_available: bool,
     pub microphone_available: bool,
@@ -158,6 +164,19 @@ fn emit_audio_chunk(app: &AppHandle, data: Vec<f32>) {
     let (processed, rms) = process_output_audio(data);
     let _ = app.emit("audio-amplitude", rms.min(1.0));
     let _ = app.emit("audio-chunk", processed);
+}
+
+fn emit_audio_source_chunk(app: &AppHandle, source: &'static str, samples: &[f32]) {
+    if samples.is_empty() {
+        return;
+    }
+    let _ = app.emit(
+        "audio-source-chunk",
+        AudioSourceChunkPayload {
+            source,
+            samples: samples.to_vec(),
+        },
+    );
 }
 
 fn push_mixed_audio(
@@ -311,6 +330,7 @@ pub async fn start_audio_capture(
                     let start_frame =
                         origin + frame_counter.fetch_add(samples.len() as u64, Ordering::SeqCst);
                     let timestamp = start_frame as f64 / f64::from(TARGET_SAMPLE_RATE);
+                    emit_audio_source_chunk(&system_app, "system", &samples);
                     push_mixed_audio(
                         &system_app,
                         &system_mixer,
@@ -392,6 +412,7 @@ pub async fn start_audio_capture(
                         let origin = capture_origin_frame(&origin_frame, elapsed_frame);
                         let start_frame =
                             origin + frame_counter.fetch_add(mono.len() as u64, Ordering::SeqCst);
+                        emit_audio_source_chunk(&microphone_app, "microphone", &mono);
                         push_mixed_audio(
                             &microphone_app,
                             &microphone_mixer,

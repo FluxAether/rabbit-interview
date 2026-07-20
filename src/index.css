@@ -68,15 +68,6 @@ body {
   border: 1px solid #e0e7ff;
 }
 
-.suggestion-bubble {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 8px 12px;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
 .floating-panel {
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(20px);

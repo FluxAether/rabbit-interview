@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Clipboard, EyeOff, Mic, RefreshCw, Shield, Square, Trash2 } from 'lucide-react'
 import { useTranslation } from '../i18n'
 import { sendCopilotCommand } from '../lib/copilotSession'
@@ -20,9 +20,15 @@ export default function CopilotPanel({
   const t = useTranslation()
   const copilot = useAppStore((state) => state.copilot)
   const [followUp, setFollowUp] = useState('')
+  const messagesRef = useRef<HTMLDivElement>(null)
   const running = copilot.phase === 'starting' || copilot.phase === 'listening'
   const busy = copilot.phase === 'stopping'
   const amplitude = Math.min(100, Math.round(copilot.amplitude * 140))
+  const roleLabels = {
+    interviewer: t('copilot.role.interviewer'),
+    assistant: t('copilot.role.assistant'),
+    me: t('copilot.role.me'),
+  }
 
   const submitFollowUp = (event: FormEvent) => {
     event.preventDefault()
@@ -34,9 +40,14 @@ export default function CopilotPanel({
 
   const protectionLabel = t(protectionMessageKey(windowStatus))
 
+  useEffect(() => {
+    const container = messagesRef.current
+    if (container) container.scrollTop = container.scrollHeight
+  }, [copilot.messages])
+
   return (
     <section
-      className={`floating-panel flex min-h-0 flex-col border border-[#e2e8f0] p-4 text-sm ${floating ? 'h-screen w-screen rounded-none' : 'mx-auto w-full max-w-[520px] shadow-xl'}`}
+      className={`floating-panel flex min-h-0 w-full flex-col border border-[#e2e8f0] p-4 text-sm ${floating ? 'h-[100dvh] rounded-none' : 'shadow-xl'}`}
       aria-label={t('copilot.floating.title')}
     >
       <header className="mb-3 flex items-center justify-between gap-3 px-1" data-tauri-drag-region={floating ? true : undefined}>
@@ -66,32 +77,45 @@ export default function CopilotPanel({
         <div className="h-full bg-[#6366f1] transition-[width]" style={{ width: `${amplitude}%` }} />
       </div>
 
-      <div className="mb-3 min-h-0 shrink basis-[30%] overflow-auto rounded-xl bg-[#f8fafc] p-3">
-        <div className="mb-1 text-[10px] uppercase tracking-widest text-[#64748b]">{t('copilot.question')}</div>
-        <div className="text-[13px] leading-relaxed">
-          {copilot.question || <span className="text-[#64748b]">{t('copilot.question.empty')}</span>}
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-auto" aria-live="polite">
-        <div className="mb-1.5 text-[10px] uppercase tracking-widest text-[#64748b]">{t('copilot.suggestions')}</div>
-        {copilot.suggestions.length === 0 ? (
-          <div className="text-xs text-[#64748b]">{t('copilot.suggestions.emptyShort')}</div>
+      <div ref={messagesRef} className="min-h-64 flex-1 overflow-auto rounded-xl bg-[#f8fafc] p-3" aria-live="polite">
+        {copilot.messages.length === 0 ? (
+          <div className="flex h-full min-h-56 items-center justify-center px-6 text-center text-xs text-[#64748b]">
+            {t('copilot.chat.empty')}
+          </div>
         ) : (
-          <div className="space-y-1.5">
-            {copilot.suggestions.map((suggestion) => (
-              <article key={suggestion.id} className="suggestion-bubble flex items-start gap-2">
-                <div className="min-w-0 flex-1 whitespace-pre-wrap">{suggestion.text}</div>
-                <button
-                  type="button"
-                  onClick={() => navigator.clipboard.writeText(suggestion.text)}
-                  className="shrink-0 rounded p-1 text-[#6366f1] hover:bg-[#eef2ff]"
-                  aria-label={t('copilot.copySuggestion')}
-                >
-                  <Clipboard className="h-3.5 w-3.5" />
-                </button>
-              </article>
-            ))}
+          <div className="space-y-3">
+            {copilot.messages.map((message) => {
+              const mine = message.role === 'me'
+              const assistant = message.role === 'assistant'
+              return (
+                <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                  <article className="max-w-[88%]">
+                    <div className={`mb-1 px-1 text-[10px] font-medium text-[#64748b] ${mine ? 'text-right' : ''}`}>
+                      {roleLabels[message.role]}
+                    </div>
+                    <div className={`flex items-start gap-2 rounded-xl px-3 py-2 text-[13px] leading-relaxed ${
+                      mine
+                        ? 'rounded-br-sm bg-[#4f46e5] text-white'
+                        : assistant
+                          ? 'rounded-bl-sm border border-[#c7d2fe] bg-[#eef2ff] text-[#312e81]'
+                          : 'rounded-bl-sm border border-[#e2e8f0] bg-white text-[#1e293b]'
+                    }`}>
+                      <div className="min-w-0 flex-1 whitespace-pre-wrap">{message.text}</div>
+                      {assistant && (
+                        <button
+                          type="button"
+                          onClick={() => void navigator.clipboard.writeText(message.text)}
+                          className="shrink-0 rounded p-1 text-[#4f46e5] hover:bg-[#e0e7ff]"
+                          aria-label={t('copilot.copySuggestion')}
+                        >
+                          <Clipboard className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
