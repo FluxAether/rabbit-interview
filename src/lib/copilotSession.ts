@@ -10,7 +10,7 @@ import {
 import { chunksToWavBuffer } from './wav'
 import { loadAppSettings } from './settingsStore'
 import { openMicrophoneSettings, tryRequestMicrophone } from './permissions'
-import { upsertCopilotMessage } from './db'
+import { saveInterview, upsertCopilotMessage } from './db'
 import {
   createInitialSnapshot,
   reduceCopilotSnapshot,
@@ -19,6 +19,7 @@ import {
 } from './copilotSessionState'
 import { useAppStore, type Suggestion } from '../stores/useAppStore'
 import { mergeContinuationText, textSimilarity } from './copilotText'
+import { createCopilotInterviewRecord, type SavedRecording } from './copilotArchive'
 
 const COMMAND_EVENT = 'copilot-session-command'
 const SNAPSHOT_EVENT = 'copilot-session-snapshot'
@@ -193,6 +194,70 @@ class CopilotSessionHost {
           })
         }
       })
+  }
+
+  private async archiveSession(
+    snapshot: CopilotSnapshot,
+    persistenceSessionId: string | null,
+  ): Promise<void> {
+    const recordedSamples = this.recording.reduce((total, chunk) => total + chunk.length, 0)
+    if (!persistenceSessionId) return
+
+    let recording: SavedRecording | null = null
+    let recordingError: string | null = null
+    try {
+      recording = await invoke<SavedRecording | null>('save_audio_recording', {
+        sessionId: persistenceSessionId,
+      })
+    } catch (error) {
+      recordingError = error instanceof Error ? error.message : String(error)
+      console.error('[Copilot] Failed to save recording', error)
+    }
+    if (
+      snapshot.messages.length === 0
+      && recordedSamples === 0
+      && !recording
+      && !recordingError
+    ) return
+
+    this.transition({ type: 'archive-saving' })
+    const duration = recording?.duration_seconds
+      ?? Math.round(recordedSamples / (this.sampleRate || 16_000))
+    const record = createCopilotInterviewRecord(
+      snapshot.messages,
+      duration,
+      recording?.path ?? null,
+    )
+
+    try {
+      const id = await saveInterview(record)
+      useAppStore.getState().addHistory({ ...record, id })
+      if (recordingError) {
+        this.transition({
+          type: 'archive-error',
+          notice: `Session saved, but the recording could not be saved: ${recordingError}`,
+        })
+      } else {
+        this.transition({
+          type: 'archive-saved',
+          notice: recording ? 'copilot.archive.saved' : 'copilot.archive.sessionSaved',
+        })
+      }
+      console.info('[Copilot] Session archived', {
+        interviewId: id,
+        recordingPath: recording?.path ?? null,
+        duration,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error('[Copilot] Failed to archive session', error)
+      this.transition({
+        type: 'archive-error',
+        notice: recording
+          ? `Recording saved, but the session record could not be saved: ${message}`
+          : `Session could not be saved: ${message}`,
+      })
+    }
   }
 
   private clearPendingInterviewerQuestion(): void {
@@ -420,12 +485,15 @@ class CopilotSessionHost {
     const sessionId = this.snapshot.sessionId
     this.clearPendingInterviewerQuestion()
     this.cancelActiveAnswer(sessionId)
+    const archiveSnapshot = this.snapshot
+    const persistenceSessionId = this.persistenceSessionId
     this.transition({ type: 'stop' })
     this.stopPromise = (async () => {
       this.closeDeepgrams()
       await invoke('stop_audio_capture').catch(() => {})
       await this.cleanupRuntime()
       await this.persistenceQueue
+      await this.archiveSession(archiveSnapshot, persistenceSessionId)
       this.transition({ type: 'stopped' })
       this.persistenceSessionId = null
     })().finally(() => {
@@ -691,8 +759,13 @@ class CopilotSessionHost {
     if (!this.isCurrent(sessionId)) return
     this.clearPendingInterviewerQuestion()
     this.cancelActiveAnswer(sessionId)
+    const archiveSnapshot = this.snapshot
+    const persistenceSessionId = this.persistenceSessionId
     await invoke('stop_audio_capture').catch(() => {})
     await this.cleanupRuntime()
+    await this.persistenceQueue
+    await this.archiveSession(archiveSnapshot, persistenceSessionId)
+    this.persistenceSessionId = null
     this.transition({ type: 'error', sessionId, error })
   }
 

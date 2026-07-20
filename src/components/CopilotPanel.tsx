@@ -134,6 +134,23 @@ export default function CopilotPanel({
         </div>
       )}
 
+      {copilot.archiveStatus !== 'idle' && (
+        <div
+          className={`mt-2 rounded-lg px-2.5 py-2 text-xs ${
+            copilot.archiveStatus === 'error'
+              ? 'bg-red-50 text-red-700'
+              : copilot.archiveStatus === 'saved'
+                ? 'bg-emerald-50 text-emerald-700'
+                : 'bg-slate-100 text-slate-700'
+          }`}
+          role={copilot.archiveStatus === 'error' ? 'alert' : 'status'}
+        >
+          {copilot.archiveStatus === 'saving'
+            ? t('copilot.archive.saving')
+            : t(copilot.archiveNotice || 'copilot.archive.saved')}
+        </div>
+      )}
+
       {copilot.error && (
         <div className="mt-2 rounded-lg bg-red-50 px-2.5 py-2 text-xs text-red-700" role="alert">{copilot.error}</div>
       )}

@@ -40,15 +40,19 @@ console.log('=== Stealth Copilot refactor verification ===')
 
 const app = source('src/App.tsx')
 const page = source('src/pages/StealthCopilot.tsx')
+const historyPage = source('src/pages/History.tsx')
 const panel = source('src/components/CopilotPanel.tsx')
 const session = source('src/lib/copilotSession.ts')
 const sessionState = source('src/lib/copilotSessionState.ts')
 const db = source('src/lib/db.ts')
+const archive = source('src/lib/copilotArchive.ts')
 const llm = source('src/lib/llm.ts')
+const rustLib = source('src-tauri/src/lib.rs')
 const rustWindow = source('src-tauri/src/copilot_window.rs')
 const rustAudio = source('src-tauri/src/audio/mod.rs')
 const cargo = source('src-tauri/Cargo.toml')
 const defaultCapability = source('src-tauri/capabilities/default.json')
+const tauriConfig = source('src-tauri/tauri.conf.json')
 
 check(session.length > 0, 'single Copilot session host exists')
 check(panel.length > 0 && app.includes('CopilotPanel') && page.includes('CopilotPanel'), 'main and floating views share CopilotPanel')
@@ -59,6 +63,33 @@ check(rustAudio.includes('"audio-source-chunk"') && session.includes("listen<Aud
 check(sessionState.includes("'system-stt' | 'microphone-stt' | 'follow-up' | 'llm'"), 'chat messages retain their exact source')
 check(db.includes('CREATE TABLE IF NOT EXISTS copilot_messages') && db.includes('upsertCopilotMessage'), 'chat messages have a SQLite upsert store')
 check(session.includes('upsertCopilotMessage'), 'the Copilot session persists displayed messages')
+check(
+  session.includes('archiveSession(archiveSnapshot, persistenceSessionId)')
+    && session.includes("invoke<SavedRecording | null>('save_audio_recording'")
+    && session.includes('saveInterview(record)'),
+  'stopping capture automatically archives the session and native recording',
+)
+check(
+  rustAudio.includes('recording: Mutex<Vec<f32>>')
+    && rustAudio.includes('save_audio_recording')
+    && rustAudio.includes('write_pcm16_wav'),
+  'the native audio layer retains capture data and writes a real WAV file',
+)
+check(rustLib.includes('save_audio_recording'), 'the native recording command is registered with Tauri')
+check(
+  db.includes('recording_path TEXT')
+    && db.includes('ALTER TABLE interviews ADD COLUMN recording_path TEXT')
+    && db.includes('recording_path AS recordingPath'),
+  'interview history migrates and stores the recording path',
+)
+check(archive.includes('createCopilotInterviewRecord'), 'automatic archives use one transcript record builder')
+check(!page.includes('saveSession = async') && page.includes('copilot.archive.autoSaveHint'), 'the page no longer requires a manual session-save action')
+check(
+  historyPage.includes('convertFileSrc(selected.recordingPath)')
+    && !historyPage.includes('data:audio/wav;base64')
+    && tauriConfig.includes('$APPDATA/recordings/**'),
+  'history replay loads the saved WAV file through the scoped asset protocol',
+)
 check(defaultCapability.includes('sql:allow-execute'), 'SQLite write operations are explicitly allowed')
 check(session.includes('INTERVIEWER_QUESTION_DEBOUNCE_MS'), 'interviewer transcript segments are debounced before requesting an answer')
 check(session.includes('MAX_AUTO_CONTINUATIONS') && session.includes('continuationAttempt < MAX_AUTO_CONTINUATIONS'), 'token-limited answers are automatically continued with a bounded retry count')
@@ -149,6 +180,15 @@ if (sessionState) {
     reason: 'copilot.answer.incomplete.connection',
   })
   const stoppedIncompleteAnswer = reduceCopilotSnapshot(incompleteAnswer, { type: 'stop' })
+  const savingArchive = reduceCopilotSnapshot(stopping, { type: 'archive-saving' })
+  const savedArchive = reduceCopilotSnapshot(savingArchive, {
+    type: 'archive-saved',
+    notice: 'copilot.archive.saved',
+  })
+  const failedArchive = reduceCopilotSnapshot(savingArchive, {
+    type: 'archive-error',
+    notice: 'disk full',
+  })
   check(starting.phase === 'starting' && starting.sessionId === 7, 'idle session starts with an explicit id')
   check(listening.phase === 'listening' && listening.audioMode === 'system+microphone', 'native audio mode is reflected in the shared snapshot')
   check(duplicateStart === starting, 'duplicate start is idempotent')
@@ -183,7 +223,37 @@ if (sessionState) {
       && stoppedIncompleteAnswer.activeAnswerId === null,
     'stopping capture preserves a terminal incomplete answer instead of deleting it',
   )
+  check(
+    savingArchive?.archiveStatus === 'saving'
+      && savedArchive?.archiveStatus === 'saved'
+      && savedArchive.archiveNotice === 'copilot.archive.saved',
+    'automatic archive progress remains visible after the active session id is invalidated',
+  )
+  check(
+    failedArchive?.archiveStatus === 'error' && failedArchive.archiveNotice === 'disk full',
+    'automatic archive failures are exposed to the user',
+  )
 }
+
+const { createCopilotInterviewRecord } = loadTypeScriptModule(
+  'src/lib/copilotArchive.ts',
+  ['createCopilotInterviewRecord'],
+)
+const archivedRecord = createCopilotInterviewRecord(
+  [
+    { id: 1, role: 'interviewer', source: 'system-stt', text: 'Tell me about yourself.' },
+    { id: 2, role: 'assistant', source: 'llm', text: 'I build reliable desktop systems.' },
+  ],
+  42,
+  '/tmp/interview.wav',
+  new Date('2026-07-20T15:55:00.000Z'),
+)
+check(
+  archivedRecord.transcript === 'Interviewer: Tell me about yourself.\nAI: I build reliable desktop systems.'
+    && archivedRecord.duration === 42
+    && archivedRecord.recordingPath === '/tmp/interview.wav',
+  'automatic archive records contain the complete transcript, duration, and recording path',
+)
 
 check(!sessionState || sessionState.includes("revision: snapshot.revision + 1"), 'snapshots carry a monotonic revision')
 check(session.includes("type: 'request-snapshot'"), 'floating clients request a fresh snapshot after connecting')

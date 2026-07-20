@@ -11,6 +11,7 @@ export interface InterviewRecord {
   transcript: string
   duration: number
   mode: string
+  recordingPath?: string | null
 }
 
 export interface Suggestion {

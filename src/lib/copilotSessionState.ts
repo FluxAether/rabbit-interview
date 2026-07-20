@@ -2,6 +2,7 @@ import type { Suggestion } from '../stores/useAppStore'
 
 export type CopilotPhase = 'idle' | 'starting' | 'listening' | 'stopping' | 'error'
 export type CopilotAnswerStatus = 'idle' | 'generating' | 'continuing' | 'incomplete'
+export type CopilotArchiveStatus = 'idle' | 'saving' | 'saved' | 'error'
 export type CopilotMessageRole = 'interviewer' | 'assistant' | 'me'
 export type CopilotMessageSource = 'system-stt' | 'microphone-stt' | 'follow-up' | 'llm'
 
@@ -20,6 +21,8 @@ export interface CopilotSnapshot {
   activeAnswerId: number | null
   answerStatus: CopilotAnswerStatus
   answerNotice: string | null
+  archiveStatus: CopilotArchiveStatus
+  archiveNotice: string | null
   amplitude: number
   hasRecording: boolean
   audioMode: string
@@ -43,6 +46,9 @@ export type CopilotSnapshotAction =
   | { type: 'complete-answer'; sessionId: number; answerId: number; answer: string; suggestions: Suggestion[] }
   | { type: 'incomplete-answer'; sessionId: number; answerId: number; text: string; reason: string }
   | { type: 'cancel-answer'; sessionId: number; answerId: number }
+  | { type: 'archive-saving' }
+  | { type: 'archive-saved'; notice: string }
+  | { type: 'archive-error'; notice: string }
   | { type: 'amplitude'; sessionId: number; amplitude: number }
   | { type: 'recording'; sessionId: number }
   | { type: 'recoverable-error'; sessionId: number; error: string }
@@ -57,6 +63,8 @@ export function createInitialSnapshot(): CopilotSnapshot {
     activeAnswerId: null,
     answerStatus: 'idle',
     answerNotice: null,
+    archiveStatus: 'idle',
+    archiveNotice: null,
     amplitude: 0,
     hasRecording: false,
     audioMode: 'idle',
@@ -103,6 +111,8 @@ export function reduceCopilotSnapshot(
       activeAnswerId: null,
       answerStatus: 'idle',
       answerNotice: null,
+      archiveStatus: 'idle',
+      archiveNotice: null,
       amplitude: 0,
       hasRecording: false,
       audioMode: 'starting',
@@ -159,7 +169,36 @@ export function reduceCopilotSnapshot(
       activeAnswerId: null,
       answerStatus: 'idle',
       answerNotice: null,
+      archiveStatus: 'idle',
+      archiveNotice: null,
       error: null,
+      revision: snapshot.revision + 1,
+    }
+  }
+
+  if (action.type === 'archive-saving') {
+    return {
+      ...snapshot,
+      archiveStatus: 'saving',
+      archiveNotice: null,
+      revision: snapshot.revision + 1,
+    }
+  }
+
+  if (action.type === 'archive-saved') {
+    return {
+      ...snapshot,
+      archiveStatus: 'saved',
+      archiveNotice: action.notice,
+      revision: snapshot.revision + 1,
+    }
+  }
+
+  if (action.type === 'archive-error') {
+    return {
+      ...snapshot,
+      archiveStatus: 'error',
+      archiveNotice: action.notice,
       revision: snapshot.revision + 1,
     }
   }

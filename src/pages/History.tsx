@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { useAppStore, InterviewRecord } from '../stores/useAppStore'
 import WaveSurfer from 'wavesurfer.js'
 import { loadHistory as loadHistoryDb } from '../lib/db'
@@ -29,41 +30,56 @@ export default function History() {
   const waveformRef = useRef<HTMLDivElement>(null)
   const wavesurferRef = useRef<any>(null)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [audioReady, setAudioReady] = useState(false)
+
+  useEffect(() => {
+    wavesurferRef.current?.destroy()
+    wavesurferRef.current = null
+    setAudioReady(false)
+    setIsPlaying(false)
+    if (!selected?.recordingPath || !waveformRef.current) return
+
+    let wavesurfer: ReturnType<typeof WaveSurfer.create> | null = null
+    try {
+      wavesurfer = WaveSurfer.create({
+        container: waveformRef.current,
+        waveColor: '#6366f1',
+        progressColor: '#4f46e5',
+        height: 60,
+        barWidth: 2,
+        barGap: 1,
+      })
+      wavesurfer.on('ready', () => setAudioReady(true))
+      wavesurfer.on('finish', () => setIsPlaying(false))
+      void wavesurfer.load(convertFileSrc(selected.recordingPath)).catch((error) => {
+        setAudioReady(false)
+        console.warn('Unable to load saved interview recording', error)
+      })
+      wavesurferRef.current = wavesurfer
+    } catch (error) {
+      console.warn('Unable to load saved interview recording', error)
+    }
+
+    return () => {
+      wavesurfer?.destroy()
+      if (wavesurferRef.current === wavesurfer) wavesurferRef.current = null
+    }
+  }, [selected?.recordingPath])
 
   const replay = (record: InterviewRecord) => {
     setSelected(record)
-    setIsPlaying(false)
-    
-    // Initialize wavesurfer after render
-    setTimeout(() => {
-      if (waveformRef.current && !wavesurferRef.current) {
-        try {
-          wavesurferRef.current = WaveSurfer.create({
-            container: waveformRef.current,
-            waveColor: '#6366f1',
-            progressColor: '#4f46e5',
-            height: 60,
-            barWidth: 2,
-            barGap: 1,
-          })
-          // Use a silent oscillator or just the visual for demo
-          // For real: load a blob URL from recorded audio
-          wavesurferRef.current.load('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=') // tiny silent wav
-        } catch (e) {
-          console.warn('WaveSurfer init (demo mode)')
-        }
-      }
-    }, 80)
   }
 
   const toggleReplayAudio = () => {
-    if (wavesurferRef.current) {
-      wavesurferRef.current.playPause()
-      setIsPlaying(!isPlaying)
-    } else {
-      // Fallback animation
-      setIsPlaying(!isPlaying)
-    }
+    if (!wavesurferRef.current || !selected?.recordingPath || !audioReady) return
+    wavesurferRef.current.playPause()
+    setIsPlaying((playing) => !playing)
+  }
+
+  const closeReplay = () => {
+    setSelected(null)
+    setIsPlaying(false)
+    setAudioReady(false)
   }
 
   return (
@@ -120,7 +136,13 @@ export default function History() {
               </div>
 
               <button onClick={() => setSelected(item)} className="px-4 py-1.5 border text-xs rounded-xl">{t('common.viewDetails')}</button>
-              <button onClick={() => replay(item)} className="px-4 py-1.5 bg-[#6366f1] text-white text-xs rounded-2xl flex items-center gap-1">▶ {t('common.replay')}</button>
+              <button
+                onClick={() => replay(item)}
+                disabled={!item.recordingPath}
+                className="px-4 py-1.5 bg-[#6366f1] text-white text-xs rounded-2xl flex items-center gap-1 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ▶ {t('common.replay')}
+              </button>
             </div>
           </div>
         ))}
@@ -129,7 +151,7 @@ export default function History() {
 
       {/* Replay Modal */}
       {selected && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={() => setSelected(null)}>
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={closeReplay}>
           <div className="card w-[620px] p-6" onClick={e => e.stopPropagation()}>
             <div className="font-semibold mb-2">{t('history.replayModal.title')} — {selected.role} @ {selected.company}</div>
             <div className="text-sm mb-3">{t('misc.score')}: <span className="font-semibold text-[#6366f1]">{selected.score ?? t('history.notScored')}</span> • {t('history.replayModal.duration')}: {Math.floor(selected.duration/60)}m</div>
@@ -138,26 +160,25 @@ export default function History() {
               {selected.transcript || t('history.transcriptPlaceholder')}
             </div>
 
-            {/* Real WaveSurfer container */}
-            <div ref={waveformRef} className="w-full bg-[#f8fafc] rounded-xl p-2 mb-3 min-h-[70px]" />
+            {selected.recordingPath ? (
+              <div ref={waveformRef} className="w-full bg-[#f8fafc] rounded-xl p-2 mb-3 min-h-[70px]" />
+            ) : (
+              <div className="mb-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {t('history.recordingUnavailable')}
+              </div>
+            )}
 
             <div className="flex gap-2">
-              <button 
-                onClick={toggleReplayAudio} 
-                className="flex-1 py-2 border rounded-xl flex items-center justify-center gap-2"
+              <button
+                onClick={toggleReplayAudio}
+                disabled={!selected.recordingPath || !audioReady}
+                className="flex-1 py-2 border rounded-xl flex items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isPlaying ? '⏸ ' + t('common.pause') : '▶ ' + t('common.play')}
               </button>
               <button 
                 className="flex-1 py-2 bg-[#6366f1] text-white rounded-xl" 
-                onClick={() => {
-                  setSelected(null)
-                  setIsPlaying(false)
-                  if (wavesurferRef.current) {
-                    wavesurferRef.current.destroy()
-                    wavesurferRef.current = null
-                  }
-                }}
+                onClick={closeReplay}
               >
                 {t('common.close')}
               </button>

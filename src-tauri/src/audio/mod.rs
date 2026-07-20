@@ -10,13 +10,16 @@ use cpal::{
 };
 use mixer::{AudioSource, TimedAudioMixer};
 use serde::Serialize;
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager};
 
 const TARGET_SAMPLE_RATE: u32 = AUDIOTEE_SAMPLE_RATE;
+const MAX_RECORDING_SECONDS: usize = 15 * 60;
 
 enum AudioCommand {
     Stop,
@@ -53,6 +56,14 @@ struct AudioCapture {
     tx: Mutex<Option<mpsc::Sender<AudioCommand>>>,
     current_mode: Mutex<String>,
     failure_reason: Mutex<Option<String>>,
+    recording: Mutex<Vec<f32>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SavedRecording {
+    pub path: String,
+    pub duration_seconds: u64,
+    pub sample_rate: u32,
 }
 
 static AUDIO_STATE: once_cell::sync::Lazy<AudioCapture> =
@@ -162,8 +173,80 @@ fn emit_audio_chunk(app: &AppHandle, data: Vec<f32>) {
         return;
     }
     let (processed, rms) = process_output_audio(data);
+    {
+        let mut recording = AUDIO_STATE.recording.lock().unwrap();
+        recording.extend_from_slice(&processed);
+        let max_samples = TARGET_SAMPLE_RATE as usize * MAX_RECORDING_SECONDS;
+        if recording.len() > max_samples {
+            let overflow = recording.len() - max_samples;
+            recording.drain(..overflow);
+        }
+    }
     let _ = app.emit("audio-amplitude", rms.min(1.0));
     let _ = app.emit("audio-chunk", processed);
+}
+
+fn write_pcm16_wav<W: Write>(
+    writer: &mut W,
+    samples: &[f32],
+    sample_rate: u32,
+) -> Result<(), String> {
+    let data_size = samples
+        .len()
+        .checked_mul(2)
+        .and_then(|size| u32::try_from(size).ok())
+        .ok_or_else(|| "Recording is too large to save as WAV".to_string())?;
+    let byte_rate = sample_rate * 2;
+
+    writer
+        .write_all(b"RIFF")
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(&(36_u32 + data_size).to_le_bytes())
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(b"WAVEfmt ")
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(&16_u32.to_le_bytes())
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(&1_u16.to_le_bytes())
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(&1_u16.to_le_bytes())
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(&sample_rate.to_le_bytes())
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(&byte_rate.to_le_bytes())
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(&2_u16.to_le_bytes())
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(&16_u16.to_le_bytes())
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(b"data")
+        .map_err(|error| error.to_string())?;
+    writer
+        .write_all(&data_size.to_le_bytes())
+        .map_err(|error| error.to_string())?;
+
+    for sample in samples {
+        let normalized = sample.clamp(-1.0, 1.0);
+        let pcm = if normalized < 0.0 {
+            (normalized * 32768.0) as i16
+        } else {
+            (normalized * 32767.0) as i16
+        };
+        writer
+            .write_all(&pcm.to_le_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn emit_audio_source_chunk(app: &AppHandle, source: &'static str, samples: &[f32]) {
@@ -298,6 +381,7 @@ pub async fn start_audio_capture(
     }
 
     stop_audio_capture_and_wait();
+    AUDIO_STATE.recording.lock().unwrap().clear();
     remember_audio_state("starting", None);
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let (startup_tx, startup_rx) = mpsc::sync_channel::<Result<AudioConfigPayload, String>>(1);
@@ -516,6 +600,49 @@ pub async fn stop_audio_capture() -> Result<String, String> {
 }
 
 #[tauri::command]
+#[allow(non_snake_case)]
+pub async fn save_audio_recording(
+    app: AppHandle,
+    sessionId: String,
+) -> Result<Option<SavedRecording>, String> {
+    let samples = AUDIO_STATE.recording.lock().unwrap().clone();
+    if samples.is_empty() {
+        return Ok(None);
+    }
+
+    let safe_session_id: String = sessionId
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
+        .collect();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_secs();
+    let recording_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("recordings");
+    fs::create_dir_all(&recording_dir).map_err(|error| error.to_string())?;
+    let file_name = if safe_session_id.is_empty() {
+        format!("interview-{timestamp}.wav")
+    } else {
+        format!("interview-{timestamp}-{safe_session_id}.wav")
+    };
+    let path = recording_dir.join(file_name);
+    let file = File::create(&path).map_err(|error| error.to_string())?;
+    let mut writer = BufWriter::new(file);
+    write_pcm16_wav(&mut writer, &samples, TARGET_SAMPLE_RATE)?;
+    writer.flush().map_err(|error| error.to_string())?;
+
+    Ok(Some(SavedRecording {
+        path: path.to_string_lossy().into_owned(),
+        duration_seconds: samples.len() as u64 / u64::from(TARGET_SAMPLE_RATE),
+        sample_rate: TARGET_SAMPLE_RATE,
+    }))
+}
+
+#[tauri::command]
 pub async fn list_audio_devices() -> Result<Vec<String>, String> {
     Ok(cpal::default_host()
         .input_devices()
@@ -528,7 +655,7 @@ pub async fn list_audio_devices() -> Result<Vec<String>, String> {
 mod tests {
     use super::{
         capture_origin_frame, convert_samples, process_output_audio, stop_audio_capture_and_wait,
-        AtomicU64, MonoResampler,
+        write_pcm16_wav, AtomicU64, MonoResampler,
     };
 
     #[test]
@@ -569,6 +696,24 @@ mod tests {
         let origin = AtomicU64::new(u64::MAX);
         assert_eq!(capture_origin_frame(&origin, 320), 320);
         assert_eq!(capture_origin_frame(&origin, 640), 320);
+    }
+
+    #[test]
+    fn writes_pcm16_mono_wav_header_and_samples() {
+        let mut wav = Vec::new();
+        write_pcm16_wav(&mut wav, &[-1.0, 0.0, 1.0], 16_000).unwrap();
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+        assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 16_000);
+        assert_eq!(u32::from_le_bytes(wav[40..44].try_into().unwrap()), 6);
+        assert_eq!(
+            i16::from_le_bytes(wav[44..46].try_into().unwrap()),
+            i16::MIN
+        );
+        assert_eq!(
+            i16::from_le_bytes(wav[48..50].try_into().unwrap()),
+            i16::MAX
+        );
     }
 
     #[test]

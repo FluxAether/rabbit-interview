@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { Download, ExternalLink, Save } from 'lucide-react'
+import { Download, ExternalLink } from 'lucide-react'
 import CopilotPanel from '../components/CopilotPanel'
 import { useTranslation } from '../i18n'
-import { saveInterview } from '../lib/db'
 import {
   exportCopilotRecording,
-  getCopilotRecordingDuration,
   type AudioCapabilities,
 } from '../lib/copilotSession'
 import {
@@ -21,7 +19,6 @@ import { useAppStore } from '../stores/useAppStore'
 export default function StealthCopilot() {
   const t = useTranslation()
   const copilot = useAppStore((state) => state.copilot)
-  const addHistory = useAppStore((state) => state.addHistory)
   const [devices, setDevices] = useState<string[]>([])
   const [selectedDevice, setSelectedDevice] = useState('')
   const [useSystemAudio, setUseSystemAudio] = useState(true)
@@ -65,25 +62,6 @@ export default function StealthCopilot() {
       useMicWithSystem: microphone,
       micDevice: device || undefined,
     })
-  }
-
-  const saveSession = async () => {
-    if (!copilot.question) return
-    const roleLabels = { interviewer: 'Interviewer', assistant: 'AI', me: 'Me' }
-    const record = {
-      date: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      role: 'Live Interview',
-      company: 'Real-time',
-      score: null,
-      transcript: copilot.messages
-        .map((message) => `${roleLabels[message.role]}: ${message.text}`)
-        .join('\n'),
-      duration: getCopilotRecordingDuration(),
-      mode: 'copilot',
-    }
-    const id = await saveInterview(record)
-    addHistory({ ...record, id })
-    alert(t('copilot.sessionSaved'))
   }
 
   return (
@@ -164,22 +142,15 @@ export default function StealthCopilot() {
 
         <CopilotPanel windowStatus={windowStatus} />
 
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => void saveSession()}
-            disabled={!copilot.question}
-            className="flex items-center justify-center gap-2 rounded-xl border bg-white py-2 text-xs hover:bg-[#f8fafc] disabled:opacity-40"
-          >
-            <Save className="h-3.5 w-3.5" /> {t('copilot.saveSession')}
-          </button>
+        <div className="mt-4">
+          <p className="mb-2 text-center text-xs text-[#64748b]">{t('copilot.archive.autoSaveHint')}</p>
           <button
             type="button"
             onClick={() => {
               if (!exportCopilotRecording()) alert(t('copilot.noRecording'))
             }}
             disabled={!copilot.hasRecording}
-            className="flex items-center justify-center gap-2 rounded-xl border bg-white py-2 text-xs hover:bg-[#f8fafc] disabled:opacity-40"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border bg-white py-2 text-xs hover:bg-[#f8fafc] disabled:opacity-40"
           >
             <Download className="h-3.5 w-3.5" /> {t('copilot.exportRecording')}
           </button>

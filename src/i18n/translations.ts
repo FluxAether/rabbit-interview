@@ -143,6 +143,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'history.replayModal.title': 'Replay',
     'history.replayModal.duration': 'Duration',
     'history.transcriptPlaceholder': 'Full transcript would play here synchronized with audio.',
+    'history.recordingUnavailable': 'No saved recording is available for this interview.',
     'history.exportDemo': 'Exported to PDF (demo)',
 
     // Resume Optimizer
@@ -213,6 +214,10 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.answer.incomplete.maxTokens': 'The model reached its output limit after automatic continuation. Retry to generate a fresh answer.',
     'copilot.answer.incomplete.connection': 'The model connection ended before the answer completed. Retry the answer.',
     'copilot.answer.incomplete.unknown': 'The model stopped without confirming a complete answer. Retry the answer.',
+    'copilot.archive.saving': 'Saving session and recording…',
+    'copilot.archive.saved': 'Session and recording saved automatically.',
+    'copilot.archive.sessionSaved': 'Session saved automatically. No recording was available.',
+    'copilot.archive.autoSaveHint': 'Stopping capture automatically saves the session and recording.',
     'copilot.audioMode': 'Audio mode',
     'copilot.audioMode.idle': 'Idle',
     'copilot.audioMode.starting': 'Starting',
@@ -386,6 +391,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'history.replayModal.title': '回放',
     'history.replayModal.duration': '时长',
     'history.transcriptPlaceholder': '完整转录文本将与音频同步播放。',
+    'history.recordingUnavailable': '该面试没有可用的已保存录音。',
     'history.exportDemo': '已导出为 PDF（演示）',
 
     // Resume Optimizer
@@ -456,6 +462,10 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.answer.incomplete.maxTokens': '模型达到输出上限，自动续写后仍未完成。请点击“重答”重新生成。',
     'copilot.answer.incomplete.connection': '模型连接在回答完成前中断。请点击“重答”。',
     'copilot.answer.incomplete.unknown': '模型未确认回答已完整结束。请点击“重答”。',
+    'copilot.archive.saving': '正在保存会话和录音…',
+    'copilot.archive.saved': '会话和录音已自动保存。',
+    'copilot.archive.sessionSaved': '会话已自动保存，但本次没有可用录音。',
+    'copilot.archive.autoSaveHint': '停止捕获后会自动保存会话记录和录音。',
     'copilot.audioMode': '音频模式',
     'copilot.audioMode.idle': '空闲',
     'copilot.audioMode.starting': '正在启动',
@@ -602,6 +612,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'history.empty': '尚無記錄。請完成一次模擬面試或助手會話。',
     'history.overall': '總分',
     'history.notScored': '未評分',
+    'history.recordingUnavailable': '該面試沒有可用的已儲存錄音。',
 
     'resume.title': 'ResumeAI 優化',
     'resume.badge': 'AI 驅動',
@@ -661,6 +672,10 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.answer.incomplete.maxTokens': '模型達到輸出上限，自動續寫後仍未完成。請點擊「重答」重新產生。',
     'copilot.answer.incomplete.connection': '模型連線在回答完成前中斷。請點擊「重答」。',
     'copilot.answer.incomplete.unknown': '模型未確認回答已完整結束。請點擊「重答」。',
+    'copilot.archive.saving': '正在儲存會話和錄音…',
+    'copilot.archive.saved': '會話和錄音已自動儲存。',
+    'copilot.archive.sessionSaved': '會話已自動儲存，但本次沒有可用錄音。',
+    'copilot.archive.autoSaveHint': '停止擷取後會自動儲存會話記錄和錄音。',
     'copilot.audioMode': '音訊模式',
     'copilot.audioMode.idle': '閒置',
     'copilot.audioMode.starting': '正在啟動',
