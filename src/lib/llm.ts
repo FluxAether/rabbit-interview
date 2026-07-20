@@ -498,6 +498,7 @@ export async function generateSuggestionsStream(
 }
 
 // ==================== STT (Speech-to-Text) Streaming ====================
+const MAX_DEEPGRAM_BUFFERED_BYTES = 512 * 1024;
 // Currently only Deepgram is implemented. The model is now configurable per-provider
 // via Settings (sttProvider + sttModel). The function name is kept for backward compat.
 
@@ -617,6 +618,7 @@ export async function startDeepgramStream(
  */
 export function sendAudioChunk(ws: WebSocket | null, float32Chunk: Float32Array) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (ws.bufferedAmount >= MAX_DEEPGRAM_BUFFERED_BYTES) return;
 
   const pcm16 = float32ToInt16(float32Chunk);
   ws.send(pcm16.buffer);

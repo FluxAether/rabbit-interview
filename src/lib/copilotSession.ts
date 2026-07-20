@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import {
   closeDeepgramStream,
   generateSuggestionsStream,
@@ -7,7 +8,6 @@ import {
   startDeepgramStream,
   type SuggestionRequestType,
 } from './llm'
-import { chunksToWavBuffer } from './wav'
 import { loadAppSettings } from './settingsStore'
 import { openMicrophoneSettings, tryRequestMicrophone } from './permissions'
 import { saveInterview, upsertCopilotMessage } from './db'
@@ -23,7 +23,6 @@ import { createCopilotInterviewRecord, type SavedRecording } from './copilotArch
 
 const COMMAND_EVENT = 'copilot-session-command'
 const SNAPSHOT_EVENT = 'copilot-session-snapshot'
-const MAX_RECORDING_SECONDS = 15 * 60
 const INTERVIEWER_QUESTION_DEBOUNCE_MS = 1_200
 const MAX_AUTO_CONTINUATIONS = 2
 const ECHO_WINDOW_MS = 15_000
@@ -103,7 +102,6 @@ class CopilotSessionHost {
   }
   private unlisteners: UnlistenFn[] = []
   private commandUnlisten: UnlistenFn | null = null
-  private recording: number[][] = []
   private sampleRate = 16_000
   private activeAnswer: ActiveAnswer | null = null
   private pendingInterviewerQuestion = ''
@@ -129,10 +127,6 @@ class CopilotSessionHost {
     await this.stop()
     this.commandUnlisten?.()
     this.commandUnlisten = null
-  }
-
-  getRecording(): { chunks: number[][]; sampleRate: number } {
-    return { chunks: this.recording.slice(), sampleRate: this.sampleRate }
   }
 
   private isCurrent(sessionId: number): boolean {
@@ -200,7 +194,6 @@ class CopilotSessionHost {
     snapshot: CopilotSnapshot,
     persistenceSessionId: string | null,
   ): Promise<void> {
-    const recordedSamples = this.recording.reduce((total, chunk) => total + chunk.length, 0)
     if (!persistenceSessionId) return
 
     let recording: SavedRecording | null = null
@@ -215,14 +208,12 @@ class CopilotSessionHost {
     }
     if (
       snapshot.messages.length === 0
-      && recordedSamples === 0
       && !recording
       && !recordingError
     ) return
 
     this.transition({ type: 'archive-saving' })
-    const duration = recording?.duration_seconds
-      ?? Math.round(recordedSamples / (this.sampleRate || 16_000))
+    const duration = recording?.duration_seconds ?? 0
     const record = createCopilotInterviewRecord(
       snapshot.messages,
       duration,
@@ -396,7 +387,6 @@ class CopilotSessionHost {
     const sessionId = ++this.sessionSequence
     this.persistenceSessionId = globalThis.crypto.randomUUID()
     this.transition({ type: 'start', sessionId })
-    this.recording = []
     this.sampleRate = 16_000
     this.messageSequence = 0
     this.transcripts = {
@@ -528,25 +518,16 @@ class CopilotSessionHost {
           })
         }
       }),
-      await listen<number[]>('audio-chunk', (event) => {
-        if (!this.isCurrent(sessionId)) return
-        const payload = event.payload
-        this.recording.push(payload)
-        const maxSamples = this.sampleRate * MAX_RECORDING_SECONDS
-        let samples = this.recording.reduce((total, chunk) => total + chunk.length, 0)
-        while (samples > maxSamples && this.recording.length > 0) {
-          samples -= this.recording.shift()?.length || 0
-        }
-        this.transition({ type: 'recording', sessionId })
-      }),
       await listen<AudioSourceChunk>('audio-source-chunk', (event) => {
         if (!this.isCurrent(sessionId)) return
         sendAudioChunk(this.deepgrams[event.payload.source], new Float32Array(event.payload.samples))
       }),
       await listen<number>('audio-amplitude', (event) => {
-        if (this.isCurrent(sessionId)) {
-          this.transition({ type: 'amplitude', sessionId, amplitude: event.payload })
+        if (!this.isCurrent(sessionId)) return
+        if (!this.snapshot.hasRecording) {
+          this.transition({ type: 'recording', sessionId })
         }
+        this.transition({ type: 'amplitude', sessionId, amplitude: event.payload })
       }),
       await listen<string>('audio-error', (event) => {
         if (!this.isCurrent(sessionId)) return
@@ -822,25 +803,11 @@ export async function sendCopilotCommand(command: CopilotSessionCommand): Promis
   await emit(COMMAND_EVENT, command)
 }
 
-export function getCopilotRecording(): { chunks: number[][]; sampleRate: number } {
-  return activeHost?.getRecording() || { chunks: [], sampleRate: 16_000 }
-}
-
-export function getCopilotRecordingDuration(): number {
-  const { chunks, sampleRate } = getCopilotRecording()
-  const samples = chunks.reduce((total, chunk) => total + chunk.length, 0)
-  return Math.round(samples / (sampleRate || 16_000))
-}
-
-export function exportCopilotRecording(): boolean {
-  const { chunks, sampleRate } = getCopilotRecording()
-  if (chunks.length === 0) return false
-  const buffer = chunksToWavBuffer(chunks, sampleRate)
-  const url = URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `interview-recording-${Date.now()}.wav`
-  link.click()
-  URL.revokeObjectURL(url)
+export async function exportCopilotRecording(): Promise<boolean> {
+  const recording = await invoke<SavedRecording | null>('export_audio_recording')
+  if (!recording) return false
+  await revealItemInDir(recording.path).catch((error) => {
+    console.warn('[Copilot] Unable to reveal exported recording', error)
+  })
   return true
 }

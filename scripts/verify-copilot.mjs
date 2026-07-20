@@ -58,7 +58,12 @@ check(session.length > 0, 'single Copilot session host exists')
 check(panel.length > 0 && app.includes('CopilotPanel') && page.includes('CopilotPanel'), 'main and floating views share CopilotPanel')
 check(!app.includes('startDeepgramStream') && !page.includes('startDeepgramStream'), 'views do not own STT connections')
 check(!app.includes("listen<number[]>('audio-chunk'") && !page.includes("listen<number[]>('audio-chunk'"), 'views do not own audio listeners')
-check(session.includes('startDeepgramStream') && session.includes("listen<number[]>('audio-chunk'"), 'session host owns STT and audio events')
+check(
+  session.includes('startDeepgramStream')
+    && session.includes("listen<AudioSourceChunk>('audio-source-chunk'")
+    && session.includes("listen<number>('audio-amplitude'"),
+  'session host owns STT and lightweight audio events',
+)
 check(rustAudio.includes('"audio-source-chunk"') && session.includes("listen<AudioSourceChunk>('audio-source-chunk'"), 'system and microphone audio retain their source through transcription')
 check(sessionState.includes("'system-stt' | 'microphone-stt' | 'follow-up' | 'llm'"), 'chat messages retain their exact source')
 check(db.includes('CREATE TABLE IF NOT EXISTS copilot_messages') && db.includes('upsertCopilotMessage'), 'chat messages have a SQLite upsert store')
@@ -75,7 +80,21 @@ check(
     && rustAudio.includes('write_pcm16_wav'),
   'the native audio layer retains capture data and writes a real WAV file',
 )
-check(rustLib.includes('save_audio_recording'), 'the native recording command is registered with Tauri')
+check(
+  rustLib.includes('save_audio_recording') && rustLib.includes('export_audio_recording'),
+  'native archive and export recording commands are registered with Tauri',
+)
+check(
+  !rustAudio.includes('"audio-chunk"')
+    && !session.includes("listen<number[]>('audio-chunk'")
+    && session.includes("invoke<SavedRecording | null>('export_audio_recording'"),
+  'full recordings stay in native memory instead of being duplicated in the WebView',
+)
+check(
+  rustAudio.includes('std::mem::take(&mut *recording)')
+    && rustAudio.includes('last_recording: Mutex<Option<SavedRecording>>'),
+  'successful native archive releases the in-memory recording buffer',
+)
 check(
   db.includes('recording_path TEXT')
     && db.includes('ALTER TABLE interviews ADD COLUMN recording_path TEXT')
@@ -103,6 +122,7 @@ check(session.includes('copilot-session-command') && session.includes('copilot-s
 check(session.includes('await host.dispatch(command)'), 'main-window commands are handled directly by the active session host')
 check(!llm.includes('STAR') && !llm.includes('interview suggestions'), 'AI answers directly without a fixed STAR or suggestion template')
 check(llm.includes('without Markdown headings'), 'AI answers are requested as speakable plain paragraphs rather than raw Markdown headings')
+check(llm.includes('MAX_DEEPGRAM_BUFFERED_BYTES') && llm.includes('ws.bufferedAmount'), 'STT websocket backpressure bounds queued audio memory')
 
 check(rustWindow.includes('.content_protected(protected)') && rustWindow.includes('set_content_protected(protected)'), 'window protection is applied on create and reuse')
 check(rustWindow.includes('protection_requested') && rustWindow.includes('protection_applied'), 'native window returns truthful protection status')
@@ -453,6 +473,8 @@ class FakeWebSocket {
   constructor(url) {
     this.url = url
     this.readyState = FakeWebSocket.CONNECTING
+    this.bufferedAmount = 0
+    this.sent = []
     latestSocket = this
   }
 
@@ -461,14 +483,18 @@ class FakeWebSocket {
     this.onopen?.({})
   }
 
+  send(data) {
+    this.sent.push(data)
+  }
+
   close() {
     this.readyState = FakeWebSocket.CLOSED
   }
 }
 
-const { startDeepgramStream } = loadTypeScriptModule(
+const { startDeepgramStream, sendAudioChunk } = loadTypeScriptModule(
   'src/lib/llm.ts',
-  ['startDeepgramStream'],
+  ['startDeepgramStream', 'sendAudioChunk'],
   {
     loadApiKeys: async () => ({ deepgram: 'test-key' }),
     getLlmApiKey: async () => null,
@@ -486,6 +512,12 @@ check(latestSocket !== null && !deepgramReady, 'capture waits for the Deepgram s
 check(latestSocket?.url.includes('endpointing=300') && latestSocket.url.includes('vad_events=true'), 'fixed-language STT uses stable endpoint detection')
 latestSocket?.open()
 check(await deepgramOpening === latestSocket, 'Deepgram startup resolves with the opened socket')
+latestSocket.bufferedAmount = 512 * 1024
+sendAudioChunk(latestSocket, new Float32Array([0.5]))
+check(latestSocket.sent.length === 0, 'Deepgram audio is dropped when websocket buffering reaches the memory limit')
+latestSocket.bufferedAmount = 0
+sendAudioChunk(latestSocket, new Float32Array([0.5]))
+check(latestSocket.sent.length === 1, 'Deepgram audio resumes when websocket backpressure clears')
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)
 if (failed > 0) process.exit(1)

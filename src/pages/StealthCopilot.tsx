@@ -147,7 +147,14 @@ export default function StealthCopilot() {
           <button
             type="button"
             onClick={() => {
-              if (!exportCopilotRecording()) alert(t('copilot.noRecording'))
+              void exportCopilotRecording()
+                .then((exported) => {
+                  if (!exported) alert(t('copilot.noRecording'))
+                })
+                .catch((error) => {
+                  console.error('[Copilot] Failed to export recording', error)
+                  alert(String(error))
+                })
             }}
             disabled={!copilot.hasRecording}
             className="flex w-full items-center justify-center gap-2 rounded-xl border bg-white py-2 text-xs hover:bg-[#f8fafc] disabled:opacity-40"

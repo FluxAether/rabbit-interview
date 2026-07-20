@@ -4,8 +4,8 @@ mod copilot_window;
 mod db;
 
 use audio::{
-    get_audio_capabilities, list_audio_devices, save_audio_recording, start_audio_capture,
-    stop_audio_capture,
+    export_audio_recording, get_audio_capabilities, list_audio_devices, save_audio_recording,
+    start_audio_capture, stop_audio_capture,
 };
 use commands::{get_history, get_settings, save_interview_record, save_settings};
 use copilot_window::{
@@ -50,6 +50,7 @@ pub fn run() {
             start_audio_capture,
             stop_audio_capture,
             save_audio_recording,
+            export_audio_recording,
             get_audio_capabilities,
             list_audio_devices,
             get_settings,

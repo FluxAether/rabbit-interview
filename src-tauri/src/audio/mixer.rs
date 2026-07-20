@@ -112,7 +112,12 @@ impl TimedAudioMixer {
 
         let completed_through = match (self.system_enabled, self.microphone_enabled) {
             (true, true) => match (self.system_progress, self.microphone_progress) {
-                (Some(system), Some(microphone)) => system.min(microphone),
+                (Some(system), Some(microphone)) => {
+                    let lagged_leader = system
+                        .max(microphone)
+                        .saturating_sub(max_source_lag);
+                    system.min(microphone).max(lagged_leader)
+                }
                 (Some(system), None) => system.saturating_sub(max_source_lag),
                 (None, Some(microphone)) => microphone.saturating_sub(max_source_lag),
                 (None, None) => return Vec::new(),
@@ -215,6 +220,23 @@ mod tests {
             mixer.push(AudioSource::System, 0.1, vec![0.5; 20]),
             vec![0.5; 20]
         );
+    }
+
+    #[test]
+    fn bounds_pending_audio_when_one_source_stalls() {
+        let mut mixer = TimedAudioMixer::new(true, true, 100);
+        assert!(mixer
+            .push(AudioSource::System, 0.0, vec![0.5; 10])
+            .is_empty());
+        assert_eq!(
+            mixer.push(AudioSource::Microphone, 0.0, vec![0.0; 10]),
+            vec![0.5; 10]
+        );
+
+        let output = mixer.push(AudioSource::System, 0.1, vec![0.5; 200]);
+
+        assert_eq!(output.len(), 150);
+        assert!(mixer.pending.len() <= 50);
     }
 
     #[test]

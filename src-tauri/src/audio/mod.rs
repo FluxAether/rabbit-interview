@@ -12,6 +12,7 @@ use mixer::{AudioSource, TimedAudioMixer};
 use serde::Serialize;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -57,6 +58,7 @@ struct AudioCapture {
     current_mode: Mutex<String>,
     failure_reason: Mutex<Option<String>>,
     recording: Mutex<Vec<f32>>,
+    last_recording: Mutex<Option<SavedRecording>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -183,7 +185,6 @@ fn emit_audio_chunk(app: &AppHandle, data: Vec<f32>) {
         }
     }
     let _ = app.emit("audio-amplitude", rms.min(1.0));
-    let _ = app.emit("audio-chunk", processed);
 }
 
 fn write_pcm16_wav<W: Write>(
@@ -247,6 +248,19 @@ fn write_pcm16_wav<W: Write>(
             .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+fn save_recording_to_path(path: &Path, samples: &[f32]) -> Result<SavedRecording, String> {
+    let file = File::create(path).map_err(|error| error.to_string())?;
+    let mut writer = BufWriter::new(file);
+    write_pcm16_wav(&mut writer, samples, TARGET_SAMPLE_RATE)?;
+    writer.flush().map_err(|error| error.to_string())?;
+
+    Ok(SavedRecording {
+        path: path.to_string_lossy().into_owned(),
+        duration_seconds: samples.len() as u64 / u64::from(TARGET_SAMPLE_RATE),
+        sample_rate: TARGET_SAMPLE_RATE,
+    })
 }
 
 fn emit_audio_source_chunk(app: &AppHandle, source: &'static str, samples: &[f32]) {
@@ -381,7 +395,8 @@ pub async fn start_audio_capture(
     }
 
     stop_audio_capture_and_wait();
-    AUDIO_STATE.recording.lock().unwrap().clear();
+    *AUDIO_STATE.recording.lock().unwrap() = Vec::new();
+    *AUDIO_STATE.last_recording.lock().unwrap() = None;
     remember_audio_state("starting", None);
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let (startup_tx, startup_rx) = mpsc::sync_channel::<Result<AudioConfigPayload, String>>(1);
@@ -605,7 +620,10 @@ pub async fn save_audio_recording(
     app: AppHandle,
     sessionId: String,
 ) -> Result<Option<SavedRecording>, String> {
-    let samples = AUDIO_STATE.recording.lock().unwrap().clone();
+    let samples = {
+        let mut recording = AUDIO_STATE.recording.lock().unwrap();
+        std::mem::take(&mut *recording)
+    };
     if samples.is_empty() {
         return Ok(None);
     }
@@ -630,15 +648,41 @@ pub async fn save_audio_recording(
         format!("interview-{timestamp}-{safe_session_id}.wav")
     };
     let path = recording_dir.join(file_name);
-    let file = File::create(&path).map_err(|error| error.to_string())?;
-    let mut writer = BufWriter::new(file);
-    write_pcm16_wav(&mut writer, &samples, TARGET_SAMPLE_RATE)?;
-    writer.flush().map_err(|error| error.to_string())?;
+    match save_recording_to_path(&path, &samples) {
+        Ok(saved) => {
+            *AUDIO_STATE.last_recording.lock().unwrap() = Some(saved.clone());
+            Ok(Some(saved))
+        }
+        Err(error) => {
+            *AUDIO_STATE.recording.lock().unwrap() = samples;
+            Err(error)
+        }
+    }
+}
 
+#[tauri::command]
+pub async fn export_audio_recording(app: AppHandle) -> Result<Option<SavedRecording>, String> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis();
+    let download_dir = app.path().download_dir().map_err(|error| error.to_string())?;
+    fs::create_dir_all(&download_dir).map_err(|error| error.to_string())?;
+    let path = download_dir.join(format!("interview-recording-{timestamp}.wav"));
+
+    let samples = AUDIO_STATE.recording.lock().unwrap().clone();
+    if !samples.is_empty() {
+        return save_recording_to_path(&path, &samples).map(Some);
+    }
+
+    let Some(last_recording) = AUDIO_STATE.last_recording.lock().unwrap().clone() else {
+        return Ok(None);
+    };
+    fs::copy(&last_recording.path, &path).map_err(|error| error.to_string())?;
     Ok(Some(SavedRecording {
         path: path.to_string_lossy().into_owned(),
-        duration_seconds: samples.len() as u64 / u64::from(TARGET_SAMPLE_RATE),
-        sample_rate: TARGET_SAMPLE_RATE,
+        duration_seconds: last_recording.duration_seconds,
+        sample_rate: last_recording.sample_rate,
     }))
 }
 
