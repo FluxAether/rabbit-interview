@@ -1,9 +1,59 @@
 import { useEffect, useState, useRef } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { Clipboard } from 'lucide-react'
 import { useAppStore, InterviewRecord } from '../stores/useAppStore'
 import WaveSurfer from 'wavesurfer.js'
 import { loadHistory as loadHistoryDb } from '../lib/db'
 import { useTranslation } from '../i18n'
+
+type HistoryChatRole = 'interviewer' | 'assistant' | 'me'
+
+interface HistoryChatMessage {
+  id: string
+  role: HistoryChatRole
+  text: string
+}
+
+function parseTranscript(transcript: string, mode: string): HistoryChatMessage[] {
+  if (!transcript.trim()) return []
+
+  const messages: HistoryChatMessage[] = []
+  let current: HistoryChatMessage | null = null
+
+  const resolveRole = (label: string): HistoryChatRole | null => {
+    const normalized = label.trim().toLowerCase()
+    if (['interviewer', '面试官', '面試官'].includes(normalized)) return 'interviewer'
+    if (['assistant', '助手'].includes(normalized)) return 'assistant'
+    if (['me', 'user', '我', '用户', '用戶'].includes(normalized)) return 'me'
+    if (normalized === 'ai') return mode === 'copilot' ? 'assistant' : 'interviewer'
+    return null
+  }
+
+  transcript.split(/\r?\n/).forEach((line, index) => {
+    const match = line.match(/^(Interviewer|Assistant|AI|Me|User|面试官|面試官|助手|我|用户|用戶):\s*(.*)$/i)
+    const role = match ? resolveRole(match[1]) : null
+
+    if (match && role) {
+      if (current) messages.push(current)
+      current = {
+        id: `${index}-${role}`,
+        role,
+        text: match[2],
+      }
+      return
+    }
+
+    if (current) {
+      current.text += `${current.text ? '\n' : ''}${line}`
+    }
+  })
+
+  if (current) messages.push(current)
+
+  return messages.length > 0
+    ? messages
+    : [{ id: 'transcript', role: 'interviewer', text: transcript }]
+}
 
 export default function History() {
   const { history, loadHistory } = useAppStore()
@@ -82,6 +132,13 @@ export default function History() {
     setAudioReady(false)
   }
 
+  const selectedMessages = selected ? parseTranscript(selected.transcript || '', selected.mode) : []
+  const roleLabels: Record<HistoryChatRole, string> = {
+    interviewer: t('copilot.role.interviewer'),
+    assistant: t('copilot.role.assistant'),
+    me: t('copilot.role.me'),
+  }
+
   return (
     <div className="w-full p-8">
       <div className="flex items-center justify-between mb-5">
@@ -156,8 +213,47 @@ export default function History() {
             <div className="font-semibold mb-2">{t('history.replayModal.title')} — {selected.role} @ {selected.company}</div>
             <div className="text-sm mb-3">{t('misc.score')}: <span className="font-semibold text-[#6366f1]">{selected.score ?? t('history.notScored')}</span> • {t('history.replayModal.duration')}: {Math.floor(selected.duration/60)}m</div>
             
-            <div className="bg-[#f8fafc] p-4 rounded-xl h-48 overflow-auto text-sm mb-3 whitespace-pre-wrap font-mono">
-              {selected.transcript || t('history.transcriptPlaceholder')}
+            <div className="mb-3 max-h-[320px] min-h-48 overflow-auto rounded-xl bg-[#f8fafc] p-3 text-sm">
+              {selectedMessages.length === 0 ? (
+                <div className="flex min-h-40 items-center justify-center px-6 text-center text-xs text-[#64748b]">
+                  {t('history.transcriptPlaceholder')}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {selectedMessages.map((message) => {
+                    const mine = message.role === 'me'
+                    const assistant = message.role === 'assistant'
+                    return (
+                      <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                        <article className="max-w-[88%]">
+                          <div className={`mb-1 px-1 text-[10px] font-medium text-[#64748b] ${mine ? 'text-right' : ''}`}>
+                            {roleLabels[message.role]}
+                          </div>
+                          <div className={`flex items-start gap-2 rounded-xl px-3 py-2 text-[13px] leading-relaxed ${
+                            mine
+                              ? 'rounded-br-sm bg-[#4f46e5] text-white'
+                              : assistant
+                                ? 'rounded-bl-sm border border-[#c7d2fe] bg-[#eef2ff] text-[#312e81]'
+                                : 'rounded-bl-sm border border-[#e2e8f0] bg-white text-[#1e293b]'
+                          }`}>
+                            <div className="min-w-0 flex-1 whitespace-pre-wrap">{message.text}</div>
+                            {assistant && (
+                              <button
+                                type="button"
+                                onClick={() => void navigator.clipboard.writeText(message.text)}
+                                className="shrink-0 rounded p-1 text-[#4f46e5] hover:bg-[#e0e7ff]"
+                                aria-label={t('copilot.copySuggestion')}
+                              >
+                                <Clipboard className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </article>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
             {selected.recordingPath ? (
