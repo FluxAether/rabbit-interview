@@ -269,7 +269,7 @@ export default function Settings() {
 
   return (
     <div className="p-8 overflow-auto">
-      <div className="max-w-3xl">
+      <div className="w-full">
         <h1 className="text-3xl font-semibold tracking-tight mb-1">{t('settings.title')}</h1>
         <p className="text-[#475569] mb-8">{t('settings.description')}</p>
 

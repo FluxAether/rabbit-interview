@@ -66,7 +66,7 @@ export default function StealthCopilot() {
 
   return (
     <div className="p-8">
-      <div className="max-w-[1100px]">
+      <div className="w-full">
         <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold">{t('copilot.title')}</h1>

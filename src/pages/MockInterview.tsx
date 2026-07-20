@@ -94,7 +94,7 @@ export default function MockInterview() {
   }
 
   return (
-    <div className="p-8 max-w-[1100px]">
+    <div className="w-full p-8">
       <div className="card p-8">
         <div className="flex items-center justify-between mb-6">
           <div>

@@ -83,7 +83,7 @@ export default function History() {
   }
 
   return (
-    <div className="p-8 max-w-[1000px]">
+    <div className="w-full p-8">
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-2xl font-semibold">{t('history.title')}</h1>

@@ -79,7 +79,7 @@ export default function ResumeOptimizer() {
   }
 
   return (
-    <div className="p-8 max-w-[1100px]">
+    <div className="w-full p-8">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <div className="text-[#6366f1] font-medium text-lg">{t('resume.title')}</div>
