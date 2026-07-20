@@ -15,9 +15,11 @@ jobs:
         include:
           - os: macos-latest
             target: universal-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
             bundle: app,dmg
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            rust_targets: x86_64-pc-windows-msvc
             bundle: msi,nsis
           # Optional Linux
           # - os: ubuntu-latest
@@ -32,7 +34,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.rust_targets }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -61,12 +63,30 @@ jobs:
           security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
 
-      - name: Build Tauri App
+      - name: Build AudioTee universal sidecar (macOS)
+        if: matrix.os == 'macos-latest'
+        run: scripts/build-audiotee.sh universal
+
+      - name: Build Tauri App (macOS + AudioTee)
+        if: matrix.os == 'macos-latest'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundle }} --config src-tauri/tauri.audiotee.conf.json
+
+      - name: Verify bundled AudioTee (macOS)
+        if: matrix.os == 'macos-latest'
         run: |
-          npm run tauri build -- --target ${{ matrix.target }}
+          test -x src-tauri/target/${{ matrix.target }}/release/bundle/macos/RabbitInterview.app/Contents/MacOS/audiotee
+          test "$(lipo -archs src-tauri/target/${{ matrix.target }}/release/bundle/macos/RabbitInterview.app/Contents/MacOS/audiotee)" = "x86_64 arm64"
+          codesign --verify --deep --strict src-tauri/target/${{ matrix.target }}/release/bundle/macos/RabbitInterview.app
+
+      - name: Build Tauri App (Windows)
+        if: matrix.os == 'windows-latest'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
@@ -75,12 +95,13 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            target/${{ matrix.target }}/release/bundle/**/*.dmg
-            target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
-            target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz.sig
-            target/${{ matrix.target }}/release/bundle/**/*.msi
-            target/${{ matrix.target }}/release/bundle/**/*.exe
-            target/${{ matrix.target }}/release/bundle/**/*.deb
-            target/${{ matrix.target }}/release/bundle/**/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
+            src-tauri/target/audiotee-checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

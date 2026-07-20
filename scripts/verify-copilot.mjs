@@ -70,6 +70,7 @@ if (sessionState) {
   )
   const initial = createInitialSnapshot()
   const starting = reduceCopilotSnapshot(initial, { type: 'start', sessionId: 7 })
+  const listening = reduceCopilotSnapshot(starting, { type: 'started', sessionId: 7, mode: 'system+microphone' })
   const duplicateStart = reduceCopilotSnapshot(starting, { type: 'start', sessionId: 8 })
   const stopping = reduceCopilotSnapshot(starting, { type: 'stop' })
   const lateSuggestion = reduceCopilotSnapshot(stopping, {
@@ -78,12 +79,29 @@ if (sessionState) {
     suggestion: { id: 1, text: 'late', category: 'test' },
   })
   check(starting.phase === 'starting' && starting.sessionId === 7, 'idle session starts with an explicit id')
+  check(listening.phase === 'listening' && listening.audioMode === 'system+microphone', 'native audio mode is reflected in the shared snapshot')
   check(duplicateStart === starting, 'duplicate start is idempotent')
   check(stopping.phase === 'stopping' && stopping.sessionId === null, 'stop invalidates the active session id immediately')
   check(lateSuggestion === stopping, 'late callbacks are ignored after stop')
 }
 
 check(!sessionState || sessionState.includes("revision: snapshot.revision + 1"), 'snapshots carry a monotonic revision')
+check(session.includes("type: 'request-snapshot'"), 'floating clients request a fresh snapshot after connecting')
+
+const windowState = source('src/lib/copilotWindowState.ts')
+if (windowState) {
+  const { protectionMessageKey } = loadTypeScriptModule(
+    'src/lib/copilotWindowState.ts',
+    ['protectionMessageKey'],
+  )
+  check(protectionMessageKey(null) === 'copilot.protection.disabled', 'missing window status is reported as protection disabled')
+  check(protectionMessageKey({ platform_supported: true, protection_requested: true, protection_applied: true, request_dispatched: true }) === 'copilot.protection.enabled', 'confirmed protection has an enabled status')
+  check(protectionMessageKey({ platform_supported: true, protection_requested: true, protection_applied: false, request_dispatched: true }) === 'copilot.protection.unconfirmed', 'unconfirmed native protection is not reported as enabled')
+}
+
+const { parseSseEventData } = loadTypeScriptModule('src/lib/llm.ts', ['parseSseEventData'])
+const multilineSse = parseSseEventData('event: message\ndata: {\ndata: "value": 1\ndata: }')
+check(JSON.parse(multilineSse).value === 1, 'multi-line SSE data fields are reassembled before parsing')
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)
 if (failed > 0) process.exit(1)

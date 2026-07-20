@@ -19,6 +19,7 @@ import {
 import {
   getCopilotWindowStatus,
   hideCopilotWindow,
+  subscribeCopilotWindowStatus,
   toggleCopilotWindow,
   type CopilotWindowStatus,
 } from './lib/copilotWindow'
@@ -88,23 +89,26 @@ export default function App() {
   }, [settings.language])
 
   useEffect(() => {
-    let dispose: (() => void) | undefined
     let cancelled = false
+    const disposers: Array<() => void> = []
+    const register = (cleanup: () => void) => {
+      if (cancelled) cleanup()
+      else disposers.push(cleanup)
+    }
     loadAppSettings().then((saved) => {
       useAppStore.getState().setSettings({ ...saved, language: saved.language || DEFAULT_LANGUAGE })
     }).catch(() => {})
 
     if (floating) {
       mountCopilotSessionClient().then((cleanup) => {
-        if (cancelled) cleanup()
-        else dispose = cleanup
+        register(cleanup)
       })
       getCopilotWindowStatus().then(setWindowStatus).catch(() => {})
+      subscribeCopilotWindowStatus(setWindowStatus).then(register)
       setTimeout(() => floatingRef.current?.focus(), 50)
     } else {
       mountCopilotSessionHost().then((cleanup) => {
-        if (cancelled) cleanup()
-        else dispose = cleanup
+        register(cleanup)
       })
       loadInterviewHistory().then(loadHistory).catch((error) => {
         console.warn('Failed to load interview history', error)
@@ -112,7 +116,7 @@ export default function App() {
     }
     return () => {
       cancelled = true
-      dispose?.()
+      disposers.forEach((cleanup) => cleanup())
     }
   }, [floating, loadHistory])
 

@@ -3,6 +3,7 @@ import { Clipboard, EyeOff, Mic, RefreshCw, Shield, Square, Trash2 } from 'lucid
 import { useTranslation } from '../i18n'
 import { sendCopilotCommand } from '../lib/copilotSession'
 import type { CopilotWindowStatus } from '../lib/copilotWindow'
+import { protectionMessageKey } from '../lib/copilotWindowState'
 import { useAppStore } from '../stores/useAppStore'
 
 interface CopilotPanelProps {
@@ -31,11 +32,7 @@ export default function CopilotPanel({
     setFollowUp('')
   }
 
-  const protectionLabel = !windowStatus?.protection_requested
-    ? t('copilot.protection.disabled')
-    : windowStatus.protection_applied
-      ? t('copilot.protection.enabled')
-      : t('copilot.protection.failed')
+  const protectionLabel = t(protectionMessageKey(windowStatus))
 
   return (
     <section
@@ -136,6 +133,8 @@ export default function CopilotPanel({
       </div>
 
       <footer className="mt-3 border-t pt-2 text-[10px] text-[#64748b]">
+        <div>{t('copilot.audioMode')}: {t(`copilot.audioMode.${copilot.audioMode}`)}</div>
+        {copilot.capabilityNotice && <div className="mt-1 text-amber-700">{copilot.capabilityNotice}</div>}
         <div className={`flex items-center gap-1.5 ${windowStatus?.protection_applied ? 'text-emerald-700' : 'text-amber-700'}`}>
           <Shield className="h-3.5 w-3.5" /> {protectionLabel}
         </div>

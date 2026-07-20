@@ -10,6 +10,7 @@ use cpal::{
 };
 use mixer::{AudioSource, TimedAudioMixer};
 use serde::Serialize;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -33,6 +34,9 @@ pub struct AudioCapabilities {
     pub system_audio_available: bool,
     pub microphone_available: bool,
     pub system_audio_reason: Option<String>,
+    pub microphone_reason: Option<String>,
+    pub current_mode: String,
+    pub failure_reason: Option<String>,
     pub sample_rate: u32,
     pub audiotee_commit: String,
 }
@@ -41,10 +45,21 @@ pub struct AudioCapabilities {
 struct AudioCapture {
     handle: Mutex<Option<thread::JoinHandle<()>>>,
     tx: Mutex<Option<mpsc::Sender<AudioCommand>>>,
+    current_mode: Mutex<String>,
+    failure_reason: Mutex<Option<String>>,
 }
 
 static AUDIO_STATE: once_cell::sync::Lazy<AudioCapture> =
     once_cell::sync::Lazy::new(AudioCapture::default);
+
+fn remember_audio_state(mode: &str, failure_reason: Option<String>) {
+    *AUDIO_STATE.current_mode.lock().unwrap() = mode.into();
+    *AUDIO_STATE.failure_reason.lock().unwrap() = failure_reason;
+}
+
+fn remember_audio_failure(error: impl Into<String>) {
+    remember_audio_state("error", Some(error.into()));
+}
 
 fn convert_samples<T>(data: &[T]) -> Vec<f32>
 where
@@ -190,6 +205,7 @@ pub(crate) fn stop_audio_capture_sync() {
             let _ = handle.join();
         });
     }
+    *AUDIO_STATE.current_mode.lock().unwrap() = "idle".into();
 }
 
 pub(crate) fn stop_audio_capture_and_wait() {
@@ -199,6 +215,7 @@ pub(crate) fn stop_audio_capture_and_wait() {
     if let Some(handle) = AUDIO_STATE.handle.lock().unwrap().take() {
         let _ = handle.join();
     }
+    *AUDIO_STATE.current_mode.lock().unwrap() = "idle".into();
 }
 
 #[cfg(target_os = "macos")]
@@ -214,10 +231,20 @@ fn system_audio_capability() -> Result<(), String> {
 #[tauri::command]
 pub async fn get_audio_capabilities() -> AudioCapabilities {
     let system_audio = system_audio_capability();
+    let microphone_available = cpal::default_host().default_input_device().is_some();
+    let current_mode = AUDIO_STATE.current_mode.lock().unwrap().clone();
     AudioCapabilities {
         system_audio_available: system_audio.is_ok(),
-        microphone_available: cpal::default_host().default_input_device().is_some(),
+        microphone_available,
         system_audio_reason: system_audio.err(),
+        microphone_reason: (!microphone_available)
+            .then(|| "No microphone input device is available".into()),
+        current_mode: if current_mode.is_empty() {
+            "idle".into()
+        } else {
+            current_mode
+        },
+        failure_reason: AUDIO_STATE.failure_reason.lock().unwrap().clone(),
         sample_rate: TARGET_SAMPLE_RATE,
         audiotee_commit: integration_version().into(),
     }
@@ -232,13 +259,19 @@ pub async fn start_audio_capture(
     deviceName: Option<String>,
 ) -> Result<AudioConfigPayload, String> {
     if !useSystemAudio && !useMicrophone {
-        return Err("Select system audio, microphone, or both".into());
+        let error = "Select system audio, microphone, or both".to_string();
+        remember_audio_failure(error.clone());
+        return Err(error);
     }
     if useSystemAudio {
-        system_audio_capability()?;
+        if let Err(error) = system_audio_capability() {
+            remember_audio_failure(error.clone());
+            return Err(error);
+        }
     }
 
     stop_audio_capture_and_wait();
+    remember_audio_state("starting", None);
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let (startup_tx, startup_rx) = mpsc::sync_channel::<Result<AudioConfigPayload, String>>(1);
     let thread_app = app.clone();
@@ -256,13 +289,26 @@ pub async fn start_audio_capture(
             let system_app = thread_app.clone();
             let error_app = thread_app.clone();
             let system_mixer = Arc::clone(&mixer);
-            let system_frame = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let system_frame = Arc::new(AtomicU64::new(0));
             let frame_counter = Arc::clone(&system_frame);
+            let system_origin = Arc::new(AtomicU64::new(u64::MAX));
+            let origin_frame = Arc::clone(&system_origin);
+            let capture_started_at = started_at;
             match AudioTeeProcess::spawn(
                 move |samples| {
-                    use std::sync::atomic::Ordering;
+                    let elapsed_frame = (capture_started_at.elapsed().as_secs_f64()
+                        * f64::from(TARGET_SAMPLE_RATE))
+                    .round() as u64;
+                    let origin = origin_frame
+                        .compare_exchange(
+                            u64::MAX,
+                            elapsed_frame,
+                            Ordering::SeqCst,
+                            Ordering::SeqCst,
+                        )
+                        .unwrap_or_else(|existing| existing);
                     let start_frame =
-                        frame_counter.fetch_add(samples.len() as u64, Ordering::SeqCst);
+                        origin + frame_counter.fetch_add(samples.len() as u64, Ordering::SeqCst);
                     let timestamp = start_frame as f64 / f64::from(TARGET_SAMPLE_RATE);
                     push_mixed_audio(
                         &system_app,
@@ -273,11 +319,13 @@ pub async fn start_audio_capture(
                     );
                 },
                 move |error| {
+                    remember_audio_failure(error.clone());
                     let _ = error_app.emit("audio-error", error);
                 },
             ) {
                 Ok(process) => Some(process),
                 Err(error) => {
+                    remember_audio_failure(error.clone());
                     let _ = startup_tx.send(Err(error));
                     return;
                 }
@@ -294,6 +342,7 @@ pub async fn start_audio_capture(
             let device = match select_input_device(deviceName.as_deref()) {
                 Ok(device) => device,
                 Err(error) => {
+                    remember_audio_failure(error.clone());
                     #[cfg(target_os = "macos")]
                     if let Some(process) = audiotee.take() {
                         process.stop();
@@ -308,6 +357,7 @@ pub async fn start_audio_capture(
             let config = match preferred_input_config(&device) {
                 Ok(config) => config,
                 Err(error) => {
+                    remember_audio_failure(error.clone());
                     #[cfg(target_os = "macos")]
                     if let Some(process) = audiotee.take() {
                         process.stop();
@@ -323,6 +373,11 @@ pub async fn start_audio_capture(
             let microphone_app = thread_app.clone();
             let error_app = thread_app.clone();
             let microphone_mixer = Arc::clone(&mixer);
+            let microphone_frame = Arc::new(AtomicU64::new(0));
+            let frame_counter = Arc::clone(&microphone_frame);
+            let microphone_origin = Arc::new(AtomicU64::new(u64::MAX));
+            let origin_frame = Arc::clone(&microphone_origin);
+            let capture_started_at = started_at;
             let mut resampler = MonoResampler::new(channels, input_rate);
             let stream = match device.build_input_stream_raw(
                 &stream_config,
@@ -330,25 +385,42 @@ pub async fn start_audio_capture(
                 move |data, _| match convert_input_data(data) {
                     Ok(samples) => {
                         let mono = resampler.process(&samples);
+                        let elapsed_frame = (capture_started_at.elapsed().as_secs_f64()
+                            * f64::from(TARGET_SAMPLE_RATE))
+                        .round() as u64;
+                        let origin = origin_frame
+                            .compare_exchange(
+                                u64::MAX,
+                                elapsed_frame,
+                                Ordering::SeqCst,
+                                Ordering::SeqCst,
+                            )
+                            .unwrap_or_else(|existing| existing);
+                        let start_frame =
+                            origin + frame_counter.fetch_add(mono.len() as u64, Ordering::SeqCst);
                         push_mixed_audio(
                             &microphone_app,
                             &microphone_mixer,
                             AudioSource::Microphone,
-                            started_at.elapsed().as_secs_f64(),
+                            start_frame as f64 / f64::from(TARGET_SAMPLE_RATE),
                             mono,
                         );
                     }
                     Err(error) => {
+                        remember_audio_failure(error.clone());
                         let _ = microphone_app.emit("audio-error", error);
                     }
                 },
                 move |error| {
-                    let _ = error_app.emit("audio-error", error.to_string());
+                    let error = error.to_string();
+                    remember_audio_failure(error.clone());
+                    let _ = error_app.emit("audio-error", error);
                 },
                 None,
             ) {
                 Ok(stream) => stream,
                 Err(error) => {
+                    remember_audio_failure(error.to_string());
                     #[cfg(target_os = "macos")]
                     if let Some(process) = audiotee.take() {
                         process.stop();
@@ -359,6 +431,7 @@ pub async fn start_audio_capture(
                 }
             };
             if let Err(error) = stream.play() {
+                remember_audio_failure(error.to_string());
                 #[cfg(target_os = "macos")]
                 if let Some(process) = audiotee.take() {
                     process.stop();
@@ -402,14 +475,19 @@ pub async fn start_audio_capture(
     *AUDIO_STATE.handle.lock().unwrap() = Some(handle);
 
     match startup_rx.recv_timeout(Duration::from_secs(8)) {
-        Ok(Ok(payload)) => Ok(payload),
+        Ok(Ok(payload)) => {
+            remember_audio_state(&payload.mode, None);
+            Ok(payload)
+        }
         Ok(Err(error)) => {
             stop_audio_capture_sync();
             Err(error)
         }
         Err(error) => {
             stop_audio_capture_sync();
-            Err(format!("Timed out while starting audio capture: {error}"))
+            let error = format!("Timed out while starting audio capture: {error}");
+            remember_audio_failure(error.clone());
+            Err(error)
         }
     }
 }
@@ -433,7 +511,7 @@ pub async fn list_audio_devices() -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{convert_samples, MonoResampler};
+    use super::{convert_samples, stop_audio_capture_and_wait, MonoResampler};
 
     #[test]
     fn converts_integer_microphone_samples_to_normalized_f32() {
@@ -450,5 +528,11 @@ mod tests {
             1.0, -1.0, 0.5, 0.5, 1.0, 1.0, -0.5, -0.5, 0.0, 0.0, 0.25, 0.25,
         ];
         assert_eq!(resampler.process(&input), vec![1.0, 0.25]);
+    }
+
+    #[test]
+    fn repeated_stop_is_idempotent_when_capture_is_idle() {
+        stop_audio_capture_and_wait();
+        stop_audio_capture_and_wait();
     }
 }

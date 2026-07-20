@@ -279,15 +279,12 @@ async function consumeSse(
   let buffer = '';
   let accumulated = '';
   const processEvent = (event: string) => {
-    for (const line of event.split('\n')) {
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (!data || data === '[DONE]') continue;
-      const delta = onData(JSON.parse(data));
-      if (!delta) continue;
-      accumulated += delta;
-      handlers.onDelta(delta, accumulated);
-    }
+    const data = parseSseEventData(event);
+    if (!data || data === '[DONE]') return;
+    const delta = onData(JSON.parse(data));
+    if (!delta) return;
+    accumulated += delta;
+    handlers.onDelta(delta, accumulated);
   };
   while (true) {
     const { value, done } = await reader.read();
@@ -305,6 +302,14 @@ async function consumeSse(
   return accumulated;
 }
 
+export function parseSseEventData(event: string): string | null {
+  const dataLines = event
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).replace(/^ /, ''));
+  return dataLines.length > 0 ? dataLines.join('\n') : null;
+}
+
 export async function generateSuggestionsStream(
   question: string,
   context: string,
@@ -314,17 +319,7 @@ export async function generateSuggestionsStream(
   try {
     const { provider, model, apiKey } = await resolveConfiguredProvider();
     const prompt = `Detect the language used in the interviewer question and respond in the same language. Return concise interview suggestions, one per line.\nInterviewer question: ${question}\nRelevant resume, job and previous-turn context: ${context || 'none'}`;
-    if (!apiKey) {
-      const fallback = await generateSuggestions(question, context);
-      let accumulated = '';
-      for (const suggestion of fallback) {
-        const delta = `${accumulated ? '\n' : ''}${suggestion}`;
-        accumulated += delta;
-        handlers.onDelta(delta, accumulated);
-      }
-      handlers.onComplete(accumulated);
-      return accumulated;
-    }
+    if (!apiKey) throw new Error('No LLM API key is configured. Add a provider key in Settings and retry.');
 
     const system = 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format. Be specific and professional.';
     if (provider === 'anthropic') {
@@ -422,15 +417,21 @@ export function float32ToInt16(float32Array: Float32Array): Int16Array {
  * - Calls onTranscript with interim/final results
  *
  * Usage in Copilot:
- *   const ws = await startDeepgramStream((text, isFinal) => { ... });
+ *   const ws = await startDeepgramStream(({ text, isUtteranceFinal }) => { ... });
  *   // on each audio-chunk event:
  *   sendAudioChunk(ws, chunkFloat32Array);
  */
+export interface DeepgramTranscriptEvent {
+  text: string;
+  isFinal: boolean;
+  isUtteranceFinal: boolean;
+}
+
 export async function startDeepgramStream(
-  onTranscript: (text: string, isFinal: boolean) => void,
+  onTranscript: (event: DeepgramTranscriptEvent) => void,
   onError?: (err: any) => void,
   sampleRate: number = 16000
-): Promise<WebSocket | null> {
+): Promise<WebSocket> {
   const { deepgram: DEEPGRAM_API_KEY } = await getKeys(true); // force fresh read so newly entered keys are picked up immediately
 
   // Read STT config from global store (consistent with LLM provider logic)
@@ -440,8 +441,7 @@ export async function startDeepgramStream(
   const sttLanguage = (settings?.sttLanguage as string) || 'zh-CN';
 
   if (!DEEPGRAM_API_KEY) {
-    console.warn('No Deepgram key — live transcription disabled');
-    return null;
+    throw new Error('No Deepgram API key is configured. Add it in Settings before starting capture.');
   }
 
   // Use the actual mic sample rate reported by backend (fixes STT quality).
@@ -452,7 +452,7 @@ export async function startDeepgramStream(
   // Browser/WebView clients authenticate with Deepgram's token WebSocket subprotocol.
   const language = `&language=${encodeURIComponent(sttLanguage)}`;
   const endpointing = model === 'nova-3' ? '&endpointing=100' : '';
-  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true${language}${endpointing}`;
+  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true&utterance_end_ms=1000${language}${endpointing}`;
 
   const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]);
   ws.binaryType = 'arraybuffer';
@@ -465,8 +465,13 @@ export async function startDeepgramStream(
     try {
       const data = JSON.parse(event.data);
       const transcript = data.channel?.alternatives?.[0]?.transcript?.trim();
-      if (transcript) {
-        onTranscript(transcript, data.speech_final ?? !!data.is_final);
+      const isUtteranceFinal = Boolean(data.speech_final || data.type === 'UtteranceEnd');
+      if (transcript || isUtteranceFinal) {
+        onTranscript({
+          text: transcript || '',
+          isFinal: Boolean(data.is_final),
+          isUtteranceFinal,
+        });
       }
     } catch (e) {
       onError?.(e);

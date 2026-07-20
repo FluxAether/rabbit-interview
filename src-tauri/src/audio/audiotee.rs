@@ -108,6 +108,7 @@ pub(crate) struct AudioTeeProcess {
     child: std::process::Child,
     stdout_thread: Option<std::thread::JoinHandle<()>>,
     stderr_thread: Option<std::thread::JoinHandle<()>>,
+    monitor_thread: Option<std::thread::JoinHandle<()>>,
     stopping: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -116,15 +117,26 @@ impl AudioTeeProcess {
     pub(crate) fn spawn<Chunk, Error>(on_chunk: Chunk, on_error: Error) -> Result<Self, String>
     where
         Chunk: Fn(Vec<f32>) + Send + 'static,
-        Error: Fn(String) + Send + 'static,
+        Error: Fn(String) + Send + Sync + 'static,
+    {
+        macos_supports_core_audio_taps()?;
+        Self::spawn_at_path(resolve_audiotee_path()?, on_chunk, on_error)
+    }
+
+    fn spawn_at_path<Chunk, Error>(
+        path: std::path::PathBuf,
+        on_chunk: Chunk,
+        on_error: Error,
+    ) -> Result<Self, String>
+    where
+        Chunk: Fn(Vec<f32>) + Send + 'static,
+        Error: Fn(String) + Send + Sync + 'static,
     {
         use std::process::{Command, Stdio};
         use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::{mpsc, Arc};
+        use std::sync::Arc;
         use std::time::Duration;
 
-        macos_supports_core_audio_taps()?;
-        let path = resolve_audiotee_path()?;
         let mut child = Command::new(path)
             .args(["--sample-rate", "16000", "--chunk-duration", "0.1"])
             .stdin(Stdio::null())
@@ -143,39 +155,38 @@ impl AudioTeeProcess {
             .ok_or("AudioTee stderr pipe is unavailable")?;
         let stopping = Arc::new(AtomicBool::new(false));
         let stdout_stopping = Arc::clone(&stopping);
-        let (startup_tx, startup_rx) = mpsc::sync_channel::<Result<(), String>>(1);
+        let first_pcm = Arc::new(AtomicBool::new(false));
+        let stdout_first_pcm = Arc::clone(&first_pcm);
+        let on_error: Arc<dyn Fn(String) + Send + Sync> = Arc::new(on_error);
+        let stdout_error = Arc::clone(&on_error);
 
         let stdout_thread = std::thread::spawn(move || {
             let mut reader = stdout;
             let mut decoder = Pcm16LeDecoder::default();
             let mut buffer = [0_u8; 8 * 1024];
-            let mut startup_tx = Some(startup_tx);
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) => {
-                        if let Some(sender) = startup_tx.take() {
-                            let _ = sender
-                                .send(Err("AudioTee exited before producing PCM audio".into()));
-                        } else if !stdout_stopping.load(Ordering::SeqCst) {
-                            on_error("AudioTee exited unexpectedly".into());
+                        if !stdout_stopping.load(Ordering::SeqCst) {
+                            stdout_error(if stdout_first_pcm.load(Ordering::SeqCst) {
+                                "AudioTee exited unexpectedly".into()
+                            } else {
+                                "AudioTee exited before producing PCM audio".into()
+                            });
                         }
                         break;
                     }
                     Ok(length) => {
                         let samples = decoder.push(&buffer[..length]);
                         if !samples.is_empty() {
-                            if let Some(sender) = startup_tx.take() {
-                                let _ = sender.send(Ok(()));
-                            }
+                            stdout_first_pcm.store(true, Ordering::SeqCst);
                             on_chunk(samples);
                         }
                     }
                     Err(error) => {
                         let message = format!("Unable to read AudioTee PCM stream: {error}");
-                        if let Some(sender) = startup_tx.take() {
-                            let _ = sender.send(Err(message));
-                        } else if !stdout_stopping.load(Ordering::SeqCst) {
-                            on_error(message);
+                        if !stdout_stopping.load(Ordering::SeqCst) {
+                            stdout_error(message);
                         }
                         break;
                     }
@@ -190,38 +201,63 @@ impl AudioTeeProcess {
             }
         });
 
-        match startup_rx.recv_timeout(Duration::from_secs(3)) {
-            Ok(Ok(())) => Ok(Self {
-                child,
-                stdout_thread: Some(stdout_thread),
-                stderr_thread: Some(stderr_thread),
-                stopping,
-            }),
-            Ok(Err(error)) => {
-                stopping.store(true, Ordering::SeqCst);
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stdout_thread.join();
-                let _ = stderr_thread.join();
-                Err(error)
+        let monitor_stopping = Arc::clone(&stopping);
+        let monitor_first_pcm = Arc::clone(&first_pcm);
+        let monitor_error = Arc::clone(&on_error);
+        let monitor_thread = std::thread::spawn(move || {
+            for _ in 0..450 {
+                if monitor_stopping.load(Ordering::SeqCst)
+                    || monitor_first_pcm.load(Ordering::SeqCst)
+                {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
             }
-            Err(_) => {
-                stopping.store(true, Ordering::SeqCst);
-                let detail = child
-                    .try_wait()
-                    .ok()
-                    .flatten()
-                    .map(|status| format!(" (process exited with {status})"))
-                    .unwrap_or_default();
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stdout_thread.join();
-                let _ = stderr_thread.join();
-                Err(format!(
-                    "AudioTee produced no PCM within 3 seconds{detail}; check System Audio Recording permission"
-                ))
+            if !monitor_stopping.load(Ordering::SeqCst) {
+                monitor_error(
+                    "AudioTee produced no PCM within 45 seconds; check System Audio Recording permission"
+                        .into(),
+                );
             }
+        });
+
+        let startup_deadline = std::time::Instant::now() + Duration::from_millis(500);
+        let startup_status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None)
+                    if first_pcm.load(Ordering::SeqCst)
+                        || std::time::Instant::now() >= startup_deadline =>
+                {
+                    break None;
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+                Err(error) => {
+                    stopping.store(true, Ordering::SeqCst);
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stdout_thread.join();
+                    let _ = stderr_thread.join();
+                    let _ = monitor_thread.join();
+                    return Err(format!("Unable to inspect AudioTee process: {error}"));
+                }
+            }
+        };
+        if let Some(status) = startup_status {
+            stopping.store(true, Ordering::SeqCst);
+            let _ = stdout_thread.join();
+            let _ = stderr_thread.join();
+            let _ = monitor_thread.join();
+            return Err(format!("AudioTee exited during startup with {status}"));
         }
+
+        Ok(Self {
+            child,
+            stdout_thread: Some(stdout_thread),
+            stderr_thread: Some(stderr_thread),
+            monitor_thread: Some(monitor_thread),
+            stopping,
+        })
     }
 
     pub(crate) fn stop(mut self) {
@@ -233,6 +269,9 @@ impl AudioTeeProcess {
             let _ = thread.join();
         }
         if let Some(thread) = self.stderr_thread.take() {
+            let _ = thread.join();
+        }
+        if let Some(thread) = self.monitor_thread.take() {
             let _ = thread.join();
         }
     }
@@ -263,5 +302,12 @@ mod tests {
         assert_eq!(parse_macos_version("14.2.1\n"), Some((14, 2)));
         assert_eq!(parse_macos_version("15.0"), Some((15, 0)));
         assert_eq!(parse_macos_version("invalid"), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn reports_a_sidecar_that_exits_during_startup() {
+        let result = super::AudioTeeProcess::spawn_at_path("/usr/bin/false".into(), |_| {}, |_| {});
+        assert!(result.is_err());
     }
 }

@@ -20,6 +20,9 @@ export interface AudioCapabilities {
   system_audio_available: boolean
   microphone_available: boolean
   system_audio_reason: string | null
+  microphone_reason: string | null
+  current_mode: string
+  failure_reason: string | null
   sample_rate: number
   audiotee_commit: string
 }
@@ -63,6 +66,7 @@ class CopilotSessionHost {
   private stopPromise: Promise<void> | null = null
   private lastFinal = ''
   private lastFinalAt = 0
+  private finalTranscriptParts: string[] = []
   private previousTurn = ''
 
   async mount(): Promise<void> {
@@ -148,6 +152,7 @@ class CopilotSessionHost {
     this.sampleRate = 16_000
     this.lastFinal = ''
     this.lastFinalAt = 0
+    this.finalTranscriptParts = []
     this.previousTurn = ''
 
     try {
@@ -160,7 +165,15 @@ class CopilotSessionHost {
       const systemRequested = config.useSystemAudio ?? settings.useSystemAudio ?? true
       const useSystemAudio = systemRequested && capabilities.system_audio_available
       const microphoneRequested = config.useMicrophone ?? settings.useMicWithSystem ?? true
-      const useMicrophone = microphoneRequested || !useSystemAudio
+      const useMicrophone = microphoneRequested
+
+      this.transition({
+        type: 'capability',
+        sessionId,
+        notice: systemRequested && !capabilities.system_audio_available
+          ? capabilities.system_audio_reason
+          : null,
+      })
 
       if (useMicrophone) {
         if (!capabilities.microphone_available) {
@@ -182,7 +195,7 @@ class CopilotSessionHost {
         return
       }
 
-      const audioConfig = await invoke<{ sample_rate: number }>('start_audio_capture', {
+      const audioConfig = await invoke<{ sample_rate: number; mode: string }>('start_audio_capture', {
         useSystemAudio,
         useMicrophone,
         deviceName: config.deviceName ?? settings.micDevice ?? null,
@@ -193,7 +206,7 @@ class CopilotSessionHost {
         return
       }
       this.sampleRate = audioConfig.sample_rate || 16_000
-      this.transition({ type: 'started', sessionId })
+      this.transition({ type: 'started', sessionId, mode: audioConfig.mode })
     } catch (error) {
       if (!this.isCurrent(sessionId)) return
       await invoke('stop_audio_capture').catch(() => {})
@@ -239,7 +252,9 @@ class CopilotSessionHost {
         const nextRate = event.payload.sample_rate || 16_000
         if (nextRate !== this.sampleRate) {
           this.sampleRate = nextRate
-          void this.startDeepgram(sessionId, nextRate)
+          void this.startDeepgram(sessionId, nextRate).catch((error) => {
+            if (this.isCurrent(sessionId)) void this.fail(sessionId, String(error))
+          })
         }
       }),
       await listen<number[]>('audio-chunk', (event) => {
@@ -269,8 +284,19 @@ class CopilotSessionHost {
   private async startDeepgram(sessionId: number, sampleRate: number): Promise<void> {
     closeDeepgramStream(this.deepgram)
     this.deepgram = await startDeepgramStream(
-      (text, isFinal) => {
-        if (!isFinal || !text || !this.isCurrent(sessionId)) return
+      (event) => {
+        if (!this.isCurrent(sessionId)) return
+        if (
+          event.isFinal
+          && event.text
+          && this.finalTranscriptParts[this.finalTranscriptParts.length - 1] !== event.text
+        ) {
+          this.finalTranscriptParts.push(event.text)
+        }
+        if (!event.isUtteranceFinal) return
+        const text = (this.finalTranscriptParts.join(' ') || event.text).trim()
+        this.finalTranscriptParts = []
+        if (!text) return
         const now = Date.now()
         if (text === this.lastFinal && now - this.lastFinalAt < 2_000) return
         this.lastFinal = text

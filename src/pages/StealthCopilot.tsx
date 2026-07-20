@@ -12,6 +12,7 @@ import {
 import {
   getCopilotWindowStatus,
   showCopilotWindow,
+  subscribeCopilotWindowStatus,
   type CopilotWindowStatus,
 } from '../lib/copilotWindow'
 import { loadAppSettings, saveAppSettings } from '../lib/settingsStore'
@@ -36,6 +37,12 @@ export default function StealthCopilot() {
   }
 
   useEffect(() => {
+    let unsubscribeWindowStatus: (() => void) | undefined
+    let cancelled = false
+    subscribeCopilotWindowStatus(setWindowStatus).then((cleanup) => {
+      if (cancelled) cleanup()
+      else unsubscribeWindowStatus = cleanup
+    })
     void Promise.all([
       loadDevices(),
       invoke<AudioCapabilities>('get_audio_capabilities').then(setCapabilities),
@@ -46,6 +53,10 @@ export default function StealthCopilot() {
         setSelectedDevice(settings.micDevice || '')
       }),
     ]).catch((error) => console.warn('Unable to load Copilot capabilities', error))
+    return () => {
+      cancelled = true
+      unsubscribeWindowStatus?.()
+    }
   }, [])
 
   const persistCaptureMode = async (system: boolean, microphone: boolean, device = selectedDevice) => {
@@ -123,6 +134,9 @@ export default function StealthCopilot() {
           </div>
           {!capabilities?.system_audio_available && capabilities?.system_audio_reason && (
             <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{capabilities.system_audio_reason}</p>
+          )}
+          {!capabilities?.microphone_available && capabilities?.microphone_reason && (
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{capabilities.microphone_reason}</p>
           )}
           {capabilities?.system_audio_available && (
             <p className="mt-2 text-[11px] text-[#64748b]">AudioTee {capabilities.audiotee_commit.slice(0, 12)} · 16 kHz mono · default output</p>

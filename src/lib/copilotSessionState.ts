@@ -8,6 +8,8 @@ export interface CopilotSnapshot {
   suggestions: Suggestion[]
   amplitude: number
   hasRecording: boolean
+  audioMode: string
+  capabilityNotice: string | null
   error: string | null
   revision: number
   sessionId: number | null
@@ -15,7 +17,8 @@ export interface CopilotSnapshot {
 
 export type CopilotSnapshotAction =
   | { type: 'start'; sessionId: number }
-  | { type: 'started'; sessionId: number }
+  | { type: 'started'; sessionId: number; mode: string }
+  | { type: 'capability'; sessionId: number; notice: string | null }
   | { type: 'stop' }
   | { type: 'stopped' }
   | { type: 'clear' }
@@ -34,6 +37,8 @@ export function createInitialSnapshot(): CopilotSnapshot {
     suggestions: [],
     amplitude: 0,
     hasRecording: false,
+    audioMode: 'idle',
+    capabilityNotice: null,
     error: null,
     revision: 0,
     sessionId: null,
@@ -59,6 +64,8 @@ export function reduceCopilotSnapshot(
       suggestions: [],
       amplitude: 0,
       hasRecording: false,
+      audioMode: 'starting',
+      capabilityNotice: null,
       error: null,
       sessionId: action.sessionId,
       revision: snapshot.revision + 1,
@@ -71,6 +78,7 @@ export function reduceCopilotSnapshot(
       ...snapshot,
       phase: 'stopping',
       amplitude: 0,
+      audioMode: 'stopping',
       sessionId: null,
       revision: snapshot.revision + 1,
     }
@@ -82,6 +90,7 @@ export function reduceCopilotSnapshot(
       ...snapshot,
       phase: 'idle',
       amplitude: 0,
+      audioMode: 'idle',
       sessionId: null,
       revision: snapshot.revision + 1,
     }
@@ -104,6 +113,7 @@ export function reduceCopilotSnapshot(
       ...snapshot,
       phase: 'error',
       amplitude: 0,
+      audioMode: 'error',
       error: action.error,
       sessionId: null,
       revision: snapshot.revision + 1,
@@ -117,6 +127,13 @@ export function reduceCopilotSnapshot(
       return {
         ...snapshot,
         phase: 'listening',
+        audioMode: action.mode,
+        revision: snapshot.revision + 1,
+      }
+    case 'capability':
+      return {
+        ...snapshot,
+        capabilityNotice: action.notice,
         revision: snapshot.revision + 1,
       }
     case 'question':
