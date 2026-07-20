@@ -4,6 +4,9 @@ import { useAppStore } from '../stores/useAppStore';
 
 let cachedKeys: Awaited<ReturnType<typeof loadApiKeys>> | null = null;
 
+const INTERVIEW_ANSWER_SYSTEM = 'You are an interview copilot. Answer the question directly using the provided question and context. Respond in the same language as the question. Be accurate, specific, concise, and professional.';
+const FOLLOW_UP_SYSTEM = 'You are an interview copilot handling a user follow-up. Answer the request directly using the previous turn and provided context. Do not treat the request itself as a new interviewer question.';
+
 export function clearKeyCache() {
   cachedKeys = null;
 }
@@ -59,7 +62,7 @@ async function callGroq(prompt: string, model: string, apiKey: string): Promise<
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format for the given interviewer question. Be specific and professional.' },
+        { role: 'system', content: INTERVIEW_ANSWER_SYSTEM },
         { role: 'user', content: prompt }
       ],
       temperature: 0.6,
@@ -83,7 +86,7 @@ async function callOpenAI(prompt: string, model: string, apiKey: string): Promis
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format for the given interviewer question. Be specific and professional.' },
+        { role: 'system', content: INTERVIEW_ANSWER_SYSTEM },
         { role: 'user', content: prompt }
       ],
       max_completion_tokens: 220,
@@ -111,7 +114,7 @@ async function callGemini(prompt: string, _model: string, apiKey: string): Promi
     },
     body: JSON.stringify({
       systemInstruction: {
-        parts: [{ text: 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format for the given interviewer question. Be specific and professional.' }]
+        parts: [{ text: INTERVIEW_ANSWER_SYSTEM }]
       },
       contents: [{
         parts: [{ text: prompt }]
@@ -146,7 +149,7 @@ async function callAnthropic(prompt: string, model: string, apiKey: string): Pro
     body: JSON.stringify({
       model,
       max_tokens: 220,
-      system: 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format for the given interviewer question. Be specific and professional.',
+      system: INTERVIEW_ANSWER_SYSTEM,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -192,18 +195,10 @@ export async function generateSuggestions(question: string, transcriptSoFar?: st
     }
   }
 
-  const userPrompt = `Detect the language used in the interviewer question and respond in the same language. Return concise interview suggestions, one per line.\nInterviewer question: ${question}\nPrevious context: ${transcriptSoFar || 'none'}`;
+  const userPrompt = `Answer the interviewer question directly in the same language, using the previous context when relevant.\nInterviewer question: ${question}\nPrevious context: ${transcriptSoFar || 'none'}`;
 
   if (!apiKey) {
-    // Fallback to smart mock (same behavior as before)
-    await new Promise(r => setTimeout(r, 120));
-    return [
-      `Situation: Briefly set the context for "${question.slice(0, 40)}...".`,
-      "Task: State your specific responsibility.",
-      "Action: 2-3 concrete steps and trade-offs.",
-      "Result: Quantify impact (users, %, time, revenue).",
-      "Keep it under 90 seconds using STAR."
-    ];
+    return ['No LLM API key is configured. Add a provider key in Settings and retry.'];
   }
 
   try {
@@ -234,6 +229,8 @@ export interface SuggestionStreamHandlers {
   onComplete: (text: string) => void;
   onError?: (error: Error) => void;
 }
+
+export type SuggestionRequestType = 'interviewer-question' | 'follow-up';
 
 async function resolveConfiguredProvider(): Promise<{
   provider: 'groq' | 'openai' | 'anthropic' | 'gemini';
@@ -315,13 +312,19 @@ export async function generateSuggestionsStream(
   context: string,
   handlers: SuggestionStreamHandlers,
   signal?: AbortSignal,
+  requestType: SuggestionRequestType = 'interviewer-question',
 ): Promise<string> {
   try {
     const { provider, model, apiKey } = await resolveConfiguredProvider();
-    const prompt = `Detect the language used in the interviewer question and respond in the same language. Return concise interview suggestions, one per line.\nInterviewer question: ${question}\nRelevant resume, job and previous-turn context: ${context || 'none'}`;
+    const isFollowUp = requestType === 'follow-up';
+    const prompt = isFollowUp
+      ? `Respond in the same language as the user. Apply the request to the previous interview turn when relevant.\nUser follow-up: ${question}\nRelevant resume, job and previous-turn context: ${context || 'none'}`
+      : `Answer the interviewer question directly in the same language, using the relevant resume, job and previous-turn context.\nInterviewer question: ${question}\nRelevant resume, job and previous-turn context: ${context || 'none'}`;
     if (!apiKey) throw new Error('No LLM API key is configured. Add a provider key in Settings and retry.');
 
-    const system = 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format. Be specific and professional.';
+    const system = isFollowUp
+      ? FOLLOW_UP_SYSTEM
+      : INTERVIEW_ANSWER_SYSTEM;
     if (provider === 'anthropic') {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',

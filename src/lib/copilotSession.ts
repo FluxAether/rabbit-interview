@@ -1,6 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { closeDeepgramStream, generateSuggestionsStream, sendAudioChunk, startDeepgramStream } from './llm'
+import {
+  closeDeepgramStream,
+  generateSuggestionsStream,
+  sendAudioChunk,
+  startDeepgramStream,
+  type SuggestionRequestType,
+} from './llm'
 import { chunksToWavBuffer } from './wav'
 import { loadAppSettings } from './settingsStore'
 import { openMicrophoneSettings, tryRequestMicrophone } from './permissions'
@@ -95,6 +101,7 @@ class CopilotSessionHost {
   private persistenceSessionId: string | null = null
   private persistenceQueue: Promise<void> = Promise.resolve()
   private previousTurn = ''
+  private lastRequestType: SuggestionRequestType = 'interviewer-question'
 
   async mount(): Promise<void> {
     this.commandUnlisten = await listen<CopilotSessionCommand>(COMMAND_EVENT, (event) => {
@@ -193,7 +200,7 @@ class CopilotSessionHost {
         break
       case 'retry':
         if (this.snapshot.sessionId !== null && this.snapshot.question) {
-          void this.answer(this.snapshot.sessionId, this.snapshot.question)
+          void this.answer(this.snapshot.sessionId, this.snapshot.question, this.lastRequestType)
         }
         break
       case 'follow-up':
@@ -211,7 +218,7 @@ class CopilotSessionHost {
               text,
             },
           })
-          void this.answer(sessionId, text)
+          void this.answer(sessionId, text, 'follow-up')
         }
         break
       case 'request-snapshot':
@@ -236,6 +243,7 @@ class CopilotSessionHost {
       microphone: createTranscriptState(),
     }
     this.previousTurn = ''
+    this.lastRequestType = 'interviewer-question'
 
     try {
       const [settings, capabilities] = await Promise.all([
@@ -423,7 +431,7 @@ class CopilotSessionHost {
             text,
           },
         })
-        if (source === 'system') void this.answer(sessionId, text)
+        if (source === 'system') void this.answer(sessionId, text, 'interviewer-question')
       },
       (error) => {
         if (this.isCurrent(sessionId)) void this.fail(sessionId, String(error))
@@ -441,8 +449,13 @@ class CopilotSessionHost {
     ].filter(Boolean).join('\n\n')
   }
 
-  private async answer(sessionId: number, question: string): Promise<void> {
+  private async answer(
+    sessionId: number,
+    question: string,
+    requestType: SuggestionRequestType,
+  ): Promise<void> {
     if (!this.isCurrent(sessionId)) return
+    this.lastRequestType = requestType
     this.abortController?.abort()
     const controller = new AbortController()
     this.abortController = controller
@@ -474,6 +487,7 @@ class CopilotSessionHost {
           },
         },
         controller.signal,
+        requestType,
       )
     } catch (error) {
       if (controller.signal.aborted || !this.isCurrent(sessionId)) return

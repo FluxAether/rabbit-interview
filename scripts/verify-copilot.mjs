@@ -44,6 +44,7 @@ const panel = source('src/components/CopilotPanel.tsx')
 const session = source('src/lib/copilotSession.ts')
 const sessionState = source('src/lib/copilotSessionState.ts')
 const db = source('src/lib/db.ts')
+const llm = source('src/lib/llm.ts')
 const rustWindow = source('src-tauri/src/copilot_window.rs')
 const rustAudio = source('src-tauri/src/audio/mod.rs')
 const cargo = source('src-tauri/Cargo.toml')
@@ -59,6 +60,7 @@ check(db.includes('CREATE TABLE IF NOT EXISTS copilot_messages') && db.includes(
 check(session.includes('upsertCopilotMessage'), 'the Copilot session persists displayed messages')
 check(session.includes('copilot-session-command') && session.includes('copilot-session-snapshot'), 'session commands and snapshots cross webviews')
 check(session.includes('await host.dispatch(command)'), 'main-window commands are handled directly by the active session host')
+check(!llm.includes('STAR') && !llm.includes('interview suggestions'), 'AI answers directly without a fixed STAR or suggestion template')
 
 check(rustWindow.includes('.content_protected(protected)') && rustWindow.includes('set_content_protected(protected)'), 'window protection is applied on create and reuse')
 check(rustWindow.includes('protection_requested') && rustWindow.includes('protection_applied'), 'native window returns truthful protection status')
@@ -131,6 +133,34 @@ if (windowState) {
 const { parseSseEventData } = loadTypeScriptModule('src/lib/llm.ts', ['parseSseEventData'])
 const multilineSse = parseSseEventData('event: message\ndata: {\ndata: "value": 1\ndata: }')
 check(JSON.parse(multilineSse).value === 1, 'multi-line SSE data fields are reassembled before parsing')
+
+let followUpRequest = null
+const { generateSuggestionsStream: generateFollowUp } = loadTypeScriptModule(
+  'src/lib/llm.ts',
+  ['generateSuggestionsStream'],
+  {
+    loadApiKeys: async () => ({}),
+    getLlmApiKey: async () => 'test-key',
+    useAppStore: { getState: () => ({ settings: { aiModel: 'gpt-4o-mini' } }) },
+    fetch: async (_url, init) => {
+      followUpRequest = JSON.parse(init.body)
+      return new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n')
+    },
+  },
+)
+await generateFollowUp(
+  '请把上一条答案改短一些',
+  'Previous turn:\nQuestion: 介绍一下你自己\nAnswer: 原答案',
+  { onDelta: () => {}, onComplete: () => {} },
+  undefined,
+  'follow-up',
+)
+check(followUpRequest?.messages?.[0]?.content.includes('user follow-up'), 'follow-up uses a conversational system instruction')
+check(
+  followUpRequest?.messages?.[1]?.content.includes('User follow-up: 请把上一条答案改短一些')
+    && !followUpRequest?.messages?.[1]?.content.includes('Interviewer question: 请把上一条答案改短一些'),
+  'follow-up is not mislabeled as a new interviewer question',
+)
 
 let latestSocket = null
 class FakeWebSocket {
