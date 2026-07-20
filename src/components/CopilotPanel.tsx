@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { Clipboard, EyeOff, Mic, RefreshCw, Shield, Square, Trash2 } from 'lucide-react'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useTranslation } from '../i18n'
 import { sendCopilotCommand } from '../lib/copilotSession'
 import type { CopilotWindowStatus } from '../lib/copilotWindow'
@@ -40,6 +41,15 @@ export default function CopilotPanel({
 
   const protectionLabel = t(protectionMessageKey(windowStatus))
 
+  const startWindowDrag = (event: MouseEvent<HTMLElement>) => {
+    if (!floating || event.button !== 0) return
+    const target = event.target as HTMLElement
+    if (target.closest('button, input, textarea, select, a, [data-no-drag]')) return
+
+    event.preventDefault()
+    void getCurrentWindow().startDragging()
+  }
+
   useEffect(() => {
     const container = messagesRef.current
     if (container) container.scrollTop = container.scrollHeight
@@ -50,7 +60,11 @@ export default function CopilotPanel({
       className={`floating-panel flex min-h-0 w-full flex-col border border-[#e2e8f0] p-4 text-sm ${floating ? 'h-[100dvh] rounded-none' : 'shadow-xl'}`}
       aria-label={t('copilot.floating.title')}
     >
-      <header className="mb-3 flex items-center justify-between gap-3 px-1" data-tauri-drag-region={floating ? true : undefined}>
+      <header
+        className={`mb-3 flex items-center justify-between gap-3 px-1 ${floating ? 'cursor-move select-none' : ''}`}
+        data-tauri-drag-region={floating ? true : undefined}
+        onMouseDown={startWindowDrag}
+      >
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#6366f1]">
             <Mic className="h-3.5 w-3.5 text-white" />
@@ -67,6 +81,7 @@ export default function CopilotPanel({
             className="rounded-lg p-1.5 text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#334155]"
             aria-label={t('copilot.hide')}
             data-tauri-drag-region="false"
+            data-no-drag
           >
             <EyeOff className="h-4 w-4" />
           </button>
