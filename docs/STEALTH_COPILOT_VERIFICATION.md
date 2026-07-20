@@ -5,13 +5,18 @@
 | 检查 | 结果 |
 |---|---|
 | `npm run build` | 通过；仅保留现有 Vite 大 chunk / dynamic import 警告 |
-| `npm run verify:copilot` | 18/18 通过 |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | 8/8 通过 |
+| `npm run verify:copilot` | 24/24 通过；覆盖会话幂等、迟到回调、浮窗快照恢复、保护状态和多行 SSE |
+| `cargo test --manifest-path src-tauri/Cargo.toml` | 10/10 通过；包含 AudioTee 异常退出和重复停止 |
+| `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` | 通过 |
 | `git diff --check` | 通过 |
 | `npm run prepare:audiotee` | arm64 sidecar 构建通过，源码 commit 已锁定，SHA-256 已记录 |
 | `scripts/build-audiotee.sh universal` | arm64、x86_64 与 universal Mach-O 构建通过 |
-| Tauri debug `.app` | 打包通过；包含 AudioTee、MIT License 与 lock 文件 |
+| Tauri debug `.app` | 审查修复后重新打包通过；包含 arm64 AudioTee、MIT License 与 lock 文件 |
 | 应用启动冒烟 | 通过；SQLite 初始化后主进程正常运行 |
+
+发布 workflow 已改为在 macOS runner 构建 universal AudioTee、使用专用 Tauri 配置打包，并验证 sidecar 架构与签名。该 workflow 仍需由真实 release tag 和仓库签名/公证 secrets 验证。
+
+已知仓库基线问题保持不变：`npm run lint` 因缺少 ESLint 9 flat config 失败；全树 `cargo fmt --check` 仅报告未触碰的 `src-tauri/src/db.rs` 尾部空行漂移。
 
 本机产物审计哈希位于生成目录 `src-tauri/target/audiotee-checksums.txt`。该文件不提交，因为 Swift release 产物包含构建路径信息，跨机器不能假设二进制哈希可复现；源码 commit 始终严格校验。
 
