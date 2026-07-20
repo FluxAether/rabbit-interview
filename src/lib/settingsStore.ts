@@ -28,6 +28,7 @@ export interface AppSettings {
   // Stealth Copilot capture mode (persisted so floating window + restarts respect choice)
   useSystemAudio?: boolean;
   useMicWithSystem?: boolean;
+  micDevice?: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {

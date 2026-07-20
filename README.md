@@ -38,40 +38,20 @@ Tauri 2 (Rust) • React 19 + TS • Tailwind • Framer Motion • Lucide • S
 
 The Stealth Copilot can capture **both your voice and the interviewer's voice** (system audio) for real-time transcription and suggestions.
 
-### Recommended on macOS (no BlackHole needed!)
-- In the **隐形助手 / Stealth Copilot** panel, enable **"Use system audio (macOS native — captures interviewer)"**.
-- This uses Apple's **ScreenCaptureKit** (via native `SCContentSharingPicker` support).
-- You will be prompted once for **Screen Recording** permission (this also enables system audio capture).
-- Optional: click "Open native picker" to precisely select a meeting window (Zoom / Teams / etc.) instead of the whole screen.
-- "Also capture microphone" is recommended.
+### Recommended on macOS
 
-This completely removes the need to install BlackHole or create Aggregate Devices for most users.
-
-**Note on building**: Native ScreenCaptureKit support pulls in Swift-based dependencies (`apple-metal` etc.). 
-
-- By default the app builds without the heavy dependency (`cargo build` / `npm run tauri dev` works with just microphone capture).
-- To enable system audio capture, build/run with the feature:
-  ```bash
-  # Dev (recommended)
-  npm run tauri:mac-audio
-  # or manually with env (if your Xcode is in a different location)
-  DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-  SDKROOT=$(DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcrun --sdk macosx --show-sdk-path) \
-  PATH="/Applications/Xcode-beta.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:$PATH" \
-  npm run tauri dev -- --features macos-system-audio
-
-  # Build
-  cargo tauri build -- --features macos-system-audio
-  # or
-  npm run tauri build -- --features macos-system-audio
-  ```
-- You need a **full Xcode** (not only Command Line Tools). The helper script and DEVELOPER_DIR override take care of selecting the correct Swift toolchain and macOS SDK during compilation and linking.
+- macOS 14.2+ uses the bundled [AudioTee](https://github.com/makeusabrew/audiotee) sidecar to capture 16 kHz mono audio from the default system output.
+- Microphone audio remains optional and is captured with `cpal`; when both sources are enabled they are mixed in the native layer.
+- The integration is pinned to commit `56ac954369a09318e46b88a6eec33c2d2b0d32a3`. Each build records architecture-specific SHA-256 values in `src-tauri/target/audiotee-checksums.txt`; reviewed reference hashes and policy live in `src-tauri/binaries/audiotee.lock`.
+- Run `npm run tauri:mac-audio` for development. `npm run build:mac` builds and bundles both sidecar architectures.
+- The first system-audio capture requests macOS **System Audio Recording** permission. AudioTee does not use screen recording permission or capture screen contents.
 
 See Packaging section below for more details.
 
 ### Fallback / Other platforms
-- Microphone-only mode still uses `cpal` (select device in the UI).
-- On older macOS or Windows, you may still need virtual audio routing tools for system audio.
+
+- macOS 13.0–14.1 remains supported in microphone-only mode.
+- Other platforms currently report their native capability and fall back to microphone-only mode. A Windows WASAPI loopback implementation remains a separate compatibility spike.
 
 See Settings > Audio Capture for more details.
 
@@ -81,22 +61,22 @@ Proprietary (internal project)
 ## Packaging & Signing (Phase 4)
 
 ### macOS (with native audio capture)
-1. Make sure you have **full Xcode** (not just Command Line Tools) installed and selected:
+1. Make sure a Swift 6.3.2 toolchain is installed and selected:
    ```bash
    xcode-select -s /Applications/Xcode.app/Contents/Developer
    ```
-   The `screencapturekit` crate (and its `apple-metal` dependency) uses Swift bridges, which require a proper Xcode installation.
+   `scripts/build-audiotee.sh` verifies the reviewed source commit and records the resulting architecture-specific checksum.
 
 2. `npm run build:mac` (or `npm run tauri build`)
 
-3. If you see Swift compatibility linker errors during build, update Xcode / Command Line Tools and try again.
+3. Attach `src-tauri/target/audiotee-checksums.txt` to the release audit. Swift embeds build-path details, so binary hashes are recorded per build rather than treated as cross-machine reproducible values.
 
 4. For notarization:
    - Create App Store Connect API key or use `xcrun notarytool store-credentials`
    - `xcrun notarytool submit --keychain-profile "AC_PASSWORD" --wait ./target/release/bundle/macos/RabbitInterview.app.tar.gz`
 5. Staple: `xcrun stapler staple ./target/.../RabbitInterview.app`
 
-Entitlements are in `src-tauri/entitlements.plist` (microphone + network + file access + screen capture via Info.plist descriptions).
+Entitlements are in `src-tauri/entitlements.plist`; `Info.plist` declares microphone and system-audio capture usage descriptions.
 
 ### Windows
 - `npm run build:win`

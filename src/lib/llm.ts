@@ -229,6 +229,174 @@ export async function generateSuggestions(question: string, transcriptSoFar?: st
   }
 }
 
+export interface SuggestionStreamHandlers {
+  onDelta: (delta: string, accumulated: string) => void;
+  onComplete: (text: string) => void;
+  onError?: (error: Error) => void;
+}
+
+async function resolveConfiguredProvider(): Promise<{
+  provider: 'groq' | 'openai' | 'anthropic' | 'gemini';
+  model: string;
+  apiKey: string;
+}> {
+  const aiModel: string = useAppStore.getState().settings?.aiModel || 'groq-llama-3.1';
+  let { provider, model } = resolveProviderAndModel(aiModel);
+  let apiKey = await getLlmApiKey(provider);
+  if (!apiKey) {
+    const candidates: Array<'gemini' | 'groq' | 'openai' | 'anthropic'> = ['gemini', 'groq', 'openai', 'anthropic'];
+    for (const candidate of candidates) {
+      const candidateKey = await getLlmApiKey(candidate);
+      if (!candidateKey) continue;
+      provider = candidate;
+      apiKey = candidateKey;
+      model = candidate === 'gemini'
+        ? 'gemini-3.5-flash'
+        : candidate === 'openai'
+          ? 'gpt-5.6-luna'
+          : candidate === 'anthropic'
+            ? 'claude-haiku-4-5'
+            : 'llama-3.1-8b-instant';
+      break;
+    }
+  }
+  return { provider, model, apiKey };
+}
+
+async function consumeSse(
+  response: Response,
+  onData: (payload: any) => string | null,
+  handlers: SuggestionStreamHandlers,
+): Promise<string> {
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `LLM request failed with ${response.status}`);
+  }
+  if (!response.body) throw new Error('LLM streaming response has no body');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let accumulated = '';
+  const processEvent = (event: string) => {
+    for (const line of event.split('\n')) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+      const delta = onData(JSON.parse(data));
+      if (!delta) continue;
+      accumulated += delta;
+      handlers.onDelta(delta, accumulated);
+    }
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    buffer = buffer.replace(/\r\n/g, '\n');
+    const events = buffer.split('\n\n');
+    buffer = events.pop() || '';
+    events.forEach(processEvent);
+    if (done) {
+      if (buffer.trim()) processEvent(buffer);
+      break;
+    }
+  }
+  handlers.onComplete(accumulated);
+  return accumulated;
+}
+
+export async function generateSuggestionsStream(
+  question: string,
+  context: string,
+  handlers: SuggestionStreamHandlers,
+  signal?: AbortSignal,
+): Promise<string> {
+  try {
+    const { provider, model, apiKey } = await resolveConfiguredProvider();
+    const prompt = `Detect the language used in the interviewer question and respond in the same language. Return concise interview suggestions, one per line.\nInterviewer question: ${question}\nRelevant resume, job and previous-turn context: ${context || 'none'}`;
+    if (!apiKey) {
+      const fallback = await generateSuggestions(question, context);
+      let accumulated = '';
+      for (const suggestion of fallback) {
+        const delta = `${accumulated ? '\n' : ''}${suggestion}`;
+        accumulated += delta;
+        handlers.onDelta(delta, accumulated);
+      }
+      handlers.onComplete(accumulated);
+      return accumulated;
+    }
+
+    const system = 'You are an expert interview coach. Return 4-5 concise bullet points in STAR format. Be specific and professional.';
+    if (provider === 'anthropic') {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 220,
+          stream: true,
+          system,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      return consumeSse(
+        response,
+        (payload) => payload.type === 'content_block_delta' && payload.delta?.type === 'text_delta'
+          ? payload.delta.text
+          : null,
+        handlers,
+      );
+    }
+
+    if (provider === 'gemini') {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+        {
+          method: 'POST',
+          signal,
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: system }] },
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.6, maxOutputTokens: 220 },
+          }),
+        },
+      );
+      return consumeSse(
+        response,
+        (payload) => payload?.candidates?.[0]?.content?.parts?.map((part: any) => part.text || '').join('') || null,
+        handlers,
+      );
+    }
+
+    const endpoint = provider === 'groq'
+      ? 'https://api.groq.com/openai/v1/chat/completions'
+      : 'https://api.openai.com/v1/chat/completions';
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      signal,
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        stream: true,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
+        ...(provider === 'openai' ? { max_completion_tokens: 220 } : { max_tokens: 220, temperature: 0.6 }),
+      }),
+    });
+    return consumeSse(response, (payload) => payload?.choices?.[0]?.delta?.content || null, handlers);
+  } catch (error) {
+    const normalized = error instanceof Error ? error : new Error(String(error));
+    if (normalized.name !== 'AbortError') handlers.onError?.(normalized);
+    throw normalized;
+  }
+}
+
 // ==================== STT (Speech-to-Text) Streaming ====================
 // Currently only Deepgram is implemented. The model is now configurable per-provider
 // via Settings (sttProvider + sttModel). The function name is kept for backward compat.

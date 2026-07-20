@@ -34,14 +34,3 @@ once_cell = "1"
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 futures-util = "0.3"
 url = "2"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-# ScreenCaptureKit support for native system audio + mic (no BlackHole needed).
-# This pulls in Swift-bridged crates (apple-metal etc), so it is optional.
-# Enable with: cargo build --features macos-system-audio   (or in tauri build)
-screencapturekit = { version = "8", features = ["async", "macos_15_0"], optional = true }
-
-[features]
-default = []
-macos-system-audio = ["dep:screencapturekit"]
-

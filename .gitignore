@@ -40,6 +40,9 @@ Thumbs.db
 # Tauri generated files
 src-tauri/gen/
 src-tauri/*.log
+src-tauri/binaries/audiotee-aarch64-apple-darwin
+src-tauri/binaries/audiotee-x86_64-apple-darwin
+src-tauri/binaries/audiotee-universal-apple-darwin
 
 # Rust
 **/*.rs.bk

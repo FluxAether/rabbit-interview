@@ -2,8 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Sandbox disabled for easier distribution outside Mac App Store.
-         Required for reliable ScreenCaptureKit + system audio capture. -->
+    <!-- Sandbox disabled for distribution outside the Mac App Store and for the
+         bundled AudioTee Core Audio Tap sidecar. -->
     <key>com.apple.security.app-sandbox</key>
     <false/>
 

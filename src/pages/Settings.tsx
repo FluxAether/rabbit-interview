@@ -679,22 +679,11 @@ export default function Settings() {
           </button>
 
           <div className="text-xs p-3 bg-emerald-50 border border-emerald-200 rounded space-y-2">
-            <div><b>✅ Recommended: macOS Native Capture (ScreenCaptureKit)</b></div>
+            <div><b>✅ macOS system audio: AudioTee</b></div>
             <div className="text-emerald-700">
-              Enable "Use system audio" in the Stealth Copilot panel. This uses Apple's native API to capture interviewer audio + your mic without installing BlackHole.
+              The bundled, pinned AudioTee sidecar captures the default system output. Microphone capture remains a separate option.
             </div>
-            <div className="pt-1 text-[10px] text-emerald-600">Requires macOS 13+. Best experience on macOS 15+. You will be prompted for "Screen Recording" permission once.</div>
-          </div>
-
-          <div className="text-xs p-3 bg-amber-50 border border-amber-200 rounded space-y-2 mt-3">
-            <div><b>{t('settings.audio.blackhole.title')} (fallback)</b></div>
-            <ol className="list-decimal pl-4 space-y-1">
-              <li>{t('settings.audio.blackhole.step1')}</li>
-              <li>{t('settings.audio.blackhole.step2')}</li>
-              <li>{t('settings.audio.blackhole.step3')}</li>
-              <li>{t('settings.audio.blackhole.step4')}</li>
-            </ol>
-            <div className="pt-1">{t('settings.audio.blackhole.alt')}</div>
+            <div className="pt-1 text-[10px] text-emerald-600">Requires macOS 14.2+. macOS 13.0–14.1 and unsupported platforms use microphone-only mode.</div>
           </div>
         </div>
 
@@ -704,7 +693,6 @@ export default function Settings() {
           <div className="space-y-2 text-sm">
             <div className="flex justify-between"><span>{t('settings.shortcuts.toggle')}</span> <span className="font-mono text-xs bg-[#f1f5f9] px-1.5 py-px rounded">⌘⇧I</span></div>
             <div className="flex justify-between"><span>{t('settings.shortcuts.capture')}</span> <span className="font-mono text-xs bg-[#f1f5f9] px-1.5 py-px rounded">⌘⇧C</span></div>
-            <div className="flex justify-between"><span>{t('settings.shortcuts.mock')}</span> <span className="font-mono text-xs bg-[#f1f5f9] px-1.5 py-px rounded">⌘⇧M</span></div>
           </div>
         </div>
 

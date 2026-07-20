@@ -1,0 +1,7 @@
+repository=https://github.com/makeusabrew/audiotee
+commit=56ac954369a09318e46b88a6eec33c2d2b0d32a3
+swift=6.3.2
+checksum_policy=record-each-build-in-src-tauri/target/audiotee-checksums.txt
+reviewed_reference_aarch64=cdbaf79a5ad264cb1ecf09b828a3ff2cb5c7b05e5c5c1893934929cf366a27a3
+reviewed_reference_x86_64=1a136f96d8ca2727539c9f82570a6af74ca52f6370388379234996226b24646a
+reviewed_reference_universal=21311b195c31aca512c8e6ef8ccc355f1fa6382445dbb70b4bb5ed6afab72653

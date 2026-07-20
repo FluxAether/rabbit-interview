@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, WebviewWindowBuilder, WebviewUrl};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AppSettings {
@@ -43,51 +42,6 @@ pub async fn get_settings() -> Result<AppSettings, String> {
 pub async fn save_settings(settings: AppSettings) -> Result<(), String> {
     println!("Saving settings: {:?}", settings);
     // TODO: persist to SQLite via sql plugin
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn launch_copilot_window(app: AppHandle) -> Result<(), String> {
-    // Create or focus the floating stealth copilot window matching the design exactly
-    if let Some(existing) = app.get_webview_window("copilot") {
-        let _ = existing.show();
-        let _ = existing.set_focus();
-        return Ok(());
-    }
-
-    let _window = WebviewWindowBuilder::new(
-        &app,
-        "copilot",
-        WebviewUrl::App("index.html#copilot-floating".into()),
-    )
-    .title("AI Interview Assistant")
-    .inner_size(420.0, 380.0)
-    .resizable(false)
-    .decorations(false)
-    .closable(true)
-    .always_on_top(true)
-    .shadow(true)
-    .skip_taskbar(true)
-    // Do not set transparent(true) here — the floating panel uses CSS background + blur
-    .build()
-    .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn hide_copilot_window(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("copilot") {
-        let _ = window.hide();
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn close_copilot_window(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("copilot") {
-        let _ = window.close();
-    }
     Ok(())
 }
 

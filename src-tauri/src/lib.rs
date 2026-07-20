@@ -1,12 +1,14 @@
 mod audio;
 mod commands;
+mod copilot_window;
 mod db;
 
-use audio::{start_capture, stop_capture, list_audio_devices, stop_macos_capture};
-
-#[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
-use audio::{start_macos_capture, check_screen_recording_permission, list_macos_sources, present_macos_content_picker};
-use commands::{get_settings, save_settings, launch_copilot_window, hide_copilot_window, close_copilot_window, get_history, save_interview_record};
+use audio::{get_audio_capabilities, list_audio_devices, start_audio_capture, stop_audio_capture};
+use commands::{get_history, get_settings, save_interview_record, save_settings};
+use copilot_window::{
+    close_copilot_window, get_copilot_window_status, hide_copilot_window, show_copilot_window,
+    toggle_copilot_window,
+};
 use tauri::Emitter;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
@@ -37,32 +39,24 @@ pub fn run() {
                         _ => Ok(()),
                     };
                 })
-                .build()
+                .build(),
         )
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             greet,
-            start_capture,
-            stop_capture,
+            start_audio_capture,
+            stop_audio_capture,
+            get_audio_capabilities,
             list_audio_devices,
             get_settings,
             save_settings,
-            launch_copilot_window,
+            show_copilot_window,
             hide_copilot_window,
+            toggle_copilot_window,
+            get_copilot_window_status,
             close_copilot_window,
             get_history,
             save_interview_record,
-            // macOS native audio (ScreenCaptureKit) — enabled with feature "macos-system-audio"
-            #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
-            start_macos_capture,
-            #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
-            check_screen_recording_permission,
-            #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
-            list_macos_sources,
-            #[cfg(all(target_os = "macos", feature = "macos-system-audio"))]
-            present_macos_content_picker,
-            // stop_macos_capture always registered (delegates to SCK or no-op)
-            stop_macos_capture,
         ])
         .setup(|app| {
             if let Err(e) = db::init_db(app) {
@@ -71,17 +65,24 @@ pub fn run() {
 
             // Register the actual hotkey combinations.
             // The .with_handler on the plugin builder above will receive them and emit events.
-            let capture_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyC);
+            let capture_shortcut =
+                Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyC);
             if let Err(e) = app.global_shortcut().register(capture_shortcut) {
                 eprintln!("Failed to register ⌘⇧C capture shortcut: {}", e);
             }
 
-            let copilot_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyI);
+            let copilot_shortcut =
+                Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyI);
             if let Err(e) = app.global_shortcut().register(copilot_shortcut) {
                 eprintln!("Failed to register ⌘⇧I copilot shortcut: {}", e);
             }
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                audio::stop_audio_capture_and_wait();
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

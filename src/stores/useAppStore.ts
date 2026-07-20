@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { SupportedLanguage } from '../i18n/types'
+import { createInitialSnapshot, type CopilotSnapshot } from '../lib/copilotSessionState'
 
 export interface InterviewRecord {
   id?: number
@@ -19,31 +20,15 @@ export interface Suggestion {
   applied?: boolean
 }
 
-export interface CopilotState {
-  isActive: boolean
-  currentQuestion: string
-  suggestions: Suggestion[]
-  amplitude: number
-  isStealth: boolean
-}
-
 interface AppState {
   // Global
   currentPage: string
   settings: Record<string, any>
   setLanguage: (lang: SupportedLanguage) => void
   setSettings: (newSettings: Partial<Record<string, any>>) => void
-  // Hotkey intent: allows ⌘⇧C from other pages to navigate + toggle capture reliably
-  captureHotkeyPending: boolean
-  consumeCaptureHotkeyPending: () => boolean
-  
   // Copilot (real-time)
-  copilot: CopilotState
-  setCopilotActive: (active: boolean) => void
-  updateCopilotQuestion: (q: string) => void
-  addSuggestion: (s: Omit<Suggestion, 'id'>) => void
-  updateAmplitude: (amp: number) => void
-  applySuggestion: (id: number) => void
+  copilot: CopilotSnapshot
+  setCopilotSnapshot: (snapshot: CopilotSnapshot) => void
   
   // History
   history: InterviewRecord[]
@@ -88,44 +73,8 @@ export const useAppStore = create<AppState>((set) => ({
     sttLanguage: 'zh-CN',
   },
 
-  copilot: {
-    isActive: false,
-    currentQuestion: '',
-    suggestions: [],
-    amplitude: 0,
-    isStealth: true,
-  },
-
-  setCopilotActive: (active) =>
-    set((state) => ({ copilot: { ...state.copilot, isActive: active } })),
-
-  updateCopilotQuestion: (q) =>
-    set((state) => ({ copilot: { ...state.copilot, currentQuestion: q } })),
-
-  addSuggestion: (s) =>
-    set((state) => {
-      const next = [...state.copilot.suggestions, { ...s, id: Date.now() }];
-      // Cap suggestions to avoid memory / UI bloat during long sessions
-      return {
-        copilot: {
-          ...state.copilot,
-          suggestions: next.length > 40 ? next.slice(next.length - 40) : next,
-        },
-      };
-    }),
-
-  updateAmplitude: (amp) =>
-    set((state) => ({ copilot: { ...state.copilot, amplitude: amp } })),
-
-  applySuggestion: (id) =>
-    set((state) => ({
-      copilot: {
-        ...state.copilot,
-        suggestions: state.copilot.suggestions.map((s) =>
-          s.id === id ? { ...s, applied: true } : s
-        ),
-      },
-    })),
+  copilot: createInitialSnapshot(),
+  setCopilotSnapshot: (snapshot) => set({ copilot: snapshot }),
 
   history: [],
   addHistory: (record) => set((state) => ({ history: [record, ...state.history] })),
@@ -174,13 +123,4 @@ export const useAppStore = create<AppState>((set) => ({
       settings: { ...state.settings, ...newSettings },
     })),
 
-  captureHotkeyPending: false,
-  consumeCaptureHotkeyPending: () => {
-    let did = false
-    set((state) => {
-      did = state.captureHotkeyPending
-      return { captureHotkeyPending: false }
-    })
-    return did
-  },
 }))
