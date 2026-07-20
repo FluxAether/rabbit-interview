@@ -14,15 +14,18 @@ import { upsertCopilotMessage } from './db'
 import {
   createInitialSnapshot,
   reduceCopilotSnapshot,
-  type CopilotMessage,
   type CopilotSnapshot,
   type CopilotSnapshotAction,
 } from './copilotSessionState'
 import { useAppStore, type Suggestion } from '../stores/useAppStore'
+import { mergeContinuationText, textSimilarity } from './copilotText'
 
 const COMMAND_EVENT = 'copilot-session-command'
 const SNAPSHOT_EVENT = 'copilot-session-snapshot'
 const MAX_RECORDING_SECONDS = 15 * 60
+const INTERVIEWER_QUESTION_DEBOUNCE_MS = 1_200
+const MAX_AUTO_CONTINUATIONS = 2
+const ECHO_WINDOW_MS = 15_000
 
 export interface AudioCapabilities {
   system_audio_available: boolean
@@ -52,6 +55,11 @@ interface TranscriptState {
   finalParts: string[]
   lastFinal: string
   lastFinalAt: number
+}
+
+interface ActiveAnswer {
+  controller: AbortController
+  answerId: number
 }
 
 function createTranscriptState(): TranscriptState {
@@ -96,12 +104,18 @@ class CopilotSessionHost {
   private commandUnlisten: UnlistenFn | null = null
   private recording: number[][] = []
   private sampleRate = 16_000
-  private abortController: AbortController | null = null
+  private activeAnswer: ActiveAnswer | null = null
+  private pendingInterviewerQuestion = ''
+  private interviewerQuestionTimer: ReturnType<typeof globalThis.setTimeout> | null = null
   private stopPromise: Promise<void> | null = null
   private persistenceSessionId: string | null = null
   private persistenceQueue: Promise<void> = Promise.resolve()
   private previousTurn = ''
   private lastRequestType: SuggestionRequestType = 'interviewer-question'
+  private recentAssistantText = ''
+  private recentAssistantAt = 0
+  private recentMicrophoneText = ''
+  private recentMicrophoneAt = 0
 
   async mount(): Promise<void> {
     this.commandUnlisten = await listen<CopilotSessionCommand>(COMMAND_EVENT, (event) => {
@@ -129,25 +143,35 @@ class CopilotSessionHost {
     const next = reduceCopilotSnapshot(previous, action)
     if (next === previous) return
     this.snapshot = next
-    this.queueMessagePersistence(previous.messages, next.messages, next.sessionId)
+    this.queueMessagePersistence(previous, next)
     void this.publish()
   }
 
   private queueMessagePersistence(
-    previousMessages: CopilotMessage[],
-    nextMessages: CopilotMessage[],
-    sessionId: number | null,
+    previousSnapshot: CopilotSnapshot,
+    nextSnapshot: CopilotSnapshot,
   ): void {
     const persistenceSessionId = this.persistenceSessionId
-    if (!persistenceSessionId || sessionId === null || previousMessages === nextMessages) return
+    const sessionId = nextSnapshot.sessionId ?? previousSnapshot.sessionId
+    const activeAnswerCompleted = previousSnapshot.activeAnswerId !== null
+      && nextSnapshot.activeAnswerId === null
+    if (
+      !persistenceSessionId
+      || sessionId === null
+      || (previousSnapshot.messages === nextSnapshot.messages && !activeAnswerCompleted)
+    ) return
 
-    const previousById = new Map(previousMessages.map((message) => [message.id, message]))
-    const changedMessages = nextMessages.flatMap((message, messageOrder) => {
+    const previousById = new Map(previousSnapshot.messages.map((message) => [message.id, message]))
+    const changedMessages = nextSnapshot.messages.flatMap((message, messageOrder) => {
+      if (nextSnapshot.activeAnswerId === message.id) return []
       const previous = previousById.get(message.id)
+      const justCompleted = previousSnapshot.activeAnswerId === message.id
+        && nextSnapshot.activeAnswerId !== message.id
       return !previous
         || previous.role !== message.role
         || previous.source !== message.source
         || previous.text !== message.text
+        || justCompleted
         ? [{ message, messageOrder }]
         : []
     })
@@ -169,6 +193,69 @@ class CopilotSessionHost {
           })
         }
       })
+  }
+
+  private clearPendingInterviewerQuestion(): void {
+    if (this.interviewerQuestionTimer !== null) {
+      globalThis.clearTimeout(this.interviewerQuestionTimer)
+      this.interviewerQuestionTimer = null
+    }
+    this.pendingInterviewerQuestion = ''
+  }
+
+  private scheduleInterviewerAnswer(sessionId: number, text: string): void {
+    const normalized = text.trim()
+    if (!normalized || !this.isCurrent(sessionId)) return
+    this.pendingInterviewerQuestion = [this.pendingInterviewerQuestion, normalized]
+      .filter(Boolean)
+      .join(' ')
+    if (this.interviewerQuestionTimer !== null) {
+      globalThis.clearTimeout(this.interviewerQuestionTimer)
+    }
+    this.interviewerQuestionTimer = globalThis.setTimeout(() => {
+      this.interviewerQuestionTimer = null
+      void this.flushPendingInterviewerAnswer(sessionId)
+    }, INTERVIEWER_QUESTION_DEBOUNCE_MS)
+  }
+
+  private async flushPendingInterviewerAnswer(sessionId: number): Promise<void> {
+    if (!this.isCurrent(sessionId) || !this.pendingInterviewerQuestion || this.activeAnswer) return
+    const question = this.pendingInterviewerQuestion
+    this.pendingInterviewerQuestion = ''
+    this.transition({ type: 'question', sessionId, question })
+    await this.answer(sessionId, question, 'interviewer-question')
+  }
+
+  private resumePendingInterviewerAnswer(sessionId: number): void {
+    if (
+      !this.isCurrent(sessionId)
+      || !this.pendingInterviewerQuestion
+      || this.interviewerQuestionTimer !== null
+      || this.activeAnswer
+    ) return
+    this.interviewerQuestionTimer = globalThis.setTimeout(() => {
+      this.interviewerQuestionTimer = null
+      void this.flushPendingInterviewerAnswer(sessionId)
+    }, 0)
+  }
+
+  private cancelActiveAnswer(sessionId: number | null): void {
+    const active = this.activeAnswer
+    if (!active) return
+    this.activeAnswer = null
+    active.controller.abort()
+    if (sessionId !== null && this.isCurrent(sessionId)) {
+      this.transition({ type: 'cancel-answer', sessionId, answerId: active.answerId })
+    }
+  }
+
+  private isLikelyEcho(text: string, now: number): boolean {
+    if (text.replace(/\s/g, '').length < 12) return false
+    const assistantEcho = now - this.recentAssistantAt <= ECHO_WINDOW_MS
+      && textSimilarity(text, this.recentAssistantText) >= 0.68
+    const microphoneEcho = now - this.recentMicrophoneAt <= ECHO_WINDOW_MS
+      && textSimilarity(text, this.recentMicrophoneText) >= 0.68
+    return assistantEcho || microphoneEcho
   }
 
   private async publish(force = false): Promise<void> {
@@ -194,19 +281,26 @@ class CopilotSessionHost {
           await this.start(command.config)
         }
         break
-      case 'clear':
-        this.abortController?.abort()
+      case 'clear': {
+        const sessionId = this.snapshot.sessionId
+        this.clearPendingInterviewerQuestion()
+        this.cancelActiveAnswer(sessionId)
         this.transition({ type: 'clear' })
         break
+      }
       case 'retry':
         if (this.snapshot.sessionId !== null && this.snapshot.question) {
-          void this.answer(this.snapshot.sessionId, this.snapshot.question, this.lastRequestType)
+          const sessionId = this.snapshot.sessionId
+          this.clearPendingInterviewerQuestion()
+          void this.answer(sessionId, this.snapshot.question, this.lastRequestType, true)
         }
         break
       case 'follow-up':
         if (this.snapshot.sessionId !== null && command.text.trim()) {
           const text = command.text.trim()
           const sessionId = this.snapshot.sessionId
+          this.clearPendingInterviewerQuestion()
+          this.cancelActiveAnswer(sessionId)
           this.transition({ type: 'question', sessionId, question: text })
           this.transition({
             type: 'message',
@@ -218,7 +312,7 @@ class CopilotSessionHost {
               text,
             },
           })
-          void this.answer(sessionId, text, 'follow-up')
+          void this.answer(sessionId, text, 'follow-up', true)
         }
         break
       case 'request-snapshot':
@@ -232,6 +326,8 @@ class CopilotSessionHost {
       return
     }
 
+    this.clearPendingInterviewerQuestion()
+    this.cancelActiveAnswer(this.snapshot.sessionId)
     const sessionId = ++this.sessionSequence
     this.persistenceSessionId = globalThis.crypto.randomUUID()
     this.transition({ type: 'start', sessionId })
@@ -244,6 +340,10 @@ class CopilotSessionHost {
     }
     this.previousTurn = ''
     this.lastRequestType = 'interviewer-question'
+    this.recentAssistantText = ''
+    this.recentAssistantAt = 0
+    this.recentMicrophoneText = ''
+    this.recentMicrophoneAt = 0
 
     try {
       const [settings, capabilities] = await Promise.all([
@@ -317,10 +417,11 @@ class CopilotSessionHost {
     if (this.snapshot.phase === 'idle') return
     if (this.stopPromise) return this.stopPromise
 
+    const sessionId = this.snapshot.sessionId
+    this.clearPendingInterviewerQuestion()
+    this.cancelActiveAnswer(sessionId)
     this.transition({ type: 'stop' })
     this.stopPromise = (async () => {
-      this.abortController?.abort()
-      this.abortController = null
       this.closeDeepgrams()
       await invoke('stop_audio_capture').catch(() => {})
       await this.cleanupRuntime()
@@ -421,6 +522,12 @@ class CopilotSessionHost {
         if (text === transcript.lastFinal && now - transcript.lastFinalAt < 2_000) return
         transcript.lastFinal = text
         transcript.lastFinalAt = now
+        if (source === 'microphone') {
+          this.recentMicrophoneText = text
+          this.recentMicrophoneAt = now
+        } else if (this.isLikelyEcho(text, now)) {
+          return
+        }
         this.transition({
           type: 'message',
           sessionId,
@@ -431,7 +538,7 @@ class CopilotSessionHost {
             text,
           },
         })
-        if (source === 'system') void this.answer(sessionId, text, 'interviewer-question')
+        if (source === 'system') this.scheduleInterviewerAnswer(sessionId, text)
       },
       (error) => {
         if (this.isCurrent(sessionId)) void this.fail(sessionId, String(error))
@@ -453,55 +560,137 @@ class CopilotSessionHost {
     sessionId: number,
     question: string,
     requestType: SuggestionRequestType,
+    interrupt = false,
   ): Promise<void> {
     if (!this.isCurrent(sessionId)) return
+    if (this.activeAnswer) {
+      if (!interrupt && requestType === 'interviewer-question') {
+        this.pendingInterviewerQuestion = [question, this.pendingInterviewerQuestion]
+          .filter(Boolean)
+          .join(' ')
+        return
+      }
+      this.cancelActiveAnswer(sessionId)
+    }
+
     this.lastRequestType = requestType
-    this.abortController?.abort()
     const controller = new AbortController()
-    this.abortController = controller
-    const answerId = ++this.answerSequence
-    const idBase = sessionId * 1_000_000 + answerId * 100
+    const answerSequence = ++this.answerSequence
+    const idBase = sessionId * 1_000_000 + answerSequence * 100
+    this.activeAnswer = { controller, answerId: idBase }
     const category = String(useAppStore.getState().settings?.aiModel || 'AI')
 
     try {
-      await generateSuggestionsStream(
-        question,
-        this.buildContext(),
-        {
-          onDelta: (_delta, accumulated) => {
-            if (!this.isCurrent(sessionId) || controller.signal.aborted) return
-            this.transition({
-              type: 'replace-suggestions',
-              sessionId,
-              suggestions: [{ id: idBase, text: accumulated, category }],
-            })
+      const context = this.buildContext()
+      let fullText = ''
+      let continuationAttempt = 0
+
+      while (!controller.signal.aborted && this.isCurrent(sessionId)) {
+        const attemptBaseText = fullText
+        const result = await generateSuggestionsStream(
+          question,
+          context,
+          {
+            onDelta: (_delta, accumulated) => {
+              if (!this.isCurrent(sessionId) || controller.signal.aborted) return
+              fullText = attemptBaseText
+                ? mergeContinuationText(attemptBaseText, accumulated)
+                : accumulated
+              this.recentAssistantText = fullText
+              this.recentAssistantAt = Date.now()
+              this.transition({
+                type: 'stream-answer',
+                sessionId,
+                suggestion: { id: idBase, text: fullText, category },
+                continuing: continuationAttempt > 0,
+              })
+            },
           },
-          onComplete: (text) => {
-            if (!this.isCurrent(sessionId) || controller.signal.aborted) return
-            this.transition({
-              type: 'replace-suggestions',
-              sessionId,
-              suggestions: splitSuggestions(text, category, idBase),
-            })
-            this.previousTurn = `Question: ${question}\nAnswer: ${text}`
-          },
-        },
-        controller.signal,
-        requestType,
-      )
+          controller.signal,
+          requestType,
+          continuationAttempt > 0
+            ? { continuationText: attemptBaseText, continuationAttempt }
+            : {},
+        )
+
+        if (!this.isCurrent(sessionId) || controller.signal.aborted) return
+        fullText = attemptBaseText
+          ? mergeContinuationText(attemptBaseText, result.text)
+          : result.text
+        this.recentAssistantText = fullText
+        this.recentAssistantAt = Date.now()
+        const madeProgress = fullText.length > attemptBaseText.length
+        console.info('[Copilot][LLM]', {
+          answerId: idBase,
+          provider: result.provider,
+          model: result.model,
+          status: result.status,
+          finishReason: result.finishReason,
+          characters: fullText.length,
+          continuationAttempt,
+          madeProgress,
+        })
+
+        if (result.status === 'complete' && fullText.trim() && (continuationAttempt === 0 || madeProgress)) {
+          this.transition({
+            type: 'complete-answer',
+            sessionId,
+            answerId: idBase,
+            answer: fullText,
+            suggestions: splitSuggestions(fullText, category, idBase),
+          })
+          this.previousTurn = `Question: ${question}\nAnswer: ${fullText}`
+          break
+        }
+
+        if (result.status === 'max-tokens' && continuationAttempt < MAX_AUTO_CONTINUATIONS && madeProgress) {
+          continuationAttempt += 1
+          this.transition({
+            type: 'stream-answer',
+            sessionId,
+            suggestion: { id: idBase, text: fullText, category },
+            continuing: true,
+          })
+          continue
+        }
+
+        if (!fullText.trim()) {
+          throw new Error(`LLM stream ended without a complete answer (${result.finishReason || 'unknown reason'})`)
+        }
+        const reason = result.status === 'max-tokens'
+          ? 'copilot.answer.incomplete.maxTokens'
+          : result.finishReason === 'connection_lost'
+            ? 'copilot.answer.incomplete.connection'
+            : 'copilot.answer.incomplete.unknown'
+        this.transition({
+          type: 'incomplete-answer',
+          sessionId,
+          answerId: idBase,
+          text: fullText,
+          reason,
+        })
+        break
+      }
     } catch (error) {
       if (controller.signal.aborted || !this.isCurrent(sessionId)) return
+      this.transition({ type: 'cancel-answer', sessionId, answerId: idBase })
       this.transition({
         type: 'recoverable-error',
         sessionId,
         error: error instanceof Error ? error.message : String(error),
       })
+    } finally {
+      if (this.activeAnswer?.controller === controller) {
+        this.activeAnswer = null
+        this.resumePendingInterviewerAnswer(sessionId)
+      }
     }
   }
 
   private async fail(sessionId: number, error: string): Promise<void> {
     if (!this.isCurrent(sessionId)) return
-    this.abortController?.abort()
+    this.clearPendingInterviewerQuestion()
+    this.cancelActiveAnswer(sessionId)
     await invoke('stop_audio_capture').catch(() => {})
     await this.cleanupRuntime()
     this.transition({ type: 'error', sessionId, error })

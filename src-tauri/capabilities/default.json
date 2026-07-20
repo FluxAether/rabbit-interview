@@ -7,6 +7,7 @@
     "core:default",
     "opener:default",
     "sql:default",
+    "sql:allow-execute",
     "fs:default",
     "dialog:default",
     "global-shortcut:default",

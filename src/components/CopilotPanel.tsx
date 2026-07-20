@@ -120,6 +120,20 @@ export default function CopilotPanel({
         )}
       </div>
 
+      {copilot.answerStatus !== 'idle' && (
+        <div
+          className={`mt-2 rounded-lg px-2.5 py-2 text-xs ${
+            copilot.answerStatus === 'incomplete'
+              ? 'bg-amber-50 text-amber-800'
+              : 'bg-indigo-50 text-indigo-700'
+          }`}
+          role={copilot.answerStatus === 'incomplete' ? 'alert' : 'status'}
+        >
+          <div>{t(`copilot.answer.${copilot.answerStatus}`)}</div>
+          {copilot.answerNotice && <div className="mt-1">{t(copilot.answerNotice)}</div>}
+        </div>
+      )}
+
       {copilot.error && (
         <div className="mt-2 rounded-lg bg-red-50 px-2.5 py-2 text-xs text-red-700" role="alert">{copilot.error}</div>
       )}

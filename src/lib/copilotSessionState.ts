@@ -1,6 +1,7 @@
 import type { Suggestion } from '../stores/useAppStore'
 
 export type CopilotPhase = 'idle' | 'starting' | 'listening' | 'stopping' | 'error'
+export type CopilotAnswerStatus = 'idle' | 'generating' | 'continuing' | 'incomplete'
 export type CopilotMessageRole = 'interviewer' | 'assistant' | 'me'
 export type CopilotMessageSource = 'system-stt' | 'microphone-stt' | 'follow-up' | 'llm'
 
@@ -16,6 +17,9 @@ export interface CopilotSnapshot {
   question: string
   suggestions: Suggestion[]
   messages: CopilotMessage[]
+  activeAnswerId: number | null
+  answerStatus: CopilotAnswerStatus
+  answerNotice: string | null
   amplitude: number
   hasRecording: boolean
   audioMode: string
@@ -35,7 +39,10 @@ export type CopilotSnapshotAction =
   | { type: 'question'; sessionId: number; question: string }
   | { type: 'message'; sessionId: number; message: CopilotMessage }
   | { type: 'suggestion'; sessionId: number; suggestion: Suggestion }
-  | { type: 'replace-suggestions'; sessionId: number; suggestions: Suggestion[] }
+  | { type: 'stream-answer'; sessionId: number; suggestion: Suggestion; continuing?: boolean }
+  | { type: 'complete-answer'; sessionId: number; answerId: number; answer: string; suggestions: Suggestion[] }
+  | { type: 'incomplete-answer'; sessionId: number; answerId: number; text: string; reason: string }
+  | { type: 'cancel-answer'; sessionId: number; answerId: number }
   | { type: 'amplitude'; sessionId: number; amplitude: number }
   | { type: 'recording'; sessionId: number }
   | { type: 'recoverable-error'; sessionId: number; error: string }
@@ -47,6 +54,9 @@ export function createInitialSnapshot(): CopilotSnapshot {
     question: '',
     suggestions: [],
     messages: [],
+    activeAnswerId: null,
+    answerStatus: 'idle',
+    answerNotice: null,
     amplitude: 0,
     hasRecording: false,
     audioMode: 'idle',
@@ -90,6 +100,9 @@ export function reduceCopilotSnapshot(
       question: '',
       suggestions: [],
       messages: [],
+      activeAnswerId: null,
+      answerStatus: 'idle',
+      answerNotice: null,
       amplitude: 0,
       hasRecording: false,
       audioMode: 'starting',
@@ -102,9 +115,21 @@ export function reduceCopilotSnapshot(
 
   if (action.type === 'stop') {
     if (snapshot.phase === 'idle' || snapshot.phase === 'stopping') return snapshot
+    const discardActiveStream = snapshot.activeAnswerId !== null && snapshot.answerStatus !== 'incomplete'
+    const messages = discardActiveStream
+      ? snapshot.messages.filter((message) => message.id !== snapshot.activeAnswerId)
+      : snapshot.messages
+    const suggestions = discardActiveStream
+      ? snapshot.suggestions.filter((suggestion) => suggestion.id !== snapshot.activeAnswerId)
+      : snapshot.suggestions
     return {
       ...snapshot,
       phase: 'stopping',
+      suggestions,
+      messages,
+      activeAnswerId: null,
+      answerStatus: 'idle',
+      answerNotice: null,
       amplitude: 0,
       audioMode: 'stopping',
       sessionId: null,
@@ -131,6 +156,9 @@ export function reduceCopilotSnapshot(
       question: '',
       suggestions: [],
       messages: [],
+      activeAnswerId: null,
+      answerStatus: 'idle',
+      answerNotice: null,
       error: null,
       revision: snapshot.revision + 1,
     }
@@ -144,6 +172,9 @@ export function reduceCopilotSnapshot(
       amplitude: 0,
       audioMode: 'error',
       error: action.error,
+      activeAnswerId: null,
+      answerStatus: 'idle',
+      answerNotice: null,
       sessionId: null,
       revision: snapshot.revision + 1,
     }
@@ -191,22 +222,83 @@ export function reduceCopilotSnapshot(
         revision: snapshot.revision + 1,
       }
     }
-    case 'replace-suggestions': {
+    case 'stream-answer': {
+      const previousActiveId = snapshot.activeAnswerId
+      const baseMessages = previousActiveId !== null && previousActiveId !== action.suggestion.id
+        ? snapshot.messages.filter((message) => message.id !== previousActiveId)
+        : snapshot.messages
+      const messages = upsertMessage(baseMessages, {
+        id: action.suggestion.id,
+        role: 'assistant',
+        source: 'llm',
+        text: action.suggestion.text,
+      })
+      return {
+        ...snapshot,
+        suggestions: [action.suggestion],
+        messages,
+        activeAnswerId: action.suggestion.id,
+        answerStatus: action.continuing ? 'continuing' : 'generating',
+        answerNotice: null,
+        error: null,
+        revision: snapshot.revision + 1,
+      }
+    }
+    case 'complete-answer': {
       const suggestions = action.suggestions.slice(-40)
-      const answer = suggestions.map((suggestion) => suggestion.text).join('\n')
-      const messages = answer && suggestions[0]
-        ? upsertMessage(snapshot.messages, {
-            id: suggestions[0].id,
+      const baseMessages = snapshot.activeAnswerId !== null && snapshot.activeAnswerId !== action.answerId
+        ? snapshot.messages.filter((message) => message.id !== snapshot.activeAnswerId)
+        : snapshot.messages
+      const messages = action.answer
+        ? upsertMessage(baseMessages, {
+            id: action.answerId,
             role: 'assistant',
             source: 'llm',
-            text: answer,
+            text: action.answer,
           })
-        : snapshot.messages
+        : baseMessages
       return {
         ...snapshot,
         suggestions,
         messages,
+        activeAnswerId: null,
+        answerStatus: 'idle',
+        answerNotice: null,
         error: null,
+        revision: snapshot.revision + 1,
+      }
+    }
+    case 'incomplete-answer': {
+      const currentSuggestion = snapshot.suggestions.find((suggestion) => suggestion.id === action.answerId)
+      const suggestion = {
+        id: action.answerId,
+        text: action.text,
+        category: currentSuggestion?.category || 'AI',
+      }
+      return {
+        ...snapshot,
+        suggestions: [suggestion],
+        messages: upsertMessage(snapshot.messages, {
+          id: action.answerId,
+          role: 'assistant',
+          source: 'llm',
+          text: action.text,
+        }),
+        activeAnswerId: action.answerId,
+        answerStatus: 'incomplete',
+        answerNotice: action.reason,
+        revision: snapshot.revision + 1,
+      }
+    }
+    case 'cancel-answer': {
+      if (snapshot.activeAnswerId !== action.answerId) return snapshot
+      return {
+        ...snapshot,
+        suggestions: snapshot.suggestions.filter((suggestion) => suggestion.id !== action.answerId),
+        messages: snapshot.messages.filter((message) => message.id !== action.answerId),
+        activeAnswerId: null,
+        answerStatus: 'idle',
+        answerNotice: null,
         revision: snapshot.revision + 1,
       }
     }

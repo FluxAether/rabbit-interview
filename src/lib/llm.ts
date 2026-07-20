@@ -4,8 +4,24 @@ import { useAppStore } from '../stores/useAppStore';
 
 let cachedKeys: Awaited<ReturnType<typeof loadApiKeys>> | null = null;
 
-const INTERVIEW_ANSWER_SYSTEM = 'You are an interview copilot. Answer the question directly using the provided question and context. Respond in the same language as the question. Be accurate, specific, concise, and professional.';
-const FOLLOW_UP_SYSTEM = 'You are an interview copilot handling a user follow-up. Answer the request directly using the previous turn and provided context. Do not treat the request itself as a new interviewer question.';
+const INTERVIEW_ANSWER_SYSTEM = 'You are an interview copilot. Answer the question directly using the provided question and context. Respond in the same language as the question. Be accurate, specific, concise, and professional. Give a complete answer of roughly 5 to 8 sentences, use plain paragraphs without Markdown headings, and always finish the final sentence.';
+const FOLLOW_UP_SYSTEM = 'You are an interview copilot handling a user follow-up. Answer the request directly using the previous turn and provided context. Do not treat the request itself as a new interviewer question. Use plain paragraphs without Markdown headings and always finish the final sentence.';
+
+type LlmProvider = 'groq' | 'openai' | 'anthropic' | 'gemini';
+
+function answerTokenBudget(provider: LlmProvider, model: string): number {
+  const normalizedModel = model.toLowerCase();
+  if (provider === 'openai') {
+    return normalizedModel.includes('reason')
+      || normalizedModel.startsWith('gpt-5')
+      || /^o[134](?:-|$)/.test(normalizedModel)
+      ? 2_400
+      : 1_600;
+  }
+  if (provider === 'anthropic') return 1_600;
+  if (provider === 'gemini') return 1_600;
+  return 1_200;
+}
 
 export function clearKeyCache() {
   cachedKeys = null;
@@ -26,7 +42,7 @@ async function getKeys(forceReload = false) {
  *   "claude-3.5", "claude-3.5-sonnet"
  *   "gemini-3.5-flash" (only supported Gemini model)
  */
-function resolveProviderAndModel(aiModel: string): { provider: 'groq' | 'openai' | 'anthropic' | 'gemini'; model: string } {
+function resolveProviderAndModel(aiModel: string): { provider: LlmProvider; model: string } {
   const configured = aiModel || 'llama-3.1-8b-instant';
   const m = configured.toLowerCase();
 
@@ -66,7 +82,7 @@ async function callGroq(prompt: string, model: string, apiKey: string): Promise<
         { role: 'user', content: prompt }
       ],
       temperature: 0.6,
-      max_tokens: 220,
+      max_tokens: answerTokenBudget('groq', model),
     }),
   });
   const data = await res.json();
@@ -89,7 +105,7 @@ async function callOpenAI(prompt: string, model: string, apiKey: string): Promis
         { role: 'system', content: INTERVIEW_ANSWER_SYSTEM },
         { role: 'user', content: prompt }
       ],
-      max_completion_tokens: 220,
+      max_completion_tokens: answerTokenBudget('openai', model),
     }),
   });
   const data = await res.json();
@@ -121,7 +137,7 @@ async function callGemini(prompt: string, _model: string, apiKey: string): Promi
       }],
       generationConfig: {
         temperature: 0.6,
-        maxOutputTokens: 220,
+        maxOutputTokens: answerTokenBudget('gemini', modelId),
       }
     }),
   });
@@ -148,7 +164,7 @@ async function callAnthropic(prompt: string, model: string, apiKey: string): Pro
     },
     body: JSON.stringify({
       model,
-      max_tokens: 220,
+      max_tokens: answerTokenBudget('anthropic', model),
       system: INTERVIEW_ANSWER_SYSTEM,
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -224,16 +240,31 @@ export async function generateSuggestions(question: string, transcriptSoFar?: st
   }
 }
 
+export type LlmStreamStatus = 'complete' | 'max-tokens' | 'incomplete';
+
+export interface LlmStreamResult {
+  text: string;
+  status: LlmStreamStatus;
+  finishReason: string | null;
+  provider: LlmProvider;
+  model: string;
+}
+
 export interface SuggestionStreamHandlers {
   onDelta: (delta: string, accumulated: string) => void;
-  onComplete: (text: string) => void;
+  onComplete?: (result: LlmStreamResult) => void;
   onError?: (error: Error) => void;
 }
 
 export type SuggestionRequestType = 'interviewer-question' | 'follow-up';
 
+export interface SuggestionStreamOptions {
+  continuationText?: string;
+  continuationAttempt?: number;
+}
+
 async function resolveConfiguredProvider(): Promise<{
-  provider: 'groq' | 'openai' | 'anthropic' | 'gemini';
+  provider: LlmProvider;
   model: string;
   apiKey: string;
 }> {
@@ -260,11 +291,30 @@ async function resolveConfiguredProvider(): Promise<{
   return { provider, model, apiKey };
 }
 
+interface ParsedStreamEvent {
+  delta: string | null;
+  finishReason?: string | null;
+}
+
+function classifyStreamStatus(finishReason: string | null): LlmStreamStatus {
+  if (!finishReason) return 'incomplete';
+  const normalized = finishReason.toLowerCase();
+  if (normalized === 'length' || normalized === 'max_tokens' || normalized === 'max-tokens') {
+    return 'max-tokens';
+  }
+  if (normalized === 'stop' || normalized === 'end_turn' || normalized === 'stop_sequence') {
+    return 'complete';
+  }
+  return 'incomplete';
+}
+
 async function consumeSse(
   response: Response,
-  onData: (payload: any) => string | null,
+  parsePayload: (payload: any) => ParsedStreamEvent,
   handlers: SuggestionStreamHandlers,
-): Promise<string> {
+  provider: LlmProvider,
+  model: string,
+): Promise<LlmStreamResult> {
   if (!response.ok) {
     const body = await response.text();
     throw new Error(body || `LLM request failed with ${response.status}`);
@@ -275,28 +325,47 @@ async function consumeSse(
   const decoder = new TextDecoder();
   let buffer = '';
   let accumulated = '';
+  let finishReason: string | null = null;
+  let streamError: Error | null = null;
+
   const processEvent = (event: string) => {
     const data = parseSseEventData(event);
     if (!data || data === '[DONE]') return;
-    const delta = onData(JSON.parse(data));
-    if (!delta) return;
-    accumulated += delta;
-    handlers.onDelta(delta, accumulated);
+    const parsed = parsePayload(JSON.parse(data));
+    if (parsed.finishReason) finishReason = parsed.finishReason;
+    if (!parsed.delta) return;
+    accumulated += parsed.delta;
+    handlers.onDelta(parsed.delta, accumulated);
   };
-  while (true) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    buffer = buffer.replace(/\r\n/g, '\n');
-    const events = buffer.split('\n\n');
-    buffer = events.pop() || '';
-    events.forEach(processEvent);
-    if (done) {
-      if (buffer.trim()) processEvent(buffer);
-      break;
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      buffer = buffer.replace(/\r\n/g, '\n');
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+      events.forEach(processEvent);
+      if (done) {
+        if (buffer.trim()) processEvent(buffer);
+        break;
+      }
     }
+  } catch (error) {
+    const normalized = error instanceof Error ? error : new Error(String(error));
+    if (normalized.name === 'AbortError') throw normalized;
+    streamError = normalized;
   }
-  handlers.onComplete(accumulated);
-  return accumulated;
+
+  const result: LlmStreamResult = {
+    text: accumulated,
+    status: streamError ? 'incomplete' : classifyStreamStatus(finishReason),
+    finishReason: streamError ? 'connection_lost' : finishReason,
+    provider,
+    model,
+  };
+  handlers.onComplete?.(result);
+  return result;
 }
 
 export function parseSseEventData(event: string): string | null {
@@ -313,18 +382,24 @@ export async function generateSuggestionsStream(
   handlers: SuggestionStreamHandlers,
   signal?: AbortSignal,
   requestType: SuggestionRequestType = 'interviewer-question',
-): Promise<string> {
+  options: SuggestionStreamOptions = {},
+): Promise<LlmStreamResult> {
   try {
     const { provider, model, apiKey } = await resolveConfiguredProvider();
     const isFollowUp = requestType === 'follow-up';
-    const prompt = isFollowUp
+    const basePrompt = isFollowUp
       ? `Respond in the same language as the user. Apply the request to the previous interview turn when relevant.\nUser follow-up: ${question}\nRelevant resume, job and previous-turn context: ${context || 'none'}`
       : `Answer the interviewer question directly in the same language, using the relevant resume, job and previous-turn context.\nInterviewer question: ${question}\nRelevant resume, job and previous-turn context: ${context || 'none'}`;
+    const prompt = options.continuationText
+      ? `${basePrompt}\n\nThe previous answer was cut off by an output limit. Continue exactly where it stopped. Do not restart, repeat, summarize, add a new heading, or mention that you are continuing. Finish the answer with a complete final sentence.\nPartial answer so far:\n${options.continuationText.slice(-8_000)}`
+      : basePrompt;
     if (!apiKey) throw new Error('No LLM API key is configured. Add a provider key in Settings and retry.');
 
     const system = isFollowUp
       ? FOLLOW_UP_SYSTEM
       : INTERVIEW_ANSWER_SYSTEM;
+    const tokenBudget = answerTokenBudget(provider, model);
+
     if (provider === 'anthropic') {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -337,7 +412,7 @@ export async function generateSuggestionsStream(
         },
         body: JSON.stringify({
           model,
-          max_tokens: 220,
+          max_tokens: tokenBudget,
           stream: true,
           system,
           messages: [{ role: 'user', content: prompt }],
@@ -345,10 +420,15 @@ export async function generateSuggestionsStream(
       });
       return consumeSse(
         response,
-        (payload) => payload.type === 'content_block_delta' && payload.delta?.type === 'text_delta'
-          ? payload.delta.text
-          : null,
+        (payload) => ({
+          delta: payload.type === 'content_block_delta' && payload.delta?.type === 'text_delta'
+            ? payload.delta.text
+            : null,
+          finishReason: payload.type === 'message_delta' ? payload.delta?.stop_reason || null : null,
+        }),
         handlers,
+        provider,
+        model,
       );
     }
 
@@ -362,14 +442,22 @@ export async function generateSuggestionsStream(
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: system }] },
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.6, maxOutputTokens: 220 },
+            generationConfig: { temperature: 0.6, maxOutputTokens: tokenBudget },
           }),
         },
       );
       return consumeSse(
         response,
-        (payload) => payload?.candidates?.[0]?.content?.parts?.map((part: any) => part.text || '').join('') || null,
+        (payload) => {
+          const candidate = payload?.candidates?.[0];
+          return {
+            delta: candidate?.content?.parts?.map((part: any) => part.text || '').join('') || null,
+            finishReason: candidate?.finishReason || null,
+          };
+        },
         handlers,
+        provider,
+        model,
       );
     }
 
@@ -384,10 +472,24 @@ export async function generateSuggestionsStream(
         model,
         stream: true,
         messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
-        ...(provider === 'openai' ? { max_completion_tokens: 220 } : { max_tokens: 220, temperature: 0.6 }),
+        ...(provider === 'openai'
+          ? { max_completion_tokens: tokenBudget }
+          : { max_tokens: tokenBudget, temperature: 0.6 }),
       }),
     });
-    return consumeSse(response, (payload) => payload?.choices?.[0]?.delta?.content || null, handlers);
+    return consumeSse(
+      response,
+      (payload) => {
+        const choice = payload?.choices?.[0];
+        return {
+          delta: choice?.delta?.content || null,
+          finishReason: choice?.finish_reason || null,
+        };
+      },
+      handlers,
+      provider,
+      model,
+    );
   } catch (error) {
     const normalized = error instanceof Error ? error : new Error(String(error));
     if (normalized.name !== 'AbortError') handlers.onError?.(normalized);
