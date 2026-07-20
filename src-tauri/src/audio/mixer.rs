@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+const SYSTEM_GAIN_WHEN_MIXED: f32 = 0.35;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AudioSource {
     System,
@@ -154,7 +156,7 @@ impl TimedAudioMixer {
         for frame_number in next_frame..completed_through {
             let frame = self.pending.remove(&frame_number).unwrap_or_default();
             let sample = match (frame.system, frame.microphone) {
-                (Some(system), Some(microphone)) => (system + microphone) * 0.5,
+                (Some(system), Some(microphone)) => system * SYSTEM_GAIN_WHEN_MIXED + microphone,
                 (Some(system), None) => system,
                 (None, Some(microphone)) => microphone,
                 (None, None) => 0.0,
@@ -177,7 +179,19 @@ mod tests {
             .push(AudioSource::System, 0.0, vec![0.8, 0.8])
             .is_empty());
         let mixed = mixer.push(AudioSource::Microphone, 0.0, vec![0.4, 0.4]);
-        assert_eq!(mixed, vec![0.6, 0.6]);
+        assert_eq!(mixed, vec![0.68, 0.68]);
+    }
+
+    #[test]
+    fn audio_quality_preserves_microphone_contribution() {
+        fn mixed_sample(microphone: f32) -> f32 {
+            let mut mixer = TimedAudioMixer::new(true, true, 100);
+            assert!(mixer.push(AudioSource::System, 0.0, vec![0.8]).is_empty());
+            mixer.push(AudioSource::Microphone, 0.0, vec![microphone])[0]
+        }
+
+        let microphone_contribution = mixed_sample(0.2) - mixed_sample(0.0);
+        assert!((microphone_contribution - 0.2).abs() < 0.000_001);
     }
 
     #[test]

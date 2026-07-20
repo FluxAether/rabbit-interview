@@ -107,6 +107,8 @@ struct MonoResampler {
     channels: usize,
     input_rate: u32,
     accumulator: u64,
+    window_sum: f32,
+    window_frames: u32,
 }
 
 impl MonoResampler {
@@ -115,6 +117,8 @@ impl MonoResampler {
             channels: channels.max(1),
             input_rate,
             accumulator: 0,
+            window_sum: 0.0,
+            window_frames: 0,
         }
     }
 
@@ -122,40 +126,37 @@ impl MonoResampler {
         let mut output = Vec::new();
         for frame in interleaved.chunks_exact(self.channels) {
             let mono = frame.iter().sum::<f32>() / self.channels as f32;
+            self.window_sum += mono;
+            self.window_frames += 1;
             self.accumulator += u64::from(TARGET_SAMPLE_RATE);
-            while self.accumulator >= u64::from(self.input_rate) {
-                output.push(mono);
-                self.accumulator -= u64::from(self.input_rate);
+            if self.accumulator >= u64::from(self.input_rate) {
+                let averaged = self.window_sum / self.window_frames as f32;
+                while self.accumulator >= u64::from(self.input_rate) {
+                    output.push(averaged);
+                    self.accumulator -= u64::from(self.input_rate);
+                }
+                self.window_sum = 0.0;
+                self.window_frames = 0;
             }
         }
         output
     }
 }
 
+fn process_output_audio(data: Vec<f32>) -> (Vec<f32>, f32) {
+    if data.is_empty() {
+        return (data, 0.0);
+    }
+    let rms = (data.iter().map(|sample| sample * sample).sum::<f32>() / data.len() as f32).sqrt();
+    (data, rms)
+}
+
 fn emit_audio_chunk(app: &AppHandle, data: Vec<f32>) {
     if data.is_empty() {
         return;
     }
-    let rms = (data.iter().map(|sample| sample * sample).sum::<f32>() / data.len() as f32).sqrt();
-    let gate_threshold = 0.015;
-    let target_rms = 0.18;
-    let mut processed = data;
-    if rms > gate_threshold {
-        let gain = (target_rms / rms.max(0.001)).clamp(0.5, 5.0);
-        processed
-            .iter_mut()
-            .for_each(|sample| *sample = (*sample * gain).clamp(-0.98, 0.98));
-    } else {
-        processed.iter_mut().for_each(|sample| *sample *= 0.15);
-    }
-    let _ = app.emit(
-        "audio-amplitude",
-        if rms > gate_threshold {
-            rms.min(1.0)
-        } else {
-            0.0
-        },
-    );
+    let (processed, rms) = process_output_audio(data);
+    let _ = app.emit("audio-amplitude", rms.min(1.0));
     let _ = app.emit("audio-chunk", processed);
 }
 
@@ -505,8 +506,8 @@ pub async fn list_audio_devices() -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        capture_origin_frame, convert_samples, stop_audio_capture_and_wait, AtomicU64,
-        MonoResampler,
+        capture_origin_frame, convert_samples, process_output_audio, stop_audio_capture_and_wait,
+        AtomicU64, MonoResampler,
     };
 
     #[test]
@@ -523,7 +524,23 @@ mod tests {
         let input = vec![
             1.0, -1.0, 0.5, 0.5, 1.0, 1.0, -0.5, -0.5, 0.0, 0.0, 0.25, 0.25,
         ];
-        assert_eq!(resampler.process(&input), vec![1.0, 0.25]);
+        let output = resampler.process(&input);
+        assert!((output[0] - 0.5).abs() < 0.000_001);
+        assert!((output[1] - (-1.0 / 12.0)).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn audio_quality_downsampling_averages_the_source_window() {
+        let mut resampler = MonoResampler::new(2, 48_000);
+        let output = resampler.process(&[1.0, 1.0, 1.0, 1.0, -1.0, -1.0]);
+        assert!((output[0] - (1.0 / 3.0)).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn audio_quality_preserves_quiet_samples() {
+        let input = vec![0.01, -0.01];
+        let (output, _) = process_output_audio(input.clone());
+        assert_eq!(output, input);
     }
 
     #[test]
