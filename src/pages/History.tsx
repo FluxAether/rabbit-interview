@@ -226,10 +226,10 @@ export default function History() {
                     return (
                       <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                         <article className="max-w-[88%]">
-                          <div className={`mb-1 px-1 text-[10px] font-medium text-[#64748b] ${mine ? 'text-right' : ''}`}>
+                          <div className={`mb-1 px-1 text-[13px] font-medium text-[#64748b] ${mine ? 'text-right' : ''}`}>
                             {roleLabels[message.role]}
                           </div>
-                          <div className={`flex items-start gap-2 rounded-xl px-3 py-2 text-[13px] leading-relaxed ${
+                          <div className={`flex items-start gap-2 rounded-xl px-3 py-2 text-[16px] leading-relaxed ${
                             mine
                               ? 'rounded-br-sm bg-[#4f46e5] text-white'
                               : assistant
