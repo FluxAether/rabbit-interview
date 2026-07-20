@@ -50,7 +50,9 @@ impl TimedAudioMixer {
         }
 
         let start_frame = (timestamp_seconds * f64::from(self.sample_rate)).round() as i64;
-        let end_frame = start_frame + samples.len() as i64;
+        let Some(end_frame) = start_frame.checked_add(samples.len() as i64) else {
+            return Vec::new();
+        };
         match source {
             AudioSource::System => {
                 self.first_system_frame.get_or_insert(start_frame);
@@ -184,5 +186,13 @@ mod tests {
         let output = mixer.push(AudioSource::System, 0.0, vec![0.25, -0.25]);
         assert_eq!(output, vec![0.25, -0.25]);
         assert!(mixer.flush().is_empty());
+    }
+
+    #[test]
+    fn rejects_a_timestamp_that_would_overflow_the_frame_range() {
+        let mut mixer = TimedAudioMixer::new(true, false, 16_000);
+        assert!(mixer
+            .push(AudioSource::System, f64::MAX, vec![0.25])
+            .is_empty());
     }
 }

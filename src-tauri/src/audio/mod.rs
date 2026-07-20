@@ -61,6 +61,13 @@ fn remember_audio_failure(error: impl Into<String>) {
     remember_audio_state("error", Some(error.into()));
 }
 
+fn capture_origin_frame(origin: &AtomicU64, elapsed_frame: u64) -> u64 {
+    match origin.compare_exchange(u64::MAX, elapsed_frame, Ordering::SeqCst, Ordering::SeqCst) {
+        Ok(_) => elapsed_frame,
+        Err(existing) => existing,
+    }
+}
+
 fn convert_samples<T>(data: &[T]) -> Vec<f32>
 where
     T: Sample + SizedSample,
@@ -299,14 +306,7 @@ pub async fn start_audio_capture(
                     let elapsed_frame = (capture_started_at.elapsed().as_secs_f64()
                         * f64::from(TARGET_SAMPLE_RATE))
                     .round() as u64;
-                    let origin = origin_frame
-                        .compare_exchange(
-                            u64::MAX,
-                            elapsed_frame,
-                            Ordering::SeqCst,
-                            Ordering::SeqCst,
-                        )
-                        .unwrap_or_else(|existing| existing);
+                    let origin = capture_origin_frame(&origin_frame, elapsed_frame);
                     let start_frame =
                         origin + frame_counter.fetch_add(samples.len() as u64, Ordering::SeqCst);
                     let timestamp = start_frame as f64 / f64::from(TARGET_SAMPLE_RATE);
@@ -388,14 +388,7 @@ pub async fn start_audio_capture(
                         let elapsed_frame = (capture_started_at.elapsed().as_secs_f64()
                             * f64::from(TARGET_SAMPLE_RATE))
                         .round() as u64;
-                        let origin = origin_frame
-                            .compare_exchange(
-                                u64::MAX,
-                                elapsed_frame,
-                                Ordering::SeqCst,
-                                Ordering::SeqCst,
-                            )
-                            .unwrap_or_else(|existing| existing);
+                        let origin = capture_origin_frame(&origin_frame, elapsed_frame);
                         let start_frame =
                             origin + frame_counter.fetch_add(mono.len() as u64, Ordering::SeqCst);
                         push_mixed_audio(
@@ -511,7 +504,10 @@ pub async fn list_audio_devices() -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{convert_samples, stop_audio_capture_and_wait, MonoResampler};
+    use super::{
+        capture_origin_frame, convert_samples, stop_audio_capture_and_wait, AtomicU64,
+        MonoResampler,
+    };
 
     #[test]
     fn converts_integer_microphone_samples_to_normalized_f32() {
@@ -528,6 +524,13 @@ mod tests {
             1.0, -1.0, 0.5, 0.5, 1.0, 1.0, -0.5, -0.5, 0.0, 0.0, 0.25, 0.25,
         ];
         assert_eq!(resampler.process(&input), vec![1.0, 0.25]);
+    }
+
+    #[test]
+    fn capture_origin_uses_the_first_elapsed_frame() {
+        let origin = AtomicU64::new(u64::MAX);
+        assert_eq!(capture_origin_frame(&origin, 320), 320);
+        assert_eq!(capture_origin_frame(&origin, 640), 320);
     }
 
     #[test]
