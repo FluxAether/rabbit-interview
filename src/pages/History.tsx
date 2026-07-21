@@ -116,10 +116,6 @@ export default function History() {
     }
   }, [selected?.recordingPath])
 
-  const replay = (record: InterviewRecord) => {
-    setSelected(record)
-  }
-
   const toggleReplayAudio = () => {
     if (!wavesurferRef.current || !selected?.recordingPath || !audioReady) return
     wavesurferRef.current.playPause()
@@ -167,39 +163,33 @@ export default function History() {
           <div key={index} className="card flex items-center justify-between px-5 py-3.5 text-sm">
             <div className="flex items-center gap-4">
               <div>
-                <div>{item.date} <span className="text-[#64748b]">{new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span></div>
+                <div>{item.date}</div>
                 <div className="font-medium">{item.role}</div>
                 <div className="text-xs text-[#64748b]">{item.company}</div>
               </div>
             </div>
 
             <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1.5">
-                <div className="score-circle">
-                  <svg width="52" height="52" className="score-circle">
-                    <circle cx="26" cy="26" r="22" fill="none" stroke="#e2e8f0" strokeWidth="5" />
-                    <circle 
-                      cx="26" cy="26" r="22" fill="none" 
-                      stroke="#6366f1" strokeWidth="5" 
-                      strokeDasharray={138} 
-                      strokeDashoffset={item.score == null ? 138 : 138 - (item.score / 100 * 138)}
-                    />
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-xl font-semibold leading-none">{item.score ?? '—'}</div>
-                  <div className="text-[10px] text-[#64748b]">{item.score == null ? t('history.notScored') : t('history.overall')}</div>
+              <div className="score-circle">
+                <svg width="52" height="52">
+                  <circle cx="26" cy="26" r="22" fill="none" stroke="#e2e8f0" strokeWidth="5" />
+                  <circle
+                    cx="26"
+                    cy="26"
+                    r="22"
+                    fill="none"
+                    stroke="#6366f1"
+                    strokeWidth="5"
+                    strokeDasharray={138}
+                    strokeDashoffset={item.score == null ? 138 : 138 - (item.score / 100 * 138)}
+                  />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center text-xl font-semibold leading-none">
+                  {item.score ?? '—'}
                 </div>
               </div>
 
               <button onClick={() => setSelected(item)} className="px-4 py-1.5 border text-xs rounded-xl">{t('common.viewDetails')}</button>
-              <button
-                onClick={() => replay(item)}
-                disabled={!item.recordingPath}
-                className="px-4 py-1.5 bg-[#6366f1] text-white text-xs rounded-2xl flex items-center gap-1 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                ▶ {t('common.replay')}
-              </button>
             </div>
           </div>
         ))}
