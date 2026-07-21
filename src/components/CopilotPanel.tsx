@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { Clipboard, EyeOff, Mic, RefreshCw, Shield, Square, Trash2 } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useTranslation } from '../i18n'
@@ -50,14 +50,14 @@ export default function CopilotPanel({
     void getCurrentWindow().startDragging()
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = messagesRef.current
     if (container) container.scrollTop = container.scrollHeight
   }, [copilot.messages])
 
   return (
     <section
-      className={`floating-panel flex min-h-0 w-full flex-col border border-[#e2e8f0] p-4 text-sm ${floating ? 'h-[100dvh] rounded-none' : 'shadow-xl'}`}
+      className={`floating-panel flex min-h-0 w-full flex-col border border-[#e2e8f0] p-4 text-sm ${floating ? 'h-[100dvh] rounded-none' : 'h-full shadow-xl'}`}
       aria-label={t('copilot.floating.title')}
     >
       <header
@@ -92,9 +92,9 @@ export default function CopilotPanel({
         <div className="h-full bg-[#6366f1] transition-[width]" style={{ width: `${amplitude}%` }} />
       </div>
 
-      <div ref={messagesRef} className="min-h-64 flex-1 overflow-auto rounded-xl bg-[#f8fafc] p-3" aria-live="polite">
+      <div ref={messagesRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-xl bg-[#f8fafc] p-3" aria-live="polite">
         {copilot.messages.length === 0 ? (
-          <div className="flex h-full min-h-56 items-center justify-center px-6 text-center text-xs text-[#64748b]">
+          <div className="flex h-full items-center justify-center px-6 text-center text-xs text-[#64748b]">
             {t('copilot.chat.empty')}
           </div>
         ) : (

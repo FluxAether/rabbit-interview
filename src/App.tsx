@@ -174,7 +174,9 @@ export default function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-[#f1f5f9] text-[#0f172a]">
       <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
-      <main className="flex-1 overflow-auto">{renderPage()}</main>
+      <main className={`min-w-0 flex-1 ${currentPage === 'copilot' ? 'overflow-hidden' : 'overflow-auto'}`}>
+        {renderPage()}
+      </main>
     </div>
   )
 }

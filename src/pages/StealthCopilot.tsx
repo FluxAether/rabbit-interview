@@ -65,9 +65,9 @@ export default function StealthCopilot() {
   }
 
   return (
-    <div className="p-8">
-      <div className="w-full">
-        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden p-8">
+      <div className="flex min-h-0 w-full flex-1 flex-col">
+        <div className="mb-6 flex shrink-0 flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold">{t('copilot.title')}</h1>
             <p className="text-[#475569]">{t('copilot.subtitle')}</p>
@@ -82,7 +82,7 @@ export default function StealthCopilot() {
           </button>
         </div>
 
-        <section className="mb-5 rounded-2xl border border-[#e2e8f0] bg-white p-4" aria-label={t('copilot.device')}>
+        <section className="mb-5 shrink-0 rounded-2xl border border-[#e2e8f0] bg-white p-4" aria-label={t('copilot.device')}>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -140,9 +140,11 @@ export default function StealthCopilot() {
           </div>
         </section>
 
-        <CopilotPanel windowStatus={windowStatus} />
+        <div className="min-h-0 flex-1">
+          <CopilotPanel windowStatus={windowStatus} />
+        </div>
 
-        <div className="mt-4">
+        <div className="mt-4 shrink-0">
           <p className="mb-2 text-center text-xs text-[#64748b]">{t('copilot.archive.autoSaveHint')}</p>
           <button
             type="button"
