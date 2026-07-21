@@ -10,9 +10,9 @@ use cpal::{
 };
 use mixer::{AudioSource, TimedAudioMixer};
 use serde::Serialize;
-use std::fs::{self, File};
-use std::io::{BufWriter, Write};
-use std::path::Path;
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufWriter, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -20,7 +20,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
 const TARGET_SAMPLE_RATE: u32 = AUDIOTEE_SAMPLE_RATE;
-const MAX_RECORDING_SECONDS: usize = 15 * 60;
+const MAX_RECORDING_SECONDS: usize = 120 * 60;
 
 enum AudioCommand {
     Stop,
@@ -51,14 +51,32 @@ pub struct AudioCapabilities {
     pub audiotee_commit: String,
 }
 
-#[derive(Default)]
+struct LiveRecording {
+    path: PathBuf,
+    writer: BufWriter<File>,
+    sample_count: u64,
+}
+
 struct AudioCapture {
     handle: Mutex<Option<thread::JoinHandle<()>>>,
     tx: Mutex<Option<mpsc::Sender<AudioCommand>>>,
     current_mode: Mutex<String>,
     failure_reason: Mutex<Option<String>>,
-    recording: Mutex<Vec<f32>>,
+    live_recording: Mutex<Option<LiveRecording>>,
     last_recording: Mutex<Option<SavedRecording>>,
+}
+
+impl Default for AudioCapture {
+    fn default() -> Self {
+        Self {
+            handle: Mutex::new(None),
+            tx: Mutex::new(None),
+            current_mode: Mutex::new(String::new()),
+            failure_reason: Mutex::new(None),
+            live_recording: Mutex::new(None),
+            last_recording: Mutex::new(None),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -170,35 +188,17 @@ fn process_output_audio(data: Vec<f32>) -> (Vec<f32>, f32) {
     (data, rms)
 }
 
-fn emit_audio_chunk(app: &AppHandle, data: Vec<f32>) {
-    if data.is_empty() {
-        return;
+fn sample_to_pcm16(sample: f32) -> i16 {
+    let normalized = sample.clamp(-1.0, 1.0);
+    if normalized < 0.0 {
+        (normalized * 32768.0) as i16
+    } else {
+        (normalized * 32767.0) as i16
     }
-    let (processed, rms) = process_output_audio(data);
-    {
-        let mut recording = AUDIO_STATE.recording.lock().unwrap();
-        recording.extend_from_slice(&processed);
-        let max_samples = TARGET_SAMPLE_RATE as usize * MAX_RECORDING_SECONDS;
-        if recording.len() > max_samples {
-            let overflow = recording.len() - max_samples;
-            recording.drain(..overflow);
-        }
-    }
-    let _ = app.emit("audio-amplitude", rms.min(1.0));
 }
 
-fn write_pcm16_wav<W: Write>(
-    writer: &mut W,
-    samples: &[f32],
-    sample_rate: u32,
-) -> Result<(), String> {
-    let data_size = samples
-        .len()
-        .checked_mul(2)
-        .and_then(|size| u32::try_from(size).ok())
-        .ok_or_else(|| "Recording is too large to save as WAV".to_string())?;
+fn write_wav_header<W: Write>(writer: &mut W, sample_rate: u32, data_size: u32) -> Result<(), String> {
     let byte_rate = sample_rate * 2;
-
     writer
         .write_all(b"RIFF")
         .map_err(|error| error.to_string())?;
@@ -235,32 +235,183 @@ fn write_pcm16_wav<W: Write>(
     writer
         .write_all(&data_size.to_le_bytes())
         .map_err(|error| error.to_string())?;
-
-    for sample in samples {
-        let normalized = sample.clamp(-1.0, 1.0);
-        let pcm = if normalized < 0.0 {
-            (normalized * 32768.0) as i16
-        } else {
-            (normalized * 32767.0) as i16
-        };
-        writer
-            .write_all(&pcm.to_le_bytes())
-            .map_err(|error| error.to_string())?;
-    }
     Ok(())
 }
 
-fn save_recording_to_path(path: &Path, samples: &[f32]) -> Result<SavedRecording, String> {
-    let file = File::create(path).map_err(|error| error.to_string())?;
-    let mut writer = BufWriter::new(file);
-    write_pcm16_wav(&mut writer, samples, TARGET_SAMPLE_RATE)?;
-    writer.flush().map_err(|error| error.to_string())?;
+fn patch_wav_sizes(file: &mut File, data_size: u32) -> Result<(), String> {
+    file.seek(SeekFrom::Start(4))
+        .map_err(|error| error.to_string())?;
+    file.write_all(&(36_u32 + data_size).to_le_bytes())
+        .map_err(|error| error.to_string())?;
+    file.seek(SeekFrom::Start(40))
+        .map_err(|error| error.to_string())?;
+    file.write_all(&data_size.to_le_bytes())
+        .map_err(|error| error.to_string())?;
+    file.flush().map_err(|error| error.to_string())?;
+    Ok(())
+}
 
-    Ok(SavedRecording {
-        path: path.to_string_lossy().into_owned(),
-        duration_seconds: samples.len() as u64 / u64::from(TARGET_SAMPLE_RATE),
+fn recordings_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let recording_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("recordings");
+    fs::create_dir_all(&recording_dir).map_err(|error| error.to_string())?;
+    Ok(recording_dir)
+}
+
+fn discard_live_recording() {
+    let live = AUDIO_STATE.live_recording.lock().unwrap().take();
+    if let Some(live) = live {
+        drop(live.writer);
+        let _ = fs::remove_file(live.path);
+    }
+}
+
+fn begin_live_recording(app: &AppHandle) -> Result<(), String> {
+    discard_live_recording();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis();
+    let path = recordings_dir(app)?.join(format!("interview-live-{timestamp}.wav"));
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .read(true)
+        .open(&path)
+        .map_err(|error| error.to_string())?;
+    let mut writer = BufWriter::new(file);
+    write_wav_header(&mut writer, TARGET_SAMPLE_RATE, 0)?;
+    writer.flush().map_err(|error| error.to_string())?;
+    *AUDIO_STATE.live_recording.lock().unwrap() = Some(LiveRecording {
+        path,
+        writer,
+        sample_count: 0,
+    });
+    Ok(())
+}
+
+fn append_live_recording(samples: &[f32]) {
+    if samples.is_empty() {
+        return;
+    }
+    let mut live_guard = AUDIO_STATE.live_recording.lock().unwrap();
+    let Some(live) = live_guard.as_mut() else {
+        return;
+    };
+    let max_samples = (TARGET_SAMPLE_RATE as u64).saturating_mul(MAX_RECORDING_SECONDS as u64);
+    if live.sample_count >= max_samples {
+        return;
+    }
+    let remaining = (max_samples - live.sample_count) as usize;
+    let samples = if samples.len() > remaining {
+        &samples[..remaining]
+    } else {
+        samples
+    };
+    for sample in samples {
+        let pcm = sample_to_pcm16(*sample);
+        if live.writer.write_all(&pcm.to_le_bytes()).is_err() {
+            return;
+        }
+        live.sample_count += 1;
+    }
+    // Keep crash recovery close to wall clock without fsync every packet.
+    let _ = live.writer.flush();
+}
+
+fn finalize_live_recording(final_path: &Path) -> Result<Option<SavedRecording>, String> {
+    let Some(mut live) = AUDIO_STATE.live_recording.lock().unwrap().take() else {
+        return Ok(None);
+    };
+    live.writer.flush().map_err(|error| error.to_string())?;
+    let mut file = live
+        .writer
+        .into_inner()
+        .map_err(|error| error.to_string())?;
+    if live.sample_count == 0 {
+        drop(file);
+        let _ = fs::remove_file(&live.path);
+        return Ok(None);
+    }
+    let data_size = live
+        .sample_count
+        .checked_mul(2)
+        .and_then(|size| u32::try_from(size).ok())
+        .ok_or_else(|| "Recording is too large to save as WAV".to_string())?;
+    patch_wav_sizes(&mut file, data_size)?;
+    drop(file);
+
+    if live.path != final_path {
+        if final_path.exists() {
+            fs::remove_file(final_path).map_err(|error| error.to_string())?;
+        }
+        fs::rename(&live.path, final_path).or_else(|_| {
+            fs::copy(&live.path, final_path).map(|_| ()).and_then(|_| fs::remove_file(&live.path))
+        }).map_err(|error| error.to_string())?;
+    }
+
+    Ok(Some(SavedRecording {
+        path: final_path.to_string_lossy().into_owned(),
+        duration_seconds: live.sample_count / u64::from(TARGET_SAMPLE_RATE),
         sample_rate: TARGET_SAMPLE_RATE,
-    })
+    }))
+}
+
+fn export_live_recording_snapshot(path: &Path) -> Result<Option<SavedRecording>, String> {
+    let mut live_guard = AUDIO_STATE.live_recording.lock().unwrap();
+    let Some(live) = live_guard.as_mut() else {
+        return Ok(None);
+    };
+    live.writer.flush().map_err(|error| error.to_string())?;
+    let data_size = live
+        .sample_count
+        .checked_mul(2)
+        .and_then(|size| u32::try_from(size).ok())
+        .ok_or_else(|| "Recording is too large to save as WAV".to_string())?;
+
+    // Patch header on the live file first so the copied bytes are a valid WAV.
+    {
+        let file = live.writer.get_mut();
+        patch_wav_sizes(file, data_size)?;
+    }
+    fs::copy(&live.path, path).map_err(|error| error.to_string())?;
+    Ok(Some(SavedRecording {
+        path: path.to_string_lossy().into_owned(),
+        duration_seconds: live.sample_count / u64::from(TARGET_SAMPLE_RATE),
+        sample_rate: TARGET_SAMPLE_RATE,
+    }))
+}
+
+fn emit_audio_chunk(app: &AppHandle, data: Vec<f32>) {
+    if data.is_empty() {
+        return;
+    }
+    let (processed, rms) = process_output_audio(data);
+    append_live_recording(&processed);
+    let _ = app.emit("audio-amplitude", rms.min(1.0));
+}
+
+fn write_pcm16_wav<W: Write>(
+    writer: &mut W,
+    samples: &[f32],
+    sample_rate: u32,
+) -> Result<(), String> {
+    let data_size = samples
+        .len()
+        .checked_mul(2)
+        .and_then(|size| u32::try_from(size).ok())
+        .ok_or_else(|| "Recording is too large to save as WAV".to_string())?;
+    write_wav_header(writer, sample_rate, data_size)?;
+    for sample in samples {
+        writer
+            .write_all(&sample_to_pcm16(*sample).to_le_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn emit_audio_source_chunk(app: &AppHandle, source: &'static str, samples: &[f32]) {
@@ -395,8 +546,9 @@ pub async fn start_audio_capture(
     }
 
     stop_audio_capture_and_wait();
-    *AUDIO_STATE.recording.lock().unwrap() = Vec::new();
+    discard_live_recording();
     *AUDIO_STATE.last_recording.lock().unwrap() = None;
+    begin_live_recording(&app)?;
     remember_audio_state("starting", None);
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let (startup_tx, startup_rx) = mpsc::sync_channel::<Result<AudioConfigPayload, String>>(1);
@@ -620,14 +772,6 @@ pub async fn save_audio_recording(
     app: AppHandle,
     sessionId: String,
 ) -> Result<Option<SavedRecording>, String> {
-    let samples = {
-        let mut recording = AUDIO_STATE.recording.lock().unwrap();
-        std::mem::take(&mut *recording)
-    };
-    if samples.is_empty() {
-        return Ok(None);
-    }
-
     let safe_session_id: String = sessionId
         .chars()
         .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
@@ -636,28 +780,18 @@ pub async fn save_audio_recording(
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_secs();
-    let recording_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("recordings");
-    fs::create_dir_all(&recording_dir).map_err(|error| error.to_string())?;
+    let recording_dir = recordings_dir(&app)?;
     let file_name = if safe_session_id.is_empty() {
         format!("interview-{timestamp}.wav")
     } else {
         format!("interview-{timestamp}-{safe_session_id}.wav")
     };
     let path = recording_dir.join(file_name);
-    match save_recording_to_path(&path, &samples) {
-        Ok(saved) => {
-            *AUDIO_STATE.last_recording.lock().unwrap() = Some(saved.clone());
-            Ok(Some(saved))
-        }
-        Err(error) => {
-            *AUDIO_STATE.recording.lock().unwrap() = samples;
-            Err(error)
-        }
+    let saved = finalize_live_recording(&path)?;
+    if let Some(saved) = &saved {
+        *AUDIO_STATE.last_recording.lock().unwrap() = Some(saved.clone());
     }
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -670,9 +804,8 @@ pub async fn export_audio_recording(app: AppHandle) -> Result<Option<SavedRecord
     fs::create_dir_all(&download_dir).map_err(|error| error.to_string())?;
     let path = download_dir.join(format!("interview-recording-{timestamp}.wav"));
 
-    let samples = AUDIO_STATE.recording.lock().unwrap().clone();
-    if !samples.is_empty() {
-        return save_recording_to_path(&path, &samples).map(Some);
+    if let Some(saved) = export_live_recording_snapshot(&path)? {
+        return Ok(Some(saved));
     }
 
     let Some(last_recording) = AUDIO_STATE.last_recording.lock().unwrap().clone() else {
@@ -764,5 +897,40 @@ mod tests {
     fn repeated_stop_is_idempotent_when_capture_is_idle() {
         stop_audio_capture_and_wait();
         stop_audio_capture_and_wait();
+    }
+
+    #[test]
+    fn streaming_wav_finalize_patches_sizes() {
+        use super::{patch_wav_sizes, write_wav_header};
+        use std::io::{Read, Seek, SeekFrom, Write};
+
+        let dir = std::env::temp_dir().join(format!(
+            "rabbit-stream-wav-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("live.wav");
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .read(true)
+            .open(&path)
+            .unwrap();
+        write_wav_header(&mut file, 16_000, 0).unwrap();
+        file.write_all(&(-1_i16).to_le_bytes()).unwrap();
+        file.write_all(&0_i16.to_le_bytes()).unwrap();
+        file.write_all(&1_i16.to_le_bytes()).unwrap();
+        patch_wav_sizes(&mut file, 6).unwrap();
+        file.seek(SeekFrom::Start(0)).unwrap();
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).unwrap();
+        assert_eq!(&bytes[0..4], b"RIFF");
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 42);
+        assert_eq!(u32::from_le_bytes(bytes[40..44].try_into().unwrap()), 6);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

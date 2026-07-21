@@ -11,6 +11,7 @@ export interface CopilotMessage {
   role: CopilotMessageRole
   source: CopilotMessageSource
   text: string
+  createdAt: number
 }
 
 export interface CopilotSnapshot {
@@ -30,6 +31,7 @@ export interface CopilotSnapshot {
   error: string | null
   revision: number
   sessionId: number | null
+  startedAt: number | null
 }
 
 export type CopilotSnapshotAction =
@@ -72,6 +74,7 @@ export function createInitialSnapshot(): CopilotSnapshot {
     error: null,
     revision: 0,
     sessionId: null,
+    startedAt: null,
   }
 }
 
@@ -86,6 +89,7 @@ function upsertMessage(messages: CopilotMessage[], message: CopilotMessage): Cop
       messages[index].text === message.text
       && messages[index].role === message.role
       && messages[index].source === message.source
+      && messages[index].createdAt === message.createdAt
     ) return messages
     const next = messages.slice()
     next[index] = message
@@ -119,6 +123,7 @@ export function reduceCopilotSnapshot(
       capabilityNotice: null,
       error: null,
       sessionId: action.sessionId,
+      startedAt: Date.now(),
       revision: snapshot.revision + 1,
     }
   }
@@ -266,11 +271,13 @@ export function reduceCopilotSnapshot(
       const baseMessages = previousActiveId !== null && previousActiveId !== action.suggestion.id
         ? snapshot.messages.filter((message) => message.id !== previousActiveId)
         : snapshot.messages
+      const existing = baseMessages.find((message) => message.id === action.suggestion.id)
       const messages = upsertMessage(baseMessages, {
         id: action.suggestion.id,
         role: 'assistant',
         source: 'llm',
         text: action.suggestion.text,
+        createdAt: existing?.createdAt ?? Date.now(),
       })
       return {
         ...snapshot,
@@ -288,12 +295,14 @@ export function reduceCopilotSnapshot(
       const baseMessages = snapshot.activeAnswerId !== null && snapshot.activeAnswerId !== action.answerId
         ? snapshot.messages.filter((message) => message.id !== snapshot.activeAnswerId)
         : snapshot.messages
+      const existing = baseMessages.find((message) => message.id === action.answerId)
       const messages = action.answer
         ? upsertMessage(baseMessages, {
             id: action.answerId,
             role: 'assistant',
             source: 'llm',
             text: action.answer,
+            createdAt: existing?.createdAt ?? Date.now(),
           })
         : baseMessages
       return {
@@ -322,6 +331,7 @@ export function reduceCopilotSnapshot(
           role: 'assistant',
           source: 'llm',
           text: action.text,
+          createdAt: snapshot.messages.find((message) => message.id === action.answerId)?.createdAt ?? Date.now(),
         }),
         activeAnswerId: action.answerId,
         answerStatus: 'incomplete',

@@ -115,6 +115,8 @@ export default function StealthCopilot() {
           <span className="text-[#cbd5e1]">•</span>
           <span>{t('copilot.alsoCaptureMic')}: {useMicrophone ? 'On' : 'Off'}</span>
           {selectedDevice && <><span className="text-[#cbd5e1]">•</span><span className="truncate">{selectedDevice}</span></>}
+          <span className="text-[#cbd5e1]">•</span>
+          <span>{t('copilot.archive.autoSaveHint')}</span>
         </div>
 
         {audioSettingsOpen && (

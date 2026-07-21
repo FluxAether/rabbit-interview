@@ -499,6 +499,10 @@ export async function generateSuggestionsStream(
 
 // ==================== STT (Speech-to-Text) Streaming ====================
 const MAX_DEEPGRAM_BUFFERED_BYTES = 512 * 1024;
+const DEEPGRAM_CONNECT_TIMEOUT_MS = 10_000;
+const DEEPGRAM_KEEPALIVE_MS = 8_000;
+const DEEPGRAM_RECONNECT_BASE_MS = 1_000;
+const DEEPGRAM_RECONNECT_MAX_MS = 15_000;
 // Currently only Deepgram is implemented. The model is now configurable per-provider
 // via Settings (sttProvider + sttModel). The function name is kept for backward compat.
 
@@ -521,6 +525,7 @@ export function float32ToInt16(float32Array: Float32Array): Int16Array {
  * - Converts incoming f32 chunks to PCM16
  * - Sends binary audio over WebSocket
  * - Calls onTranscript with interim/final results
+ * - Reconnects automatically after unexpected disconnects
  *
  * Usage in Copilot:
  *   const ws = await startDeepgramStream(({ text, boundary }) => { ... });
@@ -535,10 +540,135 @@ export interface DeepgramTranscriptEvent {
   boundary: TranscriptBoundary;
 }
 
-export async function startDeepgramStream(
+export interface DeepgramStream extends WebSocket {
+  __deepgramManaged?: boolean;
+  __deepgramClosedByClient?: boolean;
+  __deepgramKeepAliveTimer?: ReturnType<typeof globalThis.setInterval> | null;
+  __deepgramReconnectTimer?: ReturnType<typeof globalThis.setTimeout> | null;
+  __deepgramReconnectAttempt?: number;
+  __deepgramSampleRate?: number;
+  __deepgramOnTranscript?: (event: DeepgramTranscriptEvent) => void;
+  __deepgramOnError?: (err: any) => void;
+  __deepgramReplaceSocket?: (next: WebSocket) => void;
+}
+
+function clearDeepgramTimers(ws: DeepgramStream) {
+  if (ws.__deepgramKeepAliveTimer != null) {
+    globalThis.clearInterval(ws.__deepgramKeepAliveTimer);
+    ws.__deepgramKeepAliveTimer = null;
+  }
+  if (ws.__deepgramReconnectTimer != null) {
+    globalThis.clearTimeout(ws.__deepgramReconnectTimer);
+    ws.__deepgramReconnectTimer = null;
+  }
+}
+
+function startDeepgramKeepAlive(ws: DeepgramStream) {
+  if (ws.__deepgramKeepAliveTimer != null) {
+    globalThis.clearInterval(ws.__deepgramKeepAliveTimer);
+  }
+  const timer = globalThis.setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'KeepAlive' }));
+    }
+  }, DEEPGRAM_KEEPALIVE_MS);
+  (timer as { unref?: () => void }).unref?.();
+  ws.__deepgramKeepAliveTimer = timer;
+}
+
+function attachDeepgramHandlers(ws: DeepgramStream) {
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      const transcript = data.channel?.alternatives?.[0]?.transcript?.trim();
+      const boundary: TranscriptBoundary = data.type === 'UtteranceEnd'
+        ? 'utterance-end'
+        : data.speech_final
+          ? 'speech-final'
+          : data.is_final
+            ? 'final'
+            : 'interim';
+      if (transcript || boundary === 'speech-final' || boundary === 'utterance-end') {
+        ws.__deepgramOnTranscript?.({
+          text: transcript || '',
+          isFinal: Boolean(data.is_final),
+          boundary,
+        });
+      }
+    } catch (e) {
+      ws.__deepgramOnError?.(e);
+    }
+  };
+
+  ws.onerror = (event) => {
+    console.error('[Deepgram] WS error', event);
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      // close will schedule reconnect for managed streams
+    } else {
+      ws.__deepgramOnError?.(event);
+    }
+  };
+
+  ws.onclose = () => {
+    clearDeepgramTimers(ws);
+    console.log('[Deepgram] Connection closed');
+    if (!ws.__deepgramManaged || ws.__deepgramClosedByClient) return;
+    scheduleDeepgramReconnect(ws);
+  };
+}
+
+function scheduleDeepgramReconnect(ws: DeepgramStream) {
+  if (ws.__deepgramClosedByClient || !ws.__deepgramManaged) return;
+  if (ws.__deepgramReconnectTimer != null) return;
+
+  const attempt = (ws.__deepgramReconnectAttempt ?? 0) + 1;
+  ws.__deepgramReconnectAttempt = attempt;
+  const delay = Math.min(
+    DEEPGRAM_RECONNECT_MAX_MS,
+    DEEPGRAM_RECONNECT_BASE_MS * (2 ** Math.min(attempt - 1, 4)),
+  );
+  console.warn(`[Deepgram] Reconnecting in ${delay}ms (attempt ${attempt})`);
+
+  const timer = globalThis.setTimeout(() => {
+    ws.__deepgramReconnectTimer = null;
+    void reconnectDeepgramStream(ws).catch((error) => {
+      console.error('[Deepgram] Reconnect failed', error);
+      scheduleDeepgramReconnect(ws);
+    });
+  }, delay);
+  (timer as { unref?: () => void }).unref?.();
+  ws.__deepgramReconnectTimer = timer;
+}
+
+async function reconnectDeepgramStream(ws: DeepgramStream): Promise<void> {
+  if (ws.__deepgramClosedByClient || !ws.__deepgramManaged) return;
+  const next = await openDeepgramSocket(
+    ws.__deepgramSampleRate || 16_000,
+    ws.__deepgramOnTranscript || (() => {}),
+    ws.__deepgramOnError,
+    true,
+  ) as DeepgramStream;
+
+  // Transfer managed state onto the replacement socket and update caller's reference.
+  next.__deepgramManaged = true;
+  next.__deepgramClosedByClient = false;
+  next.__deepgramReconnectAttempt = 0;
+  next.__deepgramSampleRate = ws.__deepgramSampleRate;
+  next.__deepgramOnTranscript = ws.__deepgramOnTranscript;
+  next.__deepgramOnError = ws.__deepgramOnError;
+  next.__deepgramReplaceSocket = ws.__deepgramReplaceSocket;
+  attachDeepgramHandlers(next);
+  startDeepgramKeepAlive(next);
+  ws.__deepgramManaged = false;
+  ws.__deepgramReplaceSocket?.(next);
+  console.log('[Deepgram] Reconnected');
+}
+
+async function openDeepgramSocket(
+  sampleRate: number,
   onTranscript: (event: DeepgramTranscriptEvent) => void,
   onError?: (err: any) => void,
-  sampleRate: number = 16000
+  isReconnect = false,
 ): Promise<WebSocket> {
   const { deepgram: DEEPGRAM_API_KEY } = await getKeys(true); // force fresh read so newly entered keys are picked up immediately
 
@@ -562,62 +692,65 @@ export async function startDeepgramStream(
   const endpointing = sttLanguage === 'multi' ? 100 : 300;
   const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true&utterance_end_ms=1000&vad_events=true${language}&endpointing=${endpointing}`;
 
-  const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]);
+  const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]) as DeepgramStream;
   ws.binaryType = 'arraybuffer';
-
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      const transcript = data.channel?.alternatives?.[0]?.transcript?.trim();
-      const boundary: TranscriptBoundary = data.type === 'UtteranceEnd'
-        ? 'utterance-end'
-        : data.speech_final
-          ? 'speech-final'
-          : data.is_final
-            ? 'final'
-            : 'interim';
-      if (transcript || boundary === 'speech-final' || boundary === 'utterance-end') {
-        onTranscript({
-          text: transcript || '',
-          isFinal: Boolean(data.is_final),
-          boundary,
-        });
-      }
-    } catch (e) {
-      onError?.(e);
-    }
-  };
+  ws.__deepgramSampleRate = sampleRate;
+  ws.__deepgramOnTranscript = onTranscript;
+  ws.__deepgramOnError = onError;
+  attachDeepgramHandlers(ws);
 
   return new Promise<WebSocket>((resolve, reject) => {
     let opened = false;
     const timeout = globalThis.setTimeout(() => {
       ws.close();
-      reject(new Error('Deepgram connection timed out'));
-    }, 10_000);
+      reject(new Error(isReconnect ? 'Deepgram reconnect timed out' : 'Deepgram connection timed out'));
+    }, DEEPGRAM_CONNECT_TIMEOUT_MS);
+    (timeout as { unref?: () => void }).unref?.();
 
-    ws.onopen = () => {
+    const previousOnOpen = ws.onopen;
+    const previousOnError = ws.onerror;
+    const previousOnClose = ws.onclose;
+
+    ws.onopen = (event) => {
       opened = true;
       globalThis.clearTimeout(timeout);
-      console.log('[Deepgram] Connected');
+      console.log(isReconnect ? '[Deepgram] Reconnected socket open' : '[Deepgram] Connected');
+      startDeepgramKeepAlive(ws);
+      previousOnOpen?.call(ws, event);
       resolve(ws);
     };
 
     ws.onerror = (event) => {
-      console.error('[Deepgram] WS error', event);
+      previousOnError?.call(ws, event);
       if (!opened) {
         globalThis.clearTimeout(timeout);
-        reject(new Error('Deepgram connection failed'));
-      } else {
-        onError?.(event);
+        reject(new Error(isReconnect ? 'Deepgram reconnect failed' : 'Deepgram connection failed'));
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       globalThis.clearTimeout(timeout);
-      console.log('[Deepgram] Connection closed');
-      if (!opened) reject(new Error('Deepgram connection closed before it was ready'));
+      previousOnClose?.call(ws, event);
+      if (!opened) reject(new Error(isReconnect ? 'Deepgram reconnect closed before it was ready' : 'Deepgram connection closed before it was ready'));
     };
   });
+}
+
+export async function startDeepgramStream(
+  onTranscript: (event: DeepgramTranscriptEvent) => void,
+  onError?: (err: any) => void,
+  sampleRate: number = 16000,
+  onSocketChange?: (ws: WebSocket) => void,
+): Promise<WebSocket> {
+  const ws = await openDeepgramSocket(sampleRate, onTranscript, onError, false) as DeepgramStream;
+  ws.__deepgramManaged = true;
+  ws.__deepgramClosedByClient = false;
+  ws.__deepgramReconnectAttempt = 0;
+  ws.__deepgramReplaceSocket = (next) => {
+    onSocketChange?.(next);
+  };
+  onSocketChange?.(ws);
+  return ws;
 }
 
 /**
@@ -634,7 +767,12 @@ export function sendAudioChunk(ws: WebSocket | null, float32Chunk: Float32Array)
 
 /** Gracefully close a Deepgram stream */
 export function closeDeepgramStream(ws: WebSocket | null) {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+  if (!ws) return;
+  const managed = ws as DeepgramStream;
+  managed.__deepgramClosedByClient = true;
+  managed.__deepgramManaged = false;
+  clearDeepgramTimers(managed);
+  if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
     // Send a final empty message is not required; just close
     ws.close();
   }

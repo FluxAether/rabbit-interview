@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { Clipboard, Download, EyeOff, Mic, RefreshCw, Shield, Square, Trash2 } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useTranslation } from '../i18n'
@@ -25,6 +25,7 @@ export default function CopilotPanel({
   const t = useTranslation()
   const copilot = useAppStore((state) => state.copilot)
   const [followUp, setFollowUp] = useState('')
+  const [now, setNow] = useState(() => Date.now())
   const messagesRef = useRef<HTMLDivElement>(null)
   const running = copilot.phase === 'starting' || copilot.phase === 'listening'
   const busy = copilot.phase === 'stopping'
@@ -34,6 +35,29 @@ export default function CopilotPanel({
     assistant: t('copilot.role.assistant'),
     me: t('copilot.role.me'),
   }
+
+  const formatClock = (timestamp: number) => {
+    const date = new Date(timestamp)
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
+  }
+
+  const formatElapsed = (totalSeconds: number) => {
+    const seconds = Math.max(0, Math.floor(totalSeconds))
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const remain = seconds % 60
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, '0')}:${String(remain).padStart(2, '0')}`
+    }
+    return `${String(minutes).padStart(2, '0')}:${String(remain).padStart(2, '0')}`
+  }
+
+  const lastMessageCreatedAt = copilot.messages.length > 0
+    ? copilot.messages[copilot.messages.length - 1]?.createdAt
+    : undefined
+  const sessionElapsedSeconds = copilot.startedAt
+    ? Math.floor((((running || busy) ? now : (lastMessageCreatedAt ?? now)) - copilot.startedAt) / 1000)
+    : 0
 
   const submitFollowUp = (event: FormEvent) => {
     event.preventDefault()
@@ -59,6 +83,13 @@ export default function CopilotPanel({
     if (container) container.scrollTop = container.scrollHeight
   }, [copilot.messages])
 
+  useEffect(() => {
+    if (!running && !busy) return
+    setNow(Date.now())
+    const timer = globalThis.setInterval(() => setNow(Date.now()), 1_000)
+    return () => globalThis.clearInterval(timer)
+  }, [running, busy, copilot.startedAt])
+
   return (
     <section
       className={`floating-panel flex min-h-0 w-full flex-col border border-[#e2e8f0] p-4 text-sm ${floating ? 'h-[100dvh] rounded-none' : 'h-full shadow-xl'}`}
@@ -78,18 +109,28 @@ export default function CopilotPanel({
             <div className="text-[10px] text-[#64748b]" role="status">{t(`copilot.phase.${copilot.phase}`)}</div>
           </div>
         </div>
-        {floating && onHide && (
-          <button
-            type="button"
-            onClick={onHide}
-            className="rounded-lg p-1.5 text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#334155]"
-            aria-label={t('copilot.hide')}
-            data-tauri-drag-region="false"
-            data-no-drag
-          >
-            <EyeOff className="h-4 w-4" />
-          </button>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {copilot.startedAt != null && (
+            <div
+              className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium tabular-nums text-[#475569]"
+              title={t('copilot.sessionDuration')}
+            >
+              {formatElapsed(sessionElapsedSeconds)}
+            </div>
+          )}
+          {floating && onHide && (
+            <button
+              type="button"
+              onClick={onHide}
+              className="rounded-lg p-1.5 text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#334155]"
+              aria-label={t('copilot.hide')}
+              data-tauri-drag-region="false"
+              data-no-drag
+            >
+              <EyeOff className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="mb-2 h-1 overflow-hidden rounded bg-[#e2e8f0]" aria-hidden="true">
@@ -109,8 +150,13 @@ export default function CopilotPanel({
               return (
                 <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                   <article className="max-w-[88%]">
-                    <div className={`mb-1 px-1 text-[13px] font-medium text-[#64748b] ${mine ? 'text-right' : ''}`}>
-                      {roleLabels[message.role]}
+                    <div className={`mb-1 flex items-center gap-2 px-1 text-[13px] font-medium text-[#64748b] ${mine ? 'justify-end' : ''}`}>
+                      <span>{roleLabels[message.role]}</span>
+                      {message.createdAt ? (
+                        <span className="text-[11px] font-normal tabular-nums text-[#94a3b8]">
+                          {formatClock(message.createdAt)}
+                        </span>
+                      ) : null}
                     </div>
                     <div className={`flex items-start gap-2 rounded-xl px-3 py-2 text-[16px] leading-relaxed ${
                       mine

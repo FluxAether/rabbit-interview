@@ -76,10 +76,12 @@ check(
   'stopping capture automatically archives the session and native recording',
 )
 check(
-  rustAudio.includes('recording: Mutex<Vec<f32>>')
+  rustAudio.includes('live_recording: Mutex<Option<LiveRecording>>')
+    && rustAudio.includes('append_live_recording')
+    && rustAudio.includes('finalize_live_recording')
     && rustAudio.includes('save_audio_recording')
-    && rustAudio.includes('write_pcm16_wav'),
-  'the native audio layer retains capture data and writes a real WAV file',
+    && rustAudio.includes('write_wav_header'),
+  'the native audio layer streams capture data into a live WAV file',
 )
 check(
   rustLib.includes('save_audio_recording') && rustLib.includes('export_audio_recording'),
@@ -89,12 +91,12 @@ check(
   !rustAudio.includes('"audio-chunk"')
     && !session.includes("listen<number[]>('audio-chunk'")
     && session.includes("invoke<SavedRecording | null>('export_audio_recording'"),
-  'full recordings stay in native memory instead of being duplicated in the WebView',
+  'full recordings stay in native storage instead of being duplicated in the WebView',
 )
 check(
-  rustAudio.includes('std::mem::take(&mut *recording)')
+  rustAudio.includes('finalize_live_recording')
     && rustAudio.includes('last_recording: Mutex<Option<SavedRecording>>'),
-  'successful native archive releases the in-memory recording buffer',
+  'successful native archive finalizes the live recording file',
 )
 check(
   db.includes('recording_path TEXT')
@@ -134,6 +136,10 @@ check(session.includes('await host.dispatch(command)'), 'main-window commands ar
 check(!llm.includes('STAR') && !llm.includes('interview suggestions'), 'AI answers directly without a fixed STAR or suggestion template')
 check(llm.includes('without Markdown headings'), 'AI answers are requested as speakable plain paragraphs rather than raw Markdown headings')
 check(llm.includes('MAX_DEEPGRAM_BUFFERED_BYTES') && llm.includes('ws.bufferedAmount'), 'STT websocket backpressure bounds queued audio memory')
+check(llm.includes('KeepAlive') && llm.includes('scheduleDeepgramReconnect') && llm.includes('onSocketChange'), 'Deepgram streams keep alive and reconnect after disconnects')
+check(rustAudio.includes('120 * 60') && rustAudio.includes('begin_live_recording'), 'native live recording starts with the session and caps at 120 minutes')
+check(sessionState.includes('createdAt: number') && sessionState.includes('startedAt: number | null'), 'chat messages and sessions track timestamps')
+check(panel.includes('formatClock') && panel.includes('formatElapsed') && panel.includes('copilot.sessionDuration'), 'chat UI shows message times and interview duration')
 
 check(rustWindow.includes('.content_protected(protected)') && rustWindow.includes('set_content_protected(protected)'), 'window protection is applied on create and reuse')
 check(rustWindow.includes('protection_requested') && rustWindow.includes('protection_applied'), 'native window returns truthful protection status')
@@ -162,17 +168,17 @@ if (sessionState) {
   const interviewerMessage = reduceCopilotSnapshot(starting, {
     type: 'message',
     sessionId: 7,
-    message: { id: 1, role: 'interviewer', source: 'system-stt', text: 'Tell me about yourself.' },
+    message: { id: 1, role: 'interviewer', source: 'system-stt', text: 'Tell me about yourself.', createdAt: 1_000 },
   })
   const myMessage = reduceCopilotSnapshot(interviewerMessage, {
     type: 'message',
     sessionId: 7,
-    message: { id: 2, role: 'me', source: 'microphone-stt', text: 'I build desktop applications.' },
+    message: { id: 2, role: 'me', source: 'microphone-stt', text: 'I build desktop applications.', createdAt: 2_000 },
   })
   const followUpMessage = reduceCopilotSnapshot(myMessage, {
     type: 'message',
     sessionId: 7,
-    message: { id: 3, role: 'me', source: 'follow-up', text: 'Can you make that more concise?' },
+    message: { id: 3, role: 'me', source: 'follow-up', text: 'Can you make that more concise?', createdAt: 3_000 },
   })
   const longAnswer = Array.from({ length: 12 }, (_, index) => `完整回答第 ${index + 1} 段`).join('\n')
   const assistantMessage = reduceCopilotSnapshot(followUpMessage, {
@@ -220,7 +226,7 @@ if (sessionState) {
     type: 'archive-error',
     notice: 'disk full',
   })
-  check(starting.phase === 'starting' && starting.sessionId === 7, 'idle session starts with an explicit id')
+  check(starting.phase === 'starting' && starting.sessionId === 7 && typeof starting.startedAt === 'number', 'idle session starts with an explicit id and start time')
   check(listening.phase === 'listening' && listening.audioMode === 'system+microphone', 'native audio mode is reflected in the shared snapshot')
   check(duplicateStart === starting, 'duplicate start is idempotent')
   check(stopping.phase === 'stopping' && stopping.sessionId === null, 'stop invalidates the active session id immediately')
@@ -228,6 +234,7 @@ if (sessionState) {
   check(interviewerMessage.question === 'Tell me about yourself.', 'system audio transcript becomes the interviewer question')
   check(assistantMessage?.messages.map((message) => message.role).join(',') === 'interviewer,me,me,assistant', 'chat snapshot preserves interviewer, user, follow-up, and AI roles')
   check(assistantMessage?.messages.map((message) => message.source).join(',') === 'system-stt,microphone-stt,follow-up,llm', 'chat snapshot preserves all four message sources in order')
+  check(assistantMessage?.messages.every((message) => typeof message.createdAt === 'number'), 'chat messages always include a send timestamp')
   check(assistantMessage?.activeAnswerId === null, 'completed AI answers are marked final')
   check(
     assistantMessage?.messages.find((message) => message.id === 4)?.text === longAnswer,
@@ -272,8 +279,8 @@ const { createCopilotInterviewRecord } = loadTypeScriptModule(
 )
 const archivedRecord = createCopilotInterviewRecord(
   [
-    { id: 1, role: 'interviewer', source: 'system-stt', text: 'Tell me about yourself.' },
-    { id: 2, role: 'assistant', source: 'llm', text: 'I build reliable desktop systems.' },
+    { id: 1, role: 'interviewer', source: 'system-stt', text: 'Tell me about yourself.', createdAt: 1_000 },
+    { id: 2, role: 'assistant', source: 'llm', text: 'I build reliable desktop systems.', createdAt: 2_000 },
   ],
   42,
   '/tmp/interview.wav',

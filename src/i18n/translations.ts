@@ -237,6 +237,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.followUp': 'Type a follow-up question',
     'copilot.ask': 'Ask',
     'copilot.hide': 'Hide floating window',
+    'copilot.sessionDuration': 'Interview duration',
 
     // Feedback labels (used in mock)
     'feedback.clarity': 'Clarity',
@@ -485,6 +486,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.followUp': '输入文字追问',
     'copilot.ask': '追问',
     'copilot.hide': '隐藏浮窗',
+    'copilot.sessionDuration': '面试总时长',
 
     // Feedback labels
     'feedback.clarity': '清晰度',
@@ -695,6 +697,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.followUp': '輸入文字追問',
     'copilot.ask': '追問',
     'copilot.hide': '隱藏浮動視窗',
+    'copilot.sessionDuration': '面試總時長',
 
     'feedback.clarity': '清晰度',
     'feedback.relevance': '相關性',

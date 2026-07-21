@@ -72,6 +72,17 @@ function createTranscriptState(): TranscriptState {
   return { finalParts: [], lastFinal: '', lastFinalAt: 0 }
 }
 
+function createChatMessage(
+  id: number,
+  role: 'interviewer' | 'assistant' | 'me',
+  source: 'system-stt' | 'microphone-stt' | 'follow-up' | 'llm',
+  text: string,
+  createdAt = Date.now(),
+) {
+  return { id, role, source, text, createdAt }
+}
+
+
 export type CopilotSessionCommand =
   | { type: 'start'; config?: CopilotStartConfig }
   | { type: 'stop' }
@@ -389,12 +400,12 @@ class CopilotSessionHost {
           this.transition({
             type: 'message',
             sessionId,
-            message: {
-              id: -(sessionId * 1_000_000 + ++this.messageSequence),
-              role: 'me',
-              source: 'follow-up',
+            message: createChatMessage(
+              -(sessionId * 1_000_000 + ++this.messageSequence),
+              'me',
+              'follow-up',
               text,
-            },
+            ),
           })
           void this.answer(sessionId, text, 'follow-up', true)
         }
@@ -613,21 +624,29 @@ class CopilotSessionHost {
         this.transition({
           type: 'message',
           sessionId,
-          message: {
-            id: -(sessionId * 1_000_000 + ++this.messageSequence),
-            role: source === 'system' ? 'interviewer' : 'me',
-            source: source === 'system' ? 'system-stt' : 'microphone-stt',
+          message: createChatMessage(
+            -(sessionId * 1_000_000 + ++this.messageSequence),
+            source === 'system' ? 'interviewer' : 'me',
+            source === 'system' ? 'system-stt' : 'microphone-stt',
             text,
-          },
+          ),
         })
         if (source === 'system') {
           this.scheduleInterviewerAnswer(sessionId, text, event.boundary)
         }
       },
       (error) => {
-        if (this.isCurrent(sessionId)) void this.fail(sessionId, String(error))
+        // Reconnect handles transient socket failures; only surface non-socket parse issues.
+        console.warn('[Copilot] Deepgram stream warning', error)
       },
       sampleRate,
+      (socket) => {
+        if (!this.isCurrent(sessionId)) {
+          closeDeepgramStream(socket)
+          return
+        }
+        this.deepgrams[source] = socket
+      },
     )
   }
 
