@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { Download, ExternalLink } from 'lucide-react'
+import { ChevronDown, ExternalLink, SlidersHorizontal } from 'lucide-react'
 import CopilotPanel from '../components/CopilotPanel'
 import { useTranslation } from '../i18n'
 import {
@@ -25,6 +25,7 @@ export default function StealthCopilot() {
   const [useMicrophone, setUseMicrophone] = useState(true)
   const [capabilities, setCapabilities] = useState<AudioCapabilities | null>(null)
   const [windowStatus, setWindowStatus] = useState<CopilotWindowStatus | null>(null)
+  const [audioSettingsOpen, setAudioSettingsOpen] = useState(false)
   const running = copilot.phase === 'starting' || copilot.phase === 'listening' || copilot.phase === 'stopping'
 
   const loadDevices = async () => {
@@ -64,26 +65,61 @@ export default function StealthCopilot() {
     })
   }
 
+  const handleExportRecording = () => {
+    void exportCopilotRecording()
+      .then((exported) => {
+        if (!exported) alert(t('copilot.noRecording'))
+      })
+      .catch((error) => {
+        console.error('[Copilot] Failed to export recording', error)
+        alert(String(error))
+      })
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden p-8">
       <div className="flex min-h-0 w-full flex-1 flex-col">
-        <div className="mb-6 flex shrink-0 flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold">{t('copilot.title')}</h1>
-            <p className="text-[#475569]">{t('copilot.subtitle')}</p>
-            <p className="mt-1 text-xs text-[#64748b]">{t('copilot.status')}: {t(`copilot.phase.${copilot.phase}`)}</p>
+        <div className="mb-3 flex shrink-0 items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <h1 className="truncate text-xl font-semibold">{t('copilot.title')}</h1>
+              <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700">
+                {t(`copilot.phase.${copilot.phase}`)}
+              </span>
+            </div>
+            <p className="mt-0.5 truncate text-xs text-[#64748b]">{t('copilot.subtitle')}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => void showCopilotWindow().then(setWindowStatus)}
-            className="flex items-center gap-2 rounded-2xl border bg-white px-4 py-2 text-sm hover:bg-[#f8fafc]"
-          >
-            <ExternalLink className="h-4 w-4" /> {t('copilot.detach')}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAudioSettingsOpen((open) => !open)}
+              className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-xs hover:bg-[#f8fafc]"
+              aria-expanded={audioSettingsOpen}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              {t('copilot.device')}
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${audioSettingsOpen ? 'rotate-180' : ''}`} />
+            </button>
+            <button
+              type="button"
+              onClick={() => void showCopilotWindow().then(setWindowStatus)}
+              className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-xs hover:bg-[#f8fafc]"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> {t('copilot.detach')}
+            </button>
+          </div>
         </div>
 
-        <section className="mb-5 shrink-0 rounded-2xl border border-[#e2e8f0] bg-white p-4" aria-label={t('copilot.device')}>
-          <div className="grid gap-3 md:grid-cols-2">
+        <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3 py-2 text-[11px] text-[#64748b]">
+          <span>{t('copilot.useSystemAudio')}: {useSystemAudio ? 'On' : 'Off'}</span>
+          <span className="text-[#cbd5e1]">•</span>
+          <span>{t('copilot.alsoCaptureMic')}: {useMicrophone ? 'On' : 'Off'}</span>
+          {selectedDevice && <><span className="text-[#cbd5e1]">•</span><span className="truncate">{selectedDevice}</span></>}
+        </div>
+
+        {audioSettingsOpen && (
+          <section className="mb-3 shrink-0 rounded-2xl border border-[#e2e8f0] bg-white p-3" aria-label={t('copilot.device')}>
+          <div className="grid gap-3 md:grid-cols-[auto_auto_minmax(220px,1fr)] md:items-center">
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -122,8 +158,8 @@ export default function StealthCopilot() {
           {capabilities?.system_audio_available && (
             <p className="mt-2 text-[11px] text-[#64748b]">AudioTee {capabilities.audiotee_commit.slice(0, 12)} · 16 kHz mono · default output</p>
           )}
-          <div className="mt-3 flex items-center gap-2 text-xs">
-            <span className="text-[#64748b]">{t('copilot.device')}:</span>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="shrink-0 text-[#64748b]">{t('copilot.device')}:</span>
             <select
               value={selectedDevice}
               onChange={(event) => {
@@ -139,30 +175,14 @@ export default function StealthCopilot() {
             <button type="button" onClick={() => void loadDevices()} disabled={running} className="text-[#6366f1]">↻</button>
           </div>
         </section>
+        )}
 
         <div className="min-h-0 flex-1">
-          <CopilotPanel windowStatus={windowStatus} />
-        </div>
-
-        <div className="mt-4 shrink-0">
-          <p className="mb-2 text-center text-xs text-[#64748b]">{t('copilot.archive.autoSaveHint')}</p>
-          <button
-            type="button"
-            onClick={() => {
-              void exportCopilotRecording()
-                .then((exported) => {
-                  if (!exported) alert(t('copilot.noRecording'))
-                })
-                .catch((error) => {
-                  console.error('[Copilot] Failed to export recording', error)
-                  alert(String(error))
-                })
-            }}
-            disabled={!copilot.hasRecording}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border bg-white py-2 text-xs hover:bg-[#f8fafc] disabled:opacity-40"
-          >
-            <Download className="h-3.5 w-3.5" /> {t('copilot.exportRecording')}
-          </button>
+          <CopilotPanel
+            windowStatus={windowStatus}
+            onExportRecording={handleExportRecording}
+            canExportRecording={copilot.hasRecording}
+          />
         </div>
       </div>
     </div>

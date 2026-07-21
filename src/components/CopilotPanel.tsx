@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent } from 'react'
-import { Clipboard, EyeOff, Mic, RefreshCw, Shield, Square, Trash2 } from 'lucide-react'
+import { Clipboard, Download, EyeOff, Mic, RefreshCw, Shield, Square, Trash2 } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useTranslation } from '../i18n'
 import { sendCopilotCommand } from '../lib/copilotSession'
@@ -11,12 +11,16 @@ interface CopilotPanelProps {
   floating?: boolean
   windowStatus?: CopilotWindowStatus | null
   onHide?: () => void
+  onExportRecording?: () => void
+  canExportRecording?: boolean
 }
 
 export default function CopilotPanel({
   floating = false,
   windowStatus = null,
   onHide,
+  onExportRecording,
+  canExportRecording = false,
 }: CopilotPanelProps) {
   const t = useTranslation()
   const copilot = useAppStore((state) => state.copilot)
@@ -61,7 +65,7 @@ export default function CopilotPanel({
       aria-label={t('copilot.floating.title')}
     >
       <header
-        className={`mb-3 flex items-center justify-between gap-3 px-1 ${floating ? 'cursor-move select-none' : ''}`}
+        className={`mb-2 flex items-center justify-between gap-3 px-1 ${floating ? 'cursor-move select-none' : ''}`}
         data-tauri-drag-region={floating ? true : undefined}
         onMouseDown={startWindowDrag}
       >
@@ -88,7 +92,7 @@ export default function CopilotPanel({
         )}
       </header>
 
-      <div className="mb-3 h-1 overflow-hidden rounded bg-[#e2e8f0]" aria-hidden="true">
+      <div className="mb-2 h-1 overflow-hidden rounded bg-[#e2e8f0]" aria-hidden="true">
         <div className="h-full bg-[#6366f1] transition-[width]" style={{ width: `${amplitude}%` }} />
       </div>
 
@@ -170,7 +174,7 @@ export default function CopilotPanel({
         <div className="mt-2 rounded-lg bg-red-50 px-2.5 py-2 text-xs text-red-700" role="alert">{copilot.error}</div>
       )}
 
-      <form className="mt-3 flex gap-2" onSubmit={submitFollowUp}>
+      <form className="mt-2 flex gap-2" onSubmit={submitFollowUp}>
         <input
           value={followUp}
           onChange={(event) => setFollowUp(event.target.value)}
@@ -184,7 +188,7 @@ export default function CopilotPanel({
         </button>
       </form>
 
-      <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
+      <div className="mt-2 flex flex-wrap items-center gap-2 border-t pt-2">
         <button
           type="button"
           onClick={() => void sendCopilotCommand({ type: 'toggle' })}
@@ -200,17 +204,32 @@ export default function CopilotPanel({
         <button type="button" onClick={() => void sendCopilotCommand({ type: 'clear' })} className="flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs">
           <Trash2 className="h-3.5 w-3.5" /> {t('copilot.clear')}
         </button>
+        {!floating && onExportRecording && (
+          <button
+            type="button"
+            onClick={onExportRecording}
+            disabled={!canExportRecording}
+            className="flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs disabled:opacity-40"
+          >
+            <Download className="h-3.5 w-3.5" /> {t('copilot.exportRecording')}
+          </button>
+        )}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 text-[10px] text-[#64748b]">
+          <span className="rounded-full bg-slate-100 px-2 py-1">
+            {t('copilot.audioMode')}: {t(`copilot.audioMode.${copilot.audioMode}`)}
+          </span>
+          <span className={`flex items-center gap-1 rounded-full px-2 py-1 ${windowStatus?.protection_applied ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`} title={t('copilot.protection.caveat')}>
+            <Shield className="h-3 w-3" /> {protectionLabel}
+          </span>
+        </div>
       </div>
 
-      <footer className="mt-3 border-t pt-2 text-[10px] text-[#64748b]">
-        <div>{t('copilot.audioMode')}: {t(`copilot.audioMode.${copilot.audioMode}`)}</div>
-        {copilot.capabilityNotice && <div className="mt-1 text-amber-700">{copilot.capabilityNotice}</div>}
-        <div className={`flex items-center gap-1.5 ${windowStatus?.protection_applied ? 'text-emerald-700' : 'text-amber-700'}`}>
-          <Shield className="h-3.5 w-3.5" /> {protectionLabel}
+      {(copilot.capabilityNotice || windowStatus?.error) && (
+        <div className="mt-2 text-[10px]">
+          {copilot.capabilityNotice && <div className="text-amber-700">{copilot.capabilityNotice}</div>}
+          {windowStatus?.error && <div className="text-red-600">{windowStatus.error}</div>}
         </div>
-        {windowStatus?.error && <div className="mt-1 text-red-600">{windowStatus.error}</div>}
-        <div className="mt-1">{t('copilot.protection.caveat')}</div>
-      </footer>
+      )}
     </section>
   )
 }
