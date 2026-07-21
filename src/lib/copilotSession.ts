@@ -7,6 +7,7 @@ import {
   sendAudioChunk,
   startDeepgramStream,
   type SuggestionRequestType,
+  type TranscriptBoundary,
 } from './llm'
 import { loadAppSettings } from './settingsStore'
 import { openMicrophoneSettings, tryRequestMicrophone } from './permissions'
@@ -20,10 +21,13 @@ import {
 import { useAppStore, type Suggestion } from '../stores/useAppStore'
 import { mergeContinuationText, textSimilarity } from './copilotText'
 import { createCopilotInterviewRecord, type SavedRecording } from './copilotArchive'
+import {
+  getInterviewerCommitDelay,
+  shouldInterruptForInterviewerContinuation,
+} from './interviewerTurnDetector'
 
 const COMMAND_EVENT = 'copilot-session-command'
 const SNAPSHOT_EVENT = 'copilot-session-snapshot'
-const INTERVIEWER_QUESTION_DEBOUNCE_MS = 1_200
 const MAX_AUTO_CONTINUATIONS = 2
 const ECHO_WINDOW_MS = 15_000
 
@@ -60,6 +64,8 @@ interface TranscriptState {
 interface ActiveAnswer {
   controller: AbortController
   answerId: number
+  question: string
+  startedAt: number
 }
 
 function createTranscriptState(): TranscriptState {
@@ -259,19 +265,41 @@ class CopilotSessionHost {
     this.pendingInterviewerQuestion = ''
   }
 
-  private scheduleInterviewerAnswer(sessionId: number, text: string): void {
+  private scheduleInterviewerAnswer(
+    sessionId: number,
+    text: string,
+    boundary: TranscriptBoundary,
+  ): void {
+    if (!this.isCurrent(sessionId)) return
     const normalized = text.trim()
-    if (!normalized || !this.isCurrent(sessionId)) return
-    this.pendingInterviewerQuestion = [this.pendingInterviewerQuestion, normalized]
-      .filter(Boolean)
-      .join(' ')
+    const active = this.activeAnswer
+
+    if (normalized && active && shouldInterruptForInterviewerContinuation(
+      active.question,
+      normalized,
+      Date.now() - active.startedAt,
+    )) {
+      this.pendingInterviewerQuestion = [
+        active.question,
+        this.pendingInterviewerQuestion,
+        normalized,
+      ].filter(Boolean).join(' ')
+      this.cancelActiveAnswer(sessionId)
+    } else if (normalized) {
+      this.pendingInterviewerQuestion = [this.pendingInterviewerQuestion, normalized]
+        .filter(Boolean)
+        .join(' ')
+    }
+
+    if (!this.pendingInterviewerQuestion) return
     if (this.interviewerQuestionTimer !== null) {
       globalThis.clearTimeout(this.interviewerQuestionTimer)
     }
+    const delay = getInterviewerCommitDelay(this.pendingInterviewerQuestion, boundary)
     this.interviewerQuestionTimer = globalThis.setTimeout(() => {
       this.interviewerQuestionTimer = null
       void this.flushPendingInterviewerAnswer(sessionId)
-    }, INTERVIEWER_QUESTION_DEBOUNCE_MS)
+    }, delay)
   }
 
   private async flushPendingInterviewerAnswer(sessionId: number): Promise<void> {
@@ -563,10 +591,15 @@ class CopilotSessionHost {
         ) {
           transcript.finalParts.push(event.text)
         }
-        if (!event.isUtteranceFinal) return
+        if (event.boundary !== 'speech-final' && event.boundary !== 'utterance-end') return
         const text = (transcript.finalParts.join(' ') || event.text).trim()
         transcript.finalParts = []
-        if (!text) return
+        if (!text) {
+          if (source === 'system' && event.boundary === 'utterance-end') {
+            this.scheduleInterviewerAnswer(sessionId, '', event.boundary)
+          }
+          return
+        }
         const now = Date.now()
         if (text === transcript.lastFinal && now - transcript.lastFinalAt < 2_000) return
         transcript.lastFinal = text
@@ -587,7 +620,9 @@ class CopilotSessionHost {
             text,
           },
         })
-        if (source === 'system') this.scheduleInterviewerAnswer(sessionId, text)
+        if (source === 'system') {
+          this.scheduleInterviewerAnswer(sessionId, text, event.boundary)
+        }
       },
       (error) => {
         if (this.isCurrent(sessionId)) void this.fail(sessionId, String(error))
@@ -626,7 +661,12 @@ class CopilotSessionHost {
     const controller = new AbortController()
     const answerSequence = ++this.answerSequence
     const idBase = sessionId * 1_000_000 + answerSequence * 100
-    this.activeAnswer = { controller, answerId: idBase }
+    this.activeAnswer = {
+      controller,
+      answerId: idBase,
+      question,
+      startedAt: Date.now(),
+    }
     const category = String(useAppStore.getState().settings?.aiModel || 'AI')
 
     try {

@@ -46,6 +46,7 @@ const session = source('src/lib/copilotSession.ts')
 const sessionState = source('src/lib/copilotSessionState.ts')
 const db = source('src/lib/db.ts')
 const archive = source('src/lib/copilotArchive.ts')
+const turnDetector = source('src/lib/interviewerTurnDetector.ts')
 const llm = source('src/lib/llm.ts')
 const rustLib = source('src-tauri/src/lib.rs')
 const rustWindow = source('src-tauri/src/copilot_window.rs')
@@ -110,7 +111,17 @@ check(
   'history replay loads the saved WAV file through the scoped asset protocol',
 )
 check(defaultCapability.includes('sql:allow-execute'), 'SQLite write operations are explicitly allowed')
-check(session.includes('INTERVIEWER_QUESTION_DEBOUNCE_MS'), 'interviewer transcript segments are debounced before requesting an answer')
+check(
+  turnDetector.includes('getInterviewerCommitDelay')
+    && session.includes('getInterviewerCommitDelay')
+    && session.includes('shouldInterruptForInterviewerContinuation'),
+  'interviewer turns use adaptive commit timing and continuation-aware interruption',
+)
+check(
+  llm.includes("'speech-final' | 'utterance-end'")
+    && session.includes("event.boundary === 'utterance-end'"),
+  'Deepgram speech-final and utterance-end signals remain distinct through turn detection',
+)
 check(session.includes('MAX_AUTO_CONTINUATIONS') && session.includes('continuationAttempt < MAX_AUTO_CONTINUATIONS'), 'token-limited answers are automatically continued with a bounded retry count')
 check(session.includes('textSimilarity') && session.includes('isLikelyEcho'), 'system-audio echo is filtered against recent AI and microphone text')
 check(session.includes("text.replace(/\\s/g, '').length < 12"), 'short interviewer acknowledgements are never discarded as echo')
@@ -429,6 +440,48 @@ check(
   'continuation requests instruct the model to resume without restarting or repeating',
 )
 
+const {
+  getInterviewerCommitDelay,
+  isLikelyIncompleteInterviewPrompt,
+  shouldInterruptForInterviewerContinuation,
+} = loadTypeScriptModule(
+  'src/lib/interviewerTurnDetector.ts',
+  [
+    'getInterviewerCommitDelay',
+    'isLikelyIncompleteInterviewPrompt',
+    'shouldInterruptForInterviewerContinuation',
+  ],
+)
+check(
+  getInterviewerCommitDelay('请介绍一下你上一个项目。', 'speech-final') === 180,
+  'complete interview prompts use the fast commit path',
+)
+check(
+  isLikelyIncompleteInterviewPrompt('你负责什么，以及')
+    && getInterviewerCommitDelay('你负责什么，以及', 'speech-final') === 700,
+  'incomplete prompts retain a longer merge window',
+)
+check(
+  getInterviewerCommitDelay('任意已经确认的文本', 'utterance-end') === 0,
+  'Deepgram utterance-end commits an assembled question immediately',
+)
+check(
+  shouldInterruptForInterviewerContinuation(
+    '请介绍一下你上一个项目。',
+    '另外，请结合一个具体故障举例。',
+    1_000,
+  ),
+  'early interviewer additions interrupt and rebuild an active answer',
+)
+check(
+  !shouldInterruptForInterviewerContinuation(
+    '请介绍一下你上一个项目。',
+    '下一个问题，为什么离开上一家公司？',
+    1_000,
+  ),
+  'explicit new questions do not interrupt the current answer as continuations',
+)
+
 const createProviderHarness = (aiModel, body) => loadTypeScriptModule(
   'src/lib/llm.ts',
   ['generateSuggestionsStream'],
@@ -503,7 +556,8 @@ const { startDeepgramStream, sendAudioChunk } = loadTypeScriptModule(
   },
 )
 let deepgramReady = false
-const deepgramOpening = startDeepgramStream(() => {}).then((socket) => {
+const deepgramEvents = []
+const deepgramOpening = startDeepgramStream((event) => deepgramEvents.push(event)).then((socket) => {
   deepgramReady = true
   return socket
 })
@@ -512,6 +566,19 @@ check(latestSocket !== null && !deepgramReady, 'capture waits for the Deepgram s
 check(latestSocket?.url.includes('endpointing=300') && latestSocket.url.includes('vad_events=true'), 'fixed-language STT uses stable endpoint detection')
 latestSocket?.open()
 check(await deepgramOpening === latestSocket, 'Deepgram startup resolves with the opened socket')
+latestSocket?.onmessage?.({
+  data: JSON.stringify({
+    is_final: true,
+    speech_final: true,
+    channel: { alternatives: [{ transcript: '请介绍一下你自己' }] },
+  }),
+})
+latestSocket?.onmessage?.({ data: JSON.stringify({ type: 'UtteranceEnd' }) })
+check(
+  deepgramEvents[0]?.boundary === 'speech-final'
+    && deepgramEvents[1]?.boundary === 'utterance-end',
+  'Deepgram boundary events preserve endpoint confidence instead of collapsing to one boolean',
+)
 latestSocket.bufferedAmount = 512 * 1024
 sendAudioChunk(latestSocket, new Float32Array([0.5]))
 check(latestSocket.sent.length === 0, 'Deepgram audio is dropped when websocket buffering reaches the memory limit')

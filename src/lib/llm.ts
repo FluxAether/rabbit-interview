@@ -523,14 +523,16 @@ export function float32ToInt16(float32Array: Float32Array): Int16Array {
  * - Calls onTranscript with interim/final results
  *
  * Usage in Copilot:
- *   const ws = await startDeepgramStream(({ text, isUtteranceFinal }) => { ... });
+ *   const ws = await startDeepgramStream(({ text, boundary }) => { ... });
  *   // on each audio-chunk event:
  *   sendAudioChunk(ws, chunkFloat32Array);
  */
+export type TranscriptBoundary = 'interim' | 'final' | 'speech-final' | 'utterance-end';
+
 export interface DeepgramTranscriptEvent {
   text: string;
   isFinal: boolean;
-  isUtteranceFinal: boolean;
+  boundary: TranscriptBoundary;
 }
 
 export async function startDeepgramStream(
@@ -567,12 +569,18 @@ export async function startDeepgramStream(
     try {
       const data = JSON.parse(event.data);
       const transcript = data.channel?.alternatives?.[0]?.transcript?.trim();
-      const isUtteranceFinal = Boolean(data.speech_final || data.type === 'UtteranceEnd');
-      if (transcript || isUtteranceFinal) {
+      const boundary: TranscriptBoundary = data.type === 'UtteranceEnd'
+        ? 'utterance-end'
+        : data.speech_final
+          ? 'speech-final'
+          : data.is_final
+            ? 'final'
+            : 'interim';
+      if (transcript || boundary === 'speech-final' || boundary === 'utterance-end') {
         onTranscript({
           text: transcript || '',
           isFinal: Boolean(data.is_final),
-          isUtteranceFinal,
+          boundary,
         });
       }
     } catch (e) {
