@@ -5,8 +5,8 @@ const SECTION_HEADINGS = /^(?:experience|education|skills|projects|summary|profi
 
 function isSectionHeading(line: string): boolean {
   if (SECTION_HEADINGS.test(line)) return true
-  const letters = line.replace(/[^\p{L}]/gu, '')
-  return letters.length >= 3 && line.length <= 48 && letters === letters.toLocaleUpperCase()
+  const latinLetters = line.replace(/[^A-Za-z]/g, '')
+  return latinLetters.length >= 3 && line.length <= 48 && latinLetters === latinLetters.toUpperCase()
 }
 
 export async function buildResumeDocxBlob(text: string): Promise<Blob> {
@@ -41,4 +41,10 @@ export async function downloadResumeDocx(text: string, fileName: string): Promis
   link.download = fileName
   link.click()
   URL.revokeObjectURL(url)
+}
+
+export function sanitizeResumeFilename(sourceFileName: string): string {
+  const baseName = sourceFileName.split(/[\\/]/).pop()?.replace(/\.(?:pdf|docx)$/i, '') ?? ''
+  const safeName = baseName.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/^\.+|\.+$/g, '').trim()
+  return `${safeName || 'resume'}-optimized.docx`
 }

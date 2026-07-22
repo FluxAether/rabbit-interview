@@ -1,6 +1,5 @@
-export const MAX_RESUME_FILE_SIZE = 5 * 1024 * 1024
-
 export type ResumeSuggestionCategory = 'format' | 'clarity' | 'impact' | 'keywords'
+export type ResumeAnalysisLanguage = 'zh-CN' | 'zh-TW' | 'en-US'
 
 export interface ResumeReplacement {
   before: string
@@ -32,8 +31,6 @@ export interface ResumeWorkspace {
   matchedKeywords: string[]
   missingKeywords: string[]
 }
-
-export type ResumeFileValidationError = 'file-empty' | 'file-too-large' | 'unsupported-file-type'
 
 const ENGLISH_STOPWORDS = new Set([
   'and', 'are', 'for', 'from', 'have', 'into', 'job', 'our', 'role', 'that', 'the', 'their',
@@ -97,8 +94,52 @@ function excerpt(text: string, max = 72): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
 }
 
-export function analyzeResume(sourceText: string, jobDescription: string): ResumeAnalysisResult {
+function getRuleCopy(language: ResumeAnalysisLanguage) {
+  if (language === 'en-US') return {
+    formatTitle: 'Formatting normalized',
+    formatDescription: 'Whitespace, line breaks, and bullet markers were normalized.',
+    clarityTitle: 'Remove first-person filler',
+    clarityDescription: (line: string) => `Rewrite “${excerpt(line)}” as a more direct resume statement.`,
+    impactTitle: 'Add a verifiable outcome',
+    impactDescription: (line: string) => `“${excerpt(line)}” has no verifiable scale, efficiency, or outcome. Add only factual details.`,
+    longTitle: 'Split a long statement',
+    longDescription: (line: string) => `“${excerpt(line)}” is dense. Split it into shorter bullets manually.`,
+    keywordTitle: 'Review job keywords',
+    keywordDescription: (keywords: string[]) => `Not found from the JD: ${keywords.join(', ')}. Add them only when supported by your experience.`,
+  }
+  if (language === 'zh-TW') return {
+    formatTitle: '已規範文字格式',
+    formatDescription: '已統一空白、換行和項目符號。',
+    clarityTitle: '精簡第一人稱表達',
+    clarityDescription: (line: string) => `將「${excerpt(line)}」改為更直接的履歷表達。`,
+    impactTitle: '補充可驗證成果',
+    impactDescription: (line: string) => `「${excerpt(line)}」缺少可驗證的規模、效率或結果，請按真實情況手動補充。`,
+    longTitle: '拆分過長表述',
+    longDescription: (line: string) => `「${excerpt(line)}」資訊較密集，建議手動拆分為更短的項目符號。`,
+    keywordTitle: '核對職缺關鍵字',
+    keywordDescription: (keywords: string[]) => `JD 中尚未出現：${keywords.join('、')}。僅在符合真實經歷時手動補充。`,
+  }
+  return {
+    formatTitle: '已规范文本格式',
+    formatDescription: '已统一空白、换行和项目符号。',
+    clarityTitle: '精简第一人称表达',
+    clarityDescription: (line: string) => `将“${excerpt(line)}”改为更直接的简历表达。`,
+    impactTitle: '补充可验证成果',
+    impactDescription: (line: string) => `“${excerpt(line)}”缺少可验证的规模、效率或结果，请按真实情况手动补充。`,
+    longTitle: '拆分过长表述',
+    longDescription: (line: string) => `“${excerpt(line)}”信息较密集，建议手动拆分为更短的项目符号。`,
+    keywordTitle: '核对职位关键词',
+    keywordDescription: (keywords: string[]) => `JD 中尚未出现：${keywords.join('、')}。仅在与你的真实经历相符时手动补充。`,
+  }
+}
+
+export function analyzeResume(
+  sourceText: string,
+  jobDescription: string,
+  language: ResumeAnalysisLanguage = 'zh-CN',
+): ResumeAnalysisResult {
   const optimizedText = normalizeResumeText(sourceText)
+  const copy = getRuleCopy(language)
   const suggestions: ResumeSuggestion[] = []
   let sequence = 0
   const add = (suggestion: Omit<ResumeSuggestion, 'id'>) => {
@@ -107,8 +148,8 @@ export function analyzeResume(sourceText: string, jobDescription: string): Resum
 
   if (optimizedText !== sourceText.trim().replace(/\r\n?/g, '\n')) {
     add({
-      title: '已规范文本格式',
-      description: '已统一空白、换行和项目符号。',
+      title: copy.formatTitle,
+      description: copy.formatDescription,
       category: 'format',
       replacement: null,
       applied: true,
@@ -125,8 +166,8 @@ export function analyzeResume(sourceText: string, jobDescription: string): Resum
     for (const [pattern, replacement] of safePatterns) {
       if (!pattern.test(line)) continue
       add({
-        title: '精简第一人称表达',
-        description: `将“${excerpt(line)}”改为更直接的简历表达。`,
+        title: copy.clarityTitle,
+        description: copy.clarityDescription(line),
         category: 'clarity',
         replacement: { before: line, after: line.replace(pattern, replacement) },
         applied: false,
@@ -137,8 +178,8 @@ export function analyzeResume(sourceText: string, jobDescription: string): Resum
 
   for (const line of lines.filter((line) => IMPACT_CUES.test(line) && !METRIC_CUES.test(line)).slice(0, 3)) {
     add({
-      title: '补充可验证成果',
-      description: `“${excerpt(line)}”缺少可验证的规模、效率或结果，请按真实情况手动补充。`,
+      title: copy.impactTitle,
+      description: copy.impactDescription(line),
       category: 'impact',
       replacement: null,
       applied: false,
@@ -147,8 +188,8 @@ export function analyzeResume(sourceText: string, jobDescription: string): Resum
 
   for (const line of lines.filter((line) => countResumeWords(line) > 45).slice(0, 2)) {
     add({
-      title: '拆分过长表述',
-      description: `“${excerpt(line)}”信息较密集，建议手动拆分为更短的项目符号。`,
+      title: copy.longTitle,
+      description: copy.longDescription(line),
       category: 'clarity',
       replacement: null,
       applied: false,
@@ -161,8 +202,8 @@ export function analyzeResume(sourceText: string, jobDescription: string): Resum
   const missingKeywords = keywords.filter((keyword) => !comparableResume.includes(keyword.toLocaleLowerCase()))
   if (missingKeywords.length > 0) {
     add({
-      title: '核对职位关键词',
-      description: `JD 中尚未出现：${missingKeywords.slice(0, 6).join('、')}。仅在与你的真实经历相符时手动补充。`,
+      title: copy.keywordTitle,
+      description: copy.keywordDescription(missingKeywords.slice(0, 6)),
       category: 'keywords',
       replacement: null,
       applied: false,
@@ -195,16 +236,4 @@ export function applyAllResumeSuggestions(text: string, suggestions: ResumeSugge
     return result.suggestion
   })
   return { text: nextText, suggestions: nextSuggestions }
-}
-
-export function validateResumeFile(file: Pick<File, 'name' | 'size'>): ResumeFileValidationError | null {
-  if (file.size === 0) return 'file-empty'
-  if (file.size > MAX_RESUME_FILE_SIZE) return 'file-too-large'
-  return /\.(?:pdf|docx)$/i.test(file.name) ? null : 'unsupported-file-type'
-}
-
-export function sanitizeResumeFilename(sourceFileName: string): string {
-  const baseName = sourceFileName.split(/[\\/]/).pop()?.replace(/\.(?:pdf|docx)$/i, '') ?? ''
-  const safeName = baseName.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/^\.+|\.+$/g, '').trim()
-  return `${safeName || 'resume'}-optimized.docx`
 }

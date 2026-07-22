@@ -3,10 +3,19 @@ import {
   createEmptyResumeWorkspace,
   type ResumeSuggestion,
   type ResumeWorkspace,
-} from './resumeOptimizer'
+} from './resumeOptimizer.ts'
 
 let store: Store | null = null
-let writeQueue: Promise<void> = Promise.resolve()
+
+export function createResumeWriteQueue(): (operation: () => Promise<void>) => Promise<void> {
+  let queue: Promise<void> = Promise.resolve()
+  return (operation) => {
+    queue = queue.catch(() => {}).then(operation)
+    return queue
+  }
+}
+
+const enqueueWrite = createResumeWriteQueue()
 
 async function getStore(): Promise<Store> {
   if (!store) store = await Store.load('resume-workspace.json')
@@ -29,10 +38,6 @@ function isSuggestion(value: unknown): value is ResumeSuggestion {
     ))
 }
 
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
-}
-
 function normalizeWorkspace(value: unknown): ResumeWorkspace {
   const empty = createEmptyResumeWorkspace()
   if (!value || typeof value !== 'object') return empty
@@ -43,8 +48,18 @@ function normalizeWorkspace(value: unknown): ResumeWorkspace {
     jobDescription: typeof saved.jobDescription === 'string' ? saved.jobDescription.slice(0, 5000) : '',
     suggestions: Array.isArray(saved.suggestions) ? saved.suggestions.filter(isSuggestion) : [],
     sourceFileName: typeof saved.sourceFileName === 'string' ? saved.sourceFileName : '',
-    matchedKeywords: stringArray(saved.matchedKeywords),
-    missingKeywords: stringArray(saved.missingKeywords),
+    matchedKeywords: [],
+    missingKeywords: [],
+  }
+}
+
+export function toPersistedResumeWorkspace(workspace: ResumeWorkspace): Omit<ResumeWorkspace, 'matchedKeywords' | 'missingKeywords'> {
+  return {
+    original: workspace.original,
+    optimized: workspace.optimized,
+    jobDescription: workspace.jobDescription,
+    suggestions: workspace.suggestions,
+    sourceFileName: workspace.sourceFileName,
   }
 }
 
@@ -53,19 +68,17 @@ export async function loadResumeWorkspace(): Promise<ResumeWorkspace> {
 }
 
 export async function saveResumeWorkspace(workspace: ResumeWorkspace): Promise<void> {
-  writeQueue = writeQueue.then(async () => {
+  return enqueueWrite(async () => {
     const currentStore = await getStore()
-    await currentStore.set('workspace', workspace)
+    await currentStore.set('workspace', toPersistedResumeWorkspace(workspace))
     await currentStore.save()
   })
-  return writeQueue
 }
 
 export async function clearResumeWorkspace(): Promise<void> {
-  writeQueue = writeQueue.then(async () => {
+  return enqueueWrite(async () => {
     const currentStore = await getStore()
     await currentStore.delete('workspace')
     await currentStore.save()
   })
-  return writeQueue
 }

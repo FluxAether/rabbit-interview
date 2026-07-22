@@ -16,6 +16,7 @@ import {
   mountCopilotSessionHost,
   sendCopilotCommand,
 } from './lib/copilotSession'
+import { createEmptyResumeWorkspace } from './lib/resumeOptimizer'
 import {
   getCopilotWindowStatus,
   hideCopilotWindow,
@@ -117,10 +118,7 @@ export default function App() {
       })
       loadResumeWorkspace().then(hydrateResumeWorkspace).catch((error) => {
         console.warn('Failed to load resume workspace', error)
-        hydrateResumeWorkspace({
-          original: '', optimized: '', jobDescription: '', suggestions: [], sourceFileName: '',
-          matchedKeywords: [], missingKeywords: [],
-        })
+        hydrateResumeWorkspace(createEmptyResumeWorkspace())
       })
     }
     return () => {

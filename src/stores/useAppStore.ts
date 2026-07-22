@@ -30,7 +30,7 @@ export interface Suggestion {
   applied?: boolean
 }
 
-interface AppState {
+export interface AppState {
   // Global
   currentPage: string
   settings: Record<string, any>
@@ -67,6 +67,30 @@ interface AppState {
   addMockMessage: (role: 'ai' | 'user', text: string) => void
   setMockFeedback: (fb: any[]) => void
   resetMock: () => void
+}
+
+function resumeStateFromWorkspace(workspace: ResumeWorkspace) {
+  return {
+    resumeOriginal: workspace.original,
+    resumeOptimized: workspace.optimized,
+    jobDescription: workspace.jobDescription,
+    resumeSuggestions: workspace.suggestions,
+    resumeSourceFileName: workspace.sourceFileName,
+    resumeMatchedKeywords: workspace.matchedKeywords,
+    resumeMissingKeywords: workspace.missingKeywords,
+  }
+}
+
+export function selectResumeWorkspace(state: AppState): ResumeWorkspace {
+  return {
+    original: state.resumeOriginal,
+    optimized: state.resumeOptimized,
+    jobDescription: state.jobDescription,
+    suggestions: state.resumeSuggestions,
+    sourceFileName: state.resumeSourceFileName,
+    matchedKeywords: state.resumeMatchedKeywords,
+    missingKeywords: state.resumeMissingKeywords,
+  }
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -106,16 +130,7 @@ export const useAppStore = create<AppState>((set) => ({
   resumeMatchedKeywords: [],
   resumeMissingKeywords: [],
   resumeHydrated: false,
-  hydrateResumeWorkspace: (workspace) => set({
-    resumeOriginal: workspace.original,
-    resumeOptimized: workspace.optimized,
-    jobDescription: workspace.jobDescription,
-    resumeSuggestions: workspace.suggestions,
-    resumeSourceFileName: workspace.sourceFileName,
-    resumeMatchedKeywords: workspace.matchedKeywords,
-    resumeMissingKeywords: workspace.missingKeywords,
-    resumeHydrated: true,
-  }),
+  hydrateResumeWorkspace: (workspace) => set({ ...resumeStateFromWorkspace(workspace), resumeHydrated: true }),
   updateResumeWorkspace: (workspace) => set((state) => ({
     resumeOriginal: workspace.original ?? state.resumeOriginal,
     resumeOptimized: workspace.optimized ?? state.resumeOptimized,
@@ -160,16 +175,7 @@ export const useAppStore = create<AppState>((set) => ({
     return appliedCount
   },
   clearResumeWorkspace: () => {
-    const empty = createEmptyResumeWorkspace()
-    set({
-      resumeOriginal: empty.original,
-      resumeOptimized: empty.optimized,
-      jobDescription: empty.jobDescription,
-      resumeSuggestions: empty.suggestions,
-      resumeSourceFileName: empty.sourceFileName,
-      resumeMatchedKeywords: empty.matchedKeywords,
-      resumeMissingKeywords: empty.missingKeywords,
-    })
+    set(resumeStateFromWorkspace(createEmptyResumeWorkspace()))
   },
 
   mockConversation: [],

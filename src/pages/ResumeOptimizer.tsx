@@ -1,22 +1,24 @@
 import { useEffect, useState } from 'react'
 import { Download, FileText, LoaderCircle, Trash2, Upload } from 'lucide-react'
 import { useDropzone, type FileRejection } from 'react-dropzone'
-import { useTranslation } from '../i18n'
-import { downloadResumeDocx } from '../lib/resumeDocuments'
-import { extractResumeText } from '../lib/resumeImport'
+import { useCurrentLanguage, useTranslation } from '../i18n'
+import { downloadResumeDocx, sanitizeResumeFilename } from '../lib/resumeDocuments'
+import {
+  MAX_RESUME_FILE_SIZE,
+  extractResumeText,
+  validateResumeFile,
+  type ResumeFileValidationError,
+} from '../lib/resumeImport'
 import {
   analyzeResume,
   countResumeWords,
-  sanitizeResumeFilename,
-  validateResumeFile,
-  type ResumeFileValidationError,
   type ResumeSuggestionCategory,
 } from '../lib/resumeOptimizer'
 import {
   clearResumeWorkspace as clearSavedResumeWorkspace,
   saveResumeWorkspace,
 } from '../lib/resumeWorkspaceStore'
-import { useAppStore } from '../stores/useAppStore'
+import { selectResumeWorkspace, useAppStore } from '../stores/useAppStore'
 
 const SAMPLE_RESUME = `Alex Morgan
 Product Designer
@@ -47,6 +49,7 @@ export default function ResumeOptimizer() {
     clearResumeWorkspace,
   } = useAppStore()
   const t = useTranslation()
+  const language = useCurrentLanguage()
   const [isParsing, setIsParsing] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
@@ -56,15 +59,7 @@ export default function ResumeOptimizer() {
   useEffect(() => {
     if (!resumeHydrated) return
     const timer = window.setTimeout(() => {
-      const workspace = {
-        original: resumeOriginal,
-        optimized: resumeOptimized,
-        jobDescription,
-        suggestions: resumeSuggestions,
-        sourceFileName: resumeSourceFileName,
-        matchedKeywords: resumeMatchedKeywords,
-        missingKeywords: resumeMissingKeywords,
-      }
+      const workspace = selectResumeWorkspace(useAppStore.getState())
       const hasContent = Boolean(
         resumeOriginal.trim() || resumeOptimized.trim() || jobDescription.trim() || resumeSourceFileName,
       )
@@ -138,7 +133,7 @@ export default function ResumeOptimizer() {
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
     },
     maxFiles: 1,
-    maxSize: 5 * 1024 * 1024,
+    maxSize: MAX_RESUME_FILE_SIZE,
     multiple: false,
     disabled: isParsing || !resumeHydrated,
   })
@@ -151,7 +146,7 @@ export default function ResumeOptimizer() {
     setIsAnalyzing(true)
     setStatus(null)
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
-    setResumeAnalysis(analyzeResume(source, jobDescription))
+    setResumeAnalysis(analyzeResume(source, jobDescription, language))
     setStatus({ kind: 'success', text: t('resume.analysisComplete') })
     setIsAnalyzing(false)
   }
