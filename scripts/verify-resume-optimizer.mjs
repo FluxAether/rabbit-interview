@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as mammoth from 'mammoth'
 import {
-  analyzeResume,
   applyAllResumeSuggestions,
   applyResumeSuggestion,
   countResumeWords,
+  normalizeLlmResumeResult,
   normalizeResumeText,
 } from '../src/lib/resumeOptimizer.ts'
 import { buildResumeDocxBlob, sanitizeResumeFilename } from '../src/lib/resumeDocuments.ts'
@@ -28,19 +28,66 @@ const normalized = 'Alex\n• Built products\n\nSkills'
 assert.equal(normalizeResumeText(unformatted), normalized, 'normalizes whitespace and bullets')
 assert.equal(normalizeResumeText(normalized), normalized, 'normalization is idempotent')
 
-const analysis = analyzeResume(
-  'I was responsible for product design\n• Improved onboarding',
-  'Product design, TypeScript and 用户研究',
+const llmAnalysis = normalizeLlmResumeResult({
+  optimizedText: 'Alex Morgan\n• Led product design',
+  suggestions: [
+    {
+      title: 'Improved formatting',
+      description: 'Normalized the bullet formatting.',
+      category: 'impact',
+      requiresUserInput: false,
+    },
+    {
+      title: 'Add a verified outcome',
+      description: 'Add a metric only when the real result is known.',
+      category: 'impact',
+      requiresUserInput: true,
+    },
+  ],
+}, 'Alex Morgan\nLed product design', 'Product design TypeScript')
+assert.equal(llmAnalysis.optimizedText, 'Alex Morgan\n• Led product design', 'uses the LLM optimized resume')
+assert.equal(llmAnalysis.suggestions[0]?.title, 'Improved formatting', 'keeps LLM copy separate from translation keys')
+assert.equal(llmAnalysis.suggestions[0]?.applied, true, 'marks changes already included by the LLM as applied')
+assert.equal(llmAnalysis.suggestions[1]?.applied, false, 'leaves factual gaps for manual input')
+assert.ok(llmAnalysis.missingKeywords.some((keyword) => keyword.toLowerCase() === 'typescript'), 'derives keyword gaps locally')
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: '', suggestions: [] }, 'Original', ''),
+  'rejects an empty LLM result',
 )
-assert.ok(analysis.suggestions.every((suggestion) => suggestion.titleKey.startsWith('resume.rule.')), 'returns structured suggestion message keys')
-assert.equal(analysis.optimizedText.includes('TypeScript'), false, 'never invents missing JD keywords')
-assert.ok(analysis.matchedKeywords.some((keyword) => keyword.toLowerCase() === 'product'), 'reports matched JD keywords')
-assert.ok(analysis.missingKeywords.some((keyword) => keyword.toLowerCase() === 'typescript'), 'reports missing English JD keywords')
-assert.ok(analysis.missingKeywords.includes('用户研究'), 'reports missing Chinese JD keywords')
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'Increased revenue by 40%', suggestions: [] }, 'Improved revenue', ''),
+  'rejects factual tokens not present in the source resume',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'Kubernetes product design', suggestions: [] }, 'Product design', ''),
+  'rejects invented non-numeric skills',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'Responsible for Python project', suggestions: [] }, 'Python project', ''),
+  'rejects an invented English responsibility',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: '负责支付系统项目', suggestions: [] }, '支付系统项目', ''),
+  'rejects an invented Chinese responsibility',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'Improved revenue' }, 'Improved revenue', ''),
+  'rejects an incomplete LLM schema',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'Too short', suggestions: [] }, 'Relevant experience. '.repeat(30), ''),
+  'rejects a materially truncated optimized resume',
+)
 
-const actionable = analysis.suggestions.find((suggestion) => suggestion.replacement)
-assert.ok(actionable, 'creates a safe actionable suggestion')
-const applied = applyResumeSuggestion(analysis.optimizedText, actionable)
+const actionable = {
+  id: 'resume-test-1',
+  title: 'Direct wording',
+  description: 'Remove first-person filler.',
+  category: 'clarity',
+  replacement: { before: 'I was responsible for product design', after: 'Responsible for product design' },
+  applied: false,
+}
+const applied = applyResumeSuggestion('I was responsible for product design', actionable)
 assert.equal(applied.applied, true, 'applies an exact replacement')
 assert.match(applied.text, /^Responsible for product design/m, 'removes first-person filler without changing facts')
 
@@ -48,8 +95,10 @@ const stale = applyResumeSuggestion('Text was edited', actionable)
 assert.equal(stale.applied, false, 'does not overwrite manually edited content')
 assert.equal(stale.text, 'Text was edited', 'keeps edited content when a suggestion is stale')
 
-const allApplied = applyAllResumeSuggestions(analysis.optimizedText, analysis.suggestions)
-assert.ok(allApplied.suggestions.some((suggestion) => !suggestion.replacement && !suggestion.applied), 'leaves guidance-only suggestions pending')
+const guidance = { ...actionable, id: 'resume-test-2', replacement: null }
+const allApplied = applyAllResumeSuggestions('I was responsible for product design', [actionable, guidance])
+assert.equal(allApplied.suggestions[0]?.applied, true, 'applies actionable suggestions')
+assert.equal(allApplied.suggestions[1]?.applied, false, 'leaves guidance-only suggestions pending')
 
 assert.equal(validateResumeFile({ name: 'resume.pdf', size: MAX_RESUME_FILE_SIZE }), null, 'accepts a PDF at the size limit')
 assert.equal(validateResumeFile({ name: 'resume.docx', size: MAX_RESUME_FILE_SIZE + 1 }), 'file-too-large', 'rejects files over 5 MiB')
@@ -88,6 +137,11 @@ const restored = normalizeResumeWorkspace({
   suggestions: [], sourceFileName: 'resume.docx',
 })
 assert.ok(restored.missingKeywords.some((keyword) => keyword.toLowerCase() === 'typescript'), 'recomputes JD match counts when restoring a workspace')
+const restoredLlmSuggestion = normalizeResumeWorkspace({
+  original: 'Alex Morgan', optimized: llmAnalysis.optimizedText, jobDescription: '',
+  suggestions: llmAnalysis.suggestions, sourceFileName: 'resume.docx',
+})
+assert.equal(restoredLlmSuggestion.suggestions[0]?.title, 'Improved formatting', 'restores saved LLM suggestion copy')
 
 const enqueue = createResumeWriteQueue()
 await assert.rejects(enqueue(async () => { throw new Error('disk failure') }), 'reports the current persistence failure')
@@ -96,7 +150,7 @@ await enqueue(async () => { recoveredWriteRan = true })
 assert.equal(recoveredWriteRan, true, 'continues persistence after an earlier write failure')
 
 const translations = fs.readFileSync('src/i18n/translations.ts', 'utf8')
-for (const key of new Set(analysis.suggestions.flatMap((suggestion) => [suggestion.titleKey, suggestion.descriptionKey]))) {
+for (const key of ['resume.analysisComplete', 'resume.analysisError']) {
   assert.equal(translations.split(`'${key}'`).length - 1, 3, `translates ${key} in all supported UI languages`)
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Download, FileText, LoaderCircle, Trash2, Upload } from 'lucide-react'
 import { useDropzone, type FileRejection } from 'react-dropzone'
-import { useTranslation } from '../i18n'
+import { useCurrentLanguage, useTranslation } from '../i18n'
 import { downloadResumeDocx, sanitizeResumeFilename } from '../lib/resumeDocuments'
 import {
   MAX_RESUME_FILE_SIZE,
@@ -10,10 +10,10 @@ import {
   type ResumeFileValidationError,
 } from '../lib/resumeImport'
 import {
-  analyzeResume,
   countResumeWords,
   type ResumeSuggestionCategory,
 } from '../lib/resumeOptimizer'
+import { optimizeResumeWithLlm } from '../lib/resumeOptimizerAi'
 import {
   clearResumeWorkspace as clearSavedResumeWorkspace,
   saveResumeWorkspace,
@@ -49,6 +49,7 @@ export default function ResumeOptimizer() {
     clearResumeWorkspace,
   } = useAppStore()
   const t = useTranslation()
+  const language = useCurrentLanguage()
   const [isParsing, setIsParsing] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
@@ -144,10 +145,15 @@ export default function ResumeOptimizer() {
     }
     setIsAnalyzing(true)
     setStatus(null)
-    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
-    setResumeAnalysis(analyzeResume(source, jobDescription))
-    setStatus({ kind: 'success', text: t('resume.analysisComplete') })
-    setIsAnalyzing(false)
+    try {
+      setResumeAnalysis(await optimizeResumeWithLlm(source, jobDescription, language))
+      setStatus({ kind: 'success', text: t('resume.analysisComplete') })
+    } catch (error) {
+      console.warn('Failed to optimize resume with LLM', error)
+      setStatus({ kind: 'error', text: t('resume.analysisError') })
+    } finally {
+      setIsAnalyzing(false)
+    }
   }
 
   const handleApply = (id: string) => {
@@ -267,8 +273,9 @@ export default function ResumeOptimizer() {
           <textarea
             value={jobDescription}
             maxLength={5000}
+            disabled={busy}
             onChange={(event) => updateResumeWorkspace({ jobDescription: event.target.value })}
-            className="h-36 w-full rounded-xl border border-[#e2e8f0] p-3 text-sm"
+            className="h-36 w-full rounded-xl border border-[#e2e8f0] p-3 text-sm disabled:opacity-60"
             placeholder={t('resume.jd.placeholder')}
           />
           <button type="button" onClick={() => runAnalysis(resumeOriginal)} disabled={busy || !resumeOriginal.trim()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6366f1] py-2 text-sm text-white disabled:opacity-50">
@@ -299,8 +306,9 @@ export default function ResumeOptimizer() {
           </div>
           <textarea
             value={resumeOptimized}
+            disabled={busy}
             onChange={(event) => updateResumeWorkspace({ optimized: event.target.value })}
-            className="min-h-[260px] w-full resize-y rounded-xl border bg-white p-4 text-sm leading-relaxed"
+            className="min-h-[260px] w-full resize-y rounded-xl border bg-white p-4 text-sm leading-relaxed disabled:opacity-60"
             placeholder={t('resume.optimizedPlaceholder')}
             aria-label={t('resume.optimized')}
           />
@@ -328,14 +336,14 @@ export default function ResumeOptimizer() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-xs text-[#6366f1]">{categoryLabel(suggestion.category)}</div>
-                    <div className={suggestion.applied ? 'mt-1 text-sm font-medium line-through' : 'mt-1 text-sm font-medium'}>{t(suggestion.titleKey)}</div>
+                    <div className={suggestion.applied ? 'mt-1 text-sm font-medium line-through' : 'mt-1 text-sm font-medium'}>{suggestion.title ?? t(suggestion.titleKey ?? '')}</div>
                   </div>
                   {!suggestion.applied && suggestion.replacement && (
                     <button type="button" onClick={() => handleApply(suggestion.id)} className="shrink-0 rounded-lg border px-2 py-1 text-xs">{t('common.apply')}</button>
                   )}
                   {!suggestion.applied && !suggestion.replacement && <span className="shrink-0 text-xs text-[#b45309]">{t('resume.manualRequired')}</span>}
                 </div>
-                <p className="mt-2 text-xs leading-relaxed text-[#64748b]">{t(suggestion.descriptionKey, suggestion.descriptionParams)}</p>
+                <p className="mt-2 text-xs leading-relaxed text-[#64748b]">{suggestion.description ?? t(suggestion.descriptionKey ?? '', suggestion.descriptionParams)}</p>
               </article>
             ))}
           </div>

@@ -263,7 +263,7 @@ export interface SuggestionStreamOptions {
   continuationAttempt?: number;
 }
 
-async function resolveConfiguredProvider(): Promise<{
+async function resolveConfiguredProvider(allowProviderFallback = true): Promise<{
   provider: LlmProvider;
   model: string;
   apiKey: string;
@@ -271,7 +271,7 @@ async function resolveConfiguredProvider(): Promise<{
   const aiModel: string = useAppStore.getState().settings?.aiModel || 'groq-llama-3.1';
   let { provider, model } = resolveProviderAndModel(aiModel);
   let apiKey = await getLlmApiKey(provider);
-  if (!apiKey) {
+  if (!apiKey && allowProviderFallback) {
     const candidates: Array<'gemini' | 'groq' | 'openai' | 'anthropic'> = ['gemini', 'groq', 'openai', 'anthropic'];
     for (const candidate of candidates) {
       const candidateKey = await getLlmApiKey(candidate);
@@ -766,8 +766,13 @@ export function sendAudioChunk(ws: WebSocket | null, float32Chunk: Float32Array)
 }
 
 /** Gracefully close a Deepgram stream */
-export async function generateStructuredJson<T>(system: string, prompt: string, signal?: AbortSignal): Promise<T> {
-  const { provider, model, apiKey } = await resolveConfiguredProvider();
+export async function generateStructuredJson<T>(
+  system: string,
+  prompt: string,
+  signal?: AbortSignal,
+  options: { allowProviderFallback?: boolean } = {},
+): Promise<T> {
+  const { provider, model, apiKey } = await resolveConfiguredProvider(options.allowProviderFallback !== false);
   if (!apiKey) throw new Error('No LLM API key is configured. Add a provider key in Settings and retry.');
 
   let response: Response;

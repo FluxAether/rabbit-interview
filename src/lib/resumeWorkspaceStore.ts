@@ -28,9 +28,10 @@ function isSuggestion(value: unknown): value is ResumeSuggestion {
   const suggestion = value as Partial<ResumeSuggestion>
   const replacement = suggestion.replacement
   const params = suggestion.descriptionParams
+  const hasCopy = typeof suggestion.title === 'string' && typeof suggestion.description === 'string'
+  const hasTranslationKeys = typeof suggestion.titleKey === 'string' && typeof suggestion.descriptionKey === 'string'
   return typeof suggestion.id === 'string'
-    && typeof suggestion.titleKey === 'string'
-    && typeof suggestion.descriptionKey === 'string'
+    && (hasCopy || hasTranslationKeys)
     && ['format', 'clarity', 'impact', 'keywords'].includes(String(suggestion.category))
     && typeof suggestion.applied === 'boolean'
     && (params === undefined || (
