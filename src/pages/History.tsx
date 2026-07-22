@@ -7,11 +7,20 @@ import { loadHistory as loadHistoryDb } from '../lib/db'
 import { useTranslation } from '../i18n'
 
 type HistoryChatRole = 'interviewer' | 'assistant' | 'me'
+type HistoryTab = 'copilot' | 'mock'
 
 interface HistoryChatMessage {
   id: string
   role: HistoryChatRole
   text: string
+}
+
+function isMockInterviewMode(mode?: string | null): boolean {
+  return String(mode || '').startsWith('mock')
+}
+
+function isCopilotMode(mode?: string | null): boolean {
+  return String(mode || '').toLowerCase() === 'copilot'
 }
 
 function parseTranscript(transcript: string, mode: string): HistoryChatMessage[] {
@@ -59,6 +68,7 @@ export default function History() {
   const { history, loadHistory } = useAppStore()
   const t = useTranslation()
   const [search, setSearch] = useState('')
+  const [activeTab, setActiveTab] = useState<HistoryTab>('copilot')
   const [selected, setSelected] = useState<InterviewRecord | null>(null)
 
   useEffect(() => {
@@ -73,9 +83,16 @@ export default function History() {
     }).catch(console.error)
   }, [])
 
-  const filtered = history.filter(h =>
-    (h.role + h.company).toLowerCase().includes(search.toLowerCase())
+  const tabbed = history.filter((item) =>
+    activeTab === 'mock' ? isMockInterviewMode(item.mode) : isCopilotMode(item.mode)
   )
+  const filtered = tabbed.filter((item) =>
+    `${item.role}${item.company}`.toLowerCase().includes(search.toLowerCase())
+  )
+  const tabs: Array<{ id: HistoryTab; label: string; count: number }> = [
+    { id: 'copilot', label: t('history.tab.copilot'), count: history.filter((item) => isCopilotMode(item.mode)).length },
+    { id: 'mock', label: t('history.tab.mock'), count: history.filter((item) => isMockInterviewMode(item.mode)).length },
+  ]
 
   const waveformRef = useRef<HTMLDivElement>(null)
   const wavesurferRef = useRef<any>(null)
@@ -152,10 +169,27 @@ export default function History() {
         placeholder={t('history.search')} 
       />
 
-      <div className="flex gap-2 mb-3 text-xs">
-        <div className="px-3 py-1 bg-white border rounded-full">{t('common.allInterviews')}</div>
-        <div className="px-3 py-1 bg-white border rounded-full">{t('common.allScores')}</div>
-        <div className="px-3 py-1 bg-white border rounded-full">{t('common.filters')}</div>
+      <div className="mb-4 flex gap-2 rounded-2xl border border-[#e2e8f0] bg-white p-1">
+        {tabs.map((tab) => {
+          const active = tab.id === activeTab
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 rounded-xl px-3 py-2 text-sm transition-all ${
+                active
+                  ? 'bg-[#e0e7ff] font-medium text-[#4338ca]'
+                  : 'text-[#64748b] hover:bg-[#f8fafc]'
+              }`}
+            >
+              {tab.label}
+              <span className={`ml-2 text-xs ${active ? 'text-[#6366f1]' : 'text-[#94a3b8]'}`}>
+                {tab.count}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
       <div className="space-y-2">
@@ -193,7 +227,7 @@ export default function History() {
             </div>
           </div>
         ))}
-        {filtered.length === 0 && <div className="text-sm text-[#64748b] p-4">{t('history.empty')}</div>}
+        {filtered.length === 0 && <div className="text-sm text-[#64748b] p-4">{t(activeTab === 'mock' ? 'history.empty.mock' : 'history.empty.copilot')}</div>}
       </div>
 
       {/* Replay Modal */}

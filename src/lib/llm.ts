@@ -766,6 +766,48 @@ export function sendAudioChunk(ws: WebSocket | null, float32Chunk: Float32Array)
 }
 
 /** Gracefully close a Deepgram stream */
+export async function generateStructuredJson<T>(system: string, prompt: string, signal?: AbortSignal): Promise<T> {
+  const { provider, model, apiKey } = await resolveConfiguredProvider();
+  if (!apiKey) throw new Error('No LLM API key is configured. Add a provider key in Settings and retry.');
+
+  let response: Response;
+  if (provider === 'anthropic') {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', signal,
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model, max_tokens: 2400, system, messages: [{ role: 'user', content: prompt }] }),
+    });
+  } else if (provider === 'gemini') {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: 'POST', signal,
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 2400, responseMimeType: 'application/json' } }),
+    });
+  } else {
+    const url = provider === 'groq' ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
+    response = await fetch(url, {
+      method: 'POST', signal,
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], temperature: 0.3, ...(provider === 'openai' ? { max_completion_tokens: 2400, response_format: { type: 'json_object' } } : { max_tokens: 2400, response_format: { type: 'json_object' } }) }),
+    });
+  }
+
+  const data = await response.json();
+  if (!response.ok) throw new Error(data?.error?.message || `${provider} error ${response.status}`);
+  const text = provider === 'anthropic'
+    ? (data?.content || []).filter((block: any) => block?.type === 'text').map((block: any) => block.text).join('\n')
+    : provider === 'gemini'
+      ? data?.candidates?.[0]?.content?.parts?.map((part: any) => part.text || '').join('')
+      : data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error('The LLM returned an empty response.');
+  const cleaned = String(text).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    throw new Error('The LLM returned invalid JSON. Please retry.');
+  }
+}
+
 export function closeDeepgramStream(ws: WebSocket | null) {
   if (!ws) return;
   const managed = ws as DeepgramStream;

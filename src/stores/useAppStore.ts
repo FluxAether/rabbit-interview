@@ -12,6 +12,7 @@ export interface InterviewRecord {
   duration: number
   mode: string
   recordingPath?: string | null
+  detailsJson?: string | null
 }
 
 export interface Suggestion {

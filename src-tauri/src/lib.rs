@@ -2,6 +2,7 @@ mod audio;
 mod commands;
 mod copilot_window;
 mod db;
+mod speech;
 
 use audio::{
     export_audio_recording, get_audio_capabilities, list_audio_devices, save_audio_recording,
@@ -12,6 +13,7 @@ use copilot_window::{
     close_copilot_window, get_copilot_window_status, hide_copilot_window, show_copilot_window,
     toggle_copilot_window,
 };
+use speech::{speak_text, stop_speaking};
 use tauri::Emitter;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
@@ -62,6 +64,8 @@ pub fn run() {
             close_copilot_window,
             get_history,
             save_interview_record,
+            speak_text,
+            stop_speaking,
         ])
         .setup(|app| {
             if let Err(e) = db::init_db(app) {

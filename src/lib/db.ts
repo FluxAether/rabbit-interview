@@ -24,12 +24,16 @@ export async function getDb() {
         duration INTEGER,
         mode TEXT,
         recording_path TEXT,
+        details_json TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
     `);
     const interviewColumns = await db.select(`PRAGMA table_info(interviews)`);
     if (!interviewColumns.some((column: { name: string }) => column.name === 'recording_path')) {
       await db.execute(`ALTER TABLE interviews ADD COLUMN recording_path TEXT`);
+    }
+    if (!interviewColumns.some((column: { name: string }) => column.name === 'details_json')) {
+      await db.execute(`ALTER TABLE interviews ADD COLUMN details_json TEXT`);
     }
     await db.execute(`
       CREATE TABLE IF NOT EXISTS copilot_messages (
@@ -51,8 +55,8 @@ export async function getDb() {
 export async function saveInterview(record: any): Promise<number> {
   const database = await getDb();
   const result = await database.execute(
-    `INSERT INTO interviews (date, role, company, score, transcript, duration, mode, recording_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO interviews (date, role, company, score, transcript, duration, mode, recording_path, details_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
     [
       record.date,
       record.role,
@@ -62,6 +66,7 @@ export async function saveInterview(record: any): Promise<number> {
       record.duration,
       record.mode,
       record.recordingPath ?? null,
+      record.detailsJson ?? null,
     ]
   );
   return result.lastInsertId as number;
@@ -71,7 +76,8 @@ export async function loadHistory(): Promise<any[]> {
   const database = await getDb();
   return await database.select(
     `SELECT id, date, role, company, score, transcript, duration, mode,
-            recording_path AS recordingPath
+            recording_path AS recordingPath,
+            details_json AS detailsJson
      FROM interviews
      ORDER BY created_at DESC`
   );

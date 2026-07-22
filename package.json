@@ -15,7 +15,8 @@
     "build:win": "tauri build --target x86_64-pc-windows-msvc",
     "sign:mac": "echo 'Run: xcrun notarytool submit --keychain-profile \"AC_PASSWORD\" --wait dist/RabbitInterview.app.tar.gz'",
     "package": "tauri build",
-    "verify:copilot": "node scripts/verify-copilot.mjs"
+    "verify:copilot": "node scripts/verify-copilot.mjs",
+    "verify:mock": "node scripts/verify-mock-interview.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
