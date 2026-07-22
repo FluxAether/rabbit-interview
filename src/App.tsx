@@ -25,8 +25,8 @@ import {
   type CopilotWindowStatus,
 } from './lib/copilotWindow'
 import { loadAppSettings } from './lib/settingsStore'
-import { loadResumeWorkspace } from './lib/resumeWorkspaceStore'
-import { useAppStore } from './stores/useAppStore'
+import { loadResumeWorkspace, persistResumeWorkspace } from './lib/resumeWorkspaceStore'
+import { selectResumeWorkspace, useAppStore } from './stores/useAppStore'
 
 export type Page = 'dashboard' | 'copilot' | 'mock' | 'resume' | 'history' | 'settings'
 
@@ -126,6 +126,38 @@ export default function App() {
       disposers.forEach((cleanup) => cleanup())
     }
   }, [floating, hydrateResumeWorkspace, loadHistory])
+
+  useEffect(() => {
+    if (floating) return
+    let timer: number | null = null
+    const schedulePersistence = () => {
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        timer = null
+        const state = useAppStore.getState()
+        if (!state.resumeHydrated) return
+        persistResumeWorkspace(selectResumeWorkspace(state))
+          .then(() => state.setResumePersistenceError(false))
+          .catch(() => state.setResumePersistenceError(true))
+      }, 300)
+    }
+    const unsubscribe = useAppStore.subscribe((state, previous) => {
+      if (
+        state.resumeHydrated === previous.resumeHydrated
+        && state.resumeOriginal === previous.resumeOriginal
+        && state.resumeOptimized === previous.resumeOptimized
+        && state.jobDescription === previous.jobDescription
+        && state.resumeSuggestions === previous.resumeSuggestions
+        && state.resumeSourceFileName === previous.resumeSourceFileName
+      ) return
+      schedulePersistence()
+    })
+    schedulePersistence()
+    return () => {
+      unsubscribe()
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [floating])
 
   useEffect(() => {
     if (floating) return

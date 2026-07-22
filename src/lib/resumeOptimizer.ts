@@ -77,8 +77,8 @@ export function normalizeLlmResumeResult(
 
   const optimizedText = normalizeResumeText(result.optimizedText)
   const normalizedSource = normalizeResumeText(sourceText)
-  // ponytail: protect verifiable literals and contacts; add source-grounded semantic
-  // validation if users still see invented claims after reviewing the draft.
+  // ponytail: protect verifiable literals here; export requires explicit review
+  // because semantic factual changes cannot be proven safely with local heuristics.
   if (optimizedText.length < normalizedSource.length * 0.5) {
     throw new Error('The LLM returned an incomplete optimized resume.')
   }
@@ -134,6 +134,50 @@ export function createEmptyResumeWorkspace(): ResumeWorkspace {
   }
 }
 
+export function mergeResumeWorkspace(
+  current: ResumeWorkspace,
+  update: Partial<ResumeWorkspace>,
+): ResumeWorkspace {
+  const next = { ...current, ...update }
+  return {
+    ...next,
+    ...matchResumeKeywords(next.optimized || next.original, next.jobDescription),
+  }
+}
+
+export function createResumeAnalysisRequestCoordinator(timeoutMs = 60_000) {
+  let current: AbortController | null = null
+  let currentTimeout: ReturnType<typeof setTimeout> | null = null
+
+  const cancel = () => {
+    if (currentTimeout !== null) clearTimeout(currentTimeout)
+    current?.abort()
+    current = null
+    currentTimeout = null
+  }
+
+  return {
+    start() {
+      cancel()
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), timeoutMs)
+      current = controller
+      currentTimeout = timeout
+      return {
+        signal: controller.signal,
+        isLatest: () => current === controller,
+        finish: () => {
+          clearTimeout(timeout)
+          if (current !== controller) return
+          current = null
+          currentTimeout = null
+        },
+      }
+    },
+    cancel,
+  }
+}
+
 export function countResumeWords(text: string): number {
   const cjk = text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu)?.length ?? 0
   const words = text
@@ -181,29 +225,4 @@ export function matchResumeKeywords(resumeText: string, jobDescription: string):
     matchedKeywords: keywords.filter((keyword) => comparableResume.includes(keyword.toLocaleLowerCase())),
     missingKeywords: keywords.filter((keyword) => !comparableResume.includes(keyword.toLocaleLowerCase())),
   }
-}
-
-export function applyResumeSuggestion(text: string, suggestion: ResumeSuggestion): {
-  text: string
-  suggestion: ResumeSuggestion
-  applied: boolean
-} {
-  if (suggestion.applied || !suggestion.replacement) return { text, suggestion, applied: false }
-  const index = text.indexOf(suggestion.replacement.before)
-  if (index < 0) return { text, suggestion, applied: false }
-  const nextText = `${text.slice(0, index)}${suggestion.replacement.after}${text.slice(index + suggestion.replacement.before.length)}`
-  return { text: nextText, suggestion: { ...suggestion, applied: true }, applied: true }
-}
-
-export function applyAllResumeSuggestions(text: string, suggestions: ResumeSuggestion[]): {
-  text: string
-  suggestions: ResumeSuggestion[]
-} {
-  let nextText = text
-  const nextSuggestions = suggestions.map((suggestion) => {
-    const result = applyResumeSuggestion(nextText, suggestion)
-    nextText = result.text
-    return result.suggestion
-  })
-  return { text: nextText, suggestions: nextSuggestions }
 }

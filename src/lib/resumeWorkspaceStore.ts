@@ -73,6 +73,15 @@ export function toPersistedResumeWorkspace(workspace: ResumeWorkspace): Omit<Res
   }
 }
 
+export function hasResumeWorkspaceContent(workspace: ResumeWorkspace): boolean {
+  return Boolean(
+    workspace.original.trim()
+    || workspace.optimized.trim()
+    || workspace.jobDescription.trim()
+    || workspace.sourceFileName,
+  )
+}
+
 export async function loadResumeWorkspace(): Promise<ResumeWorkspace> {
   return normalizeResumeWorkspace(await (await getStore()).get<unknown>('workspace'))
 }
@@ -91,4 +100,10 @@ export async function clearResumeWorkspace(): Promise<void> {
     await currentStore.delete('workspace')
     await currentStore.save()
   })
+}
+
+export async function persistResumeWorkspace(workspace: ResumeWorkspace): Promise<void> {
+  return hasResumeWorkspaceContent(workspace)
+    ? saveResumeWorkspace(workspace)
+    : clearResumeWorkspace()
 }

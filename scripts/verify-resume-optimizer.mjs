@@ -2,21 +2,25 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as mammoth from 'mammoth'
 import {
-  applyAllResumeSuggestions,
-  applyResumeSuggestion,
   countResumeWords,
+  createEmptyResumeWorkspace,
+  createResumeAnalysisRequestCoordinator,
+  mergeResumeWorkspace,
   normalizeLlmResumeResult,
   normalizeResumeText,
 } from '../src/lib/resumeOptimizer.ts'
 import { buildResumeDocxBlob, sanitizeResumeFilename } from '../src/lib/resumeDocuments.ts'
 import {
   MAX_RESUME_FILE_SIZE,
+  MAX_RESUME_TEXT_LENGTH,
   extractResumeText,
   pdfItemsToText,
   validateResumeFile,
+  validateResumeText,
 } from '../src/lib/resumeImport.ts'
 import {
   createResumeWriteQueue,
+  hasResumeWorkspaceContent,
   normalizeResumeWorkspace,
   toPersistedResumeWorkspace,
 } from '../src/lib/resumeWorkspaceStore.ts'
@@ -27,6 +31,29 @@ const unformatted = '  Alex  \r\n-  Built products   \r\n\r\n\r\nSkills  '
 const normalized = 'Alex\n• Built products\n\nSkills'
 assert.equal(normalizeResumeText(unformatted), normalized, 'normalizes whitespace and bullets')
 assert.equal(normalizeResumeText(normalized), normalized, 'normalization is idempotent')
+
+const editedWorkspace = mergeResumeWorkspace({
+  original: 'React', optimized: 'React', jobDescription: 'React Rust', suggestions: [],
+  sourceFileName: 'resume.docx', matchedKeywords: ['React'], missingKeywords: ['Rust'],
+}, { optimized: 'React Rust' })
+assert.deepEqual(editedWorkspace.missingKeywords, [], 'recomputes keyword gaps after resume edits')
+const changedJob = mergeResumeWorkspace(editedWorkspace, { jobDescription: 'Kubernetes' })
+assert.deepEqual(changedJob.missingKeywords, ['Kubernetes'], 'recomputes keyword gaps after job-description edits')
+
+const requests = createResumeAnalysisRequestCoordinator(10_000)
+const firstRequest = requests.start()
+const secondRequest = requests.start()
+assert.equal(firstRequest.signal.aborted, true, 'aborts an older resume analysis request')
+assert.equal(firstRequest.isLatest(), false, 'marks an older resume analysis request as stale')
+assert.equal(secondRequest.isLatest(), true, 'keeps the newest resume analysis request current')
+requests.cancel()
+assert.equal(secondRequest.signal.aborted, true, 'aborts the current request when the page unmounts')
+
+const timedRequests = createResumeAnalysisRequestCoordinator(0)
+const timedRequest = timedRequests.start()
+await new Promise((resolve) => setTimeout(resolve, 0))
+assert.equal(timedRequest.signal.aborted, true, 'aborts a resume analysis request after its timeout')
+timedRequest.finish()
 
 const llmAnalysis = normalizeLlmResumeResult({
   optimizedText: 'Alex Morgan\n• Led product design',
@@ -131,30 +158,12 @@ assert.throws(
   'rejects a materially truncated optimized resume',
 )
 
-const actionable = {
-  id: 'resume-test-1',
-  title: 'Direct wording',
-  description: 'Remove first-person filler.',
-  category: 'clarity',
-  replacement: { before: 'I was responsible for product design', after: 'Responsible for product design' },
-  applied: false,
-}
-const applied = applyResumeSuggestion('I was responsible for product design', actionable)
-assert.equal(applied.applied, true, 'applies an exact replacement')
-assert.match(applied.text, /^Responsible for product design/m, 'removes first-person filler without changing facts')
-
-const stale = applyResumeSuggestion('Text was edited', actionable)
-assert.equal(stale.applied, false, 'does not overwrite manually edited content')
-assert.equal(stale.text, 'Text was edited', 'keeps edited content when a suggestion is stale')
-
-const guidance = { ...actionable, id: 'resume-test-2', replacement: null }
-const allApplied = applyAllResumeSuggestions('I was responsible for product design', [actionable, guidance])
-assert.equal(allApplied.suggestions[0]?.applied, true, 'applies actionable suggestions')
-assert.equal(allApplied.suggestions[1]?.applied, false, 'leaves guidance-only suggestions pending')
-
 assert.equal(validateResumeFile({ name: 'resume.pdf', size: MAX_RESUME_FILE_SIZE }), null, 'accepts a PDF at the size limit')
 assert.equal(validateResumeFile({ name: 'resume.docx', size: MAX_RESUME_FILE_SIZE + 1 }), 'file-too-large', 'rejects files over 5 MiB')
 assert.equal(validateResumeFile({ name: 'resume.txt', size: 12 }), 'unsupported-file-type', 'rejects unsupported file types')
+assert.equal(validateResumeText('A'.repeat(MAX_RESUME_TEXT_LENGTH)), null, 'accepts resume text at the analysis limit')
+assert.equal(validateResumeText('A'.repeat(MAX_RESUME_TEXT_LENGTH + 1)), 'resume-text-too-long', 'rejects resume text beyond the analysis limit')
+assert.equal(validateResumeText('  '), 'empty-resume-text', 'rejects resume files without extractable text')
 assert.equal(
   pdfItemsToText([{ str: 'Alex Morgan', hasEOL: true }, { str: 'EXPERIENCE', hasEOL: true }, { str: 'Built products', hasEOL: false }]),
   'Alex Morgan\nEXPERIENCE\nBuilt products',
@@ -184,6 +193,8 @@ const persisted = toPersistedResumeWorkspace({
 })
 assert.equal('matchedKeywords' in persisted, false, 'does not persist derived matched keywords')
 assert.equal('missingKeywords' in persisted, false, 'does not persist derived missing keywords')
+assert.equal(hasResumeWorkspaceContent(createEmptyResumeWorkspace()), false, 'clears persistence for an empty workspace')
+assert.equal(hasResumeWorkspaceContent({ ...createEmptyResumeWorkspace(), jobDescription: 'React' }), true, 'persists a workspace containing only a job description')
 const restored = normalizeResumeWorkspace({
   original: 'Product design', optimized: 'Product design', jobDescription: 'Product design TypeScript',
   suggestions: [], sourceFileName: 'resume.docx',
@@ -202,7 +213,15 @@ await enqueue(async () => { recoveredWriteRan = true })
 assert.equal(recoveredWriteRan, true, 'continues persistence after an earlier write failure')
 
 const translations = fs.readFileSync('src/i18n/translations.ts', 'utf8')
-for (const key of ['resume.analysisComplete', 'resume.analysisError']) {
+for (const key of [
+  'resume.analysisComplete',
+  'resume.analysisError',
+  'resume.analysisTimeout',
+  'resume.factReviewConfirm',
+  'resume.factReviewRequired',
+  'resume.includedInDraft',
+  'resume.textTooLong',
+]) {
   assert.equal(translations.split(`'${key}'`).length - 1, 3, `translates ${key} in all supported UI languages`)
 }
 

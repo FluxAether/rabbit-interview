@@ -2,9 +2,8 @@ import { create } from 'zustand'
 import { SupportedLanguage } from '../i18n/types'
 import { createInitialSnapshot, type CopilotSnapshot } from '../lib/copilotSessionState'
 import {
-  applyAllResumeSuggestions,
-  applyResumeSuggestion as applySuggestionToText,
   createEmptyResumeWorkspace,
+  mergeResumeWorkspace,
   type ResumeAnalysisResult,
   type ResumeSuggestion,
   type ResumeWorkspace,
@@ -54,12 +53,12 @@ export interface AppState {
   resumeMatchedKeywords: string[]
   resumeMissingKeywords: string[]
   resumeHydrated: boolean
+  resumePersistenceError: boolean
   hydrateResumeWorkspace: (workspace: ResumeWorkspace) => void
   updateResumeWorkspace: (workspace: Partial<ResumeWorkspace>) => void
   setResumeAnalysis: (result: ResumeAnalysisResult) => void
-  applyResumeSuggestion: (id: string) => boolean
-  applyAllResumeSuggestions: () => number
   clearResumeWorkspace: () => void
+  setResumePersistenceError: (failed: boolean) => void
   
   // Mock Interview
   mockConversation: Array<{role: 'ai' | 'user', text: string}>
@@ -130,53 +129,21 @@ export const useAppStore = create<AppState>((set) => ({
   resumeMatchedKeywords: [],
   resumeMissingKeywords: [],
   resumeHydrated: false,
+  resumePersistenceError: false,
   hydrateResumeWorkspace: (workspace) => set({ ...resumeStateFromWorkspace(workspace), resumeHydrated: true }),
-  updateResumeWorkspace: (workspace) => set((state) => ({
-    resumeOriginal: workspace.original ?? state.resumeOriginal,
-    resumeOptimized: workspace.optimized ?? state.resumeOptimized,
-    jobDescription: workspace.jobDescription ?? state.jobDescription,
-    resumeSuggestions: workspace.suggestions ?? state.resumeSuggestions,
-    resumeSourceFileName: workspace.sourceFileName ?? state.resumeSourceFileName,
-    resumeMatchedKeywords: workspace.matchedKeywords ?? state.resumeMatchedKeywords,
-    resumeMissingKeywords: workspace.missingKeywords ?? state.resumeMissingKeywords,
-  })),
+  updateResumeWorkspace: (workspace) => set((state) => resumeStateFromWorkspace(
+    mergeResumeWorkspace(selectResumeWorkspace(state), workspace),
+  )),
   setResumeAnalysis: (result) => set({
     resumeOptimized: result.optimizedText,
     resumeSuggestions: result.suggestions,
     resumeMatchedKeywords: result.matchedKeywords,
     resumeMissingKeywords: result.missingKeywords,
   }),
-  applyResumeSuggestion: (id) => {
-    let applied = false
-    set((state) => {
-      const target = state.resumeSuggestions.find((suggestion) => suggestion.id === id)
-      if (!target) return state
-      const result = applySuggestionToText(state.resumeOptimized, target)
-      applied = result.applied
-      if (!applied) return state
-      return {
-        resumeOptimized: result.text,
-        resumeSuggestions: state.resumeSuggestions.map((suggestion) =>
-          suggestion.id === id ? result.suggestion : suggestion
-        ),
-      }
-    })
-    return applied
-  },
-  applyAllResumeSuggestions: () => {
-    let appliedCount = 0
-    set((state) => {
-      const result = applyAllResumeSuggestions(state.resumeOptimized, state.resumeSuggestions)
-      appliedCount = result.suggestions.filter((suggestion, index) =>
-        suggestion.applied && !state.resumeSuggestions[index]?.applied
-      ).length
-      return { resumeOptimized: result.text, resumeSuggestions: result.suggestions }
-    })
-    return appliedCount
-  },
   clearResumeWorkspace: () => {
     set(resumeStateFromWorkspace(createEmptyResumeWorkspace()))
   },
+  setResumePersistenceError: (failed) => set({ resumePersistenceError: failed }),
 
   mockConversation: [],
   mockFeedback: [],

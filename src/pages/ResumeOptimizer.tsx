@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Download, FileText, LoaderCircle, Trash2, Upload } from 'lucide-react'
 import { useDropzone, type FileRejection } from 'react-dropzone'
 import { useCurrentLanguage, useTranslation } from '../i18n'
@@ -11,14 +11,14 @@ import {
 } from '../lib/resumeImport'
 import {
   countResumeWords,
+  createResumeAnalysisRequestCoordinator,
   type ResumeSuggestionCategory,
 } from '../lib/resumeOptimizer'
 import { optimizeResumeWithLlm } from '../lib/resumeOptimizerAi'
 import {
   clearResumeWorkspace as clearSavedResumeWorkspace,
-  saveResumeWorkspace,
 } from '../lib/resumeWorkspaceStore'
-import { selectResumeWorkspace, useAppStore } from '../stores/useAppStore'
+import { useAppStore } from '../stores/useAppStore'
 
 const SAMPLE_RESUME = `Alex Morgan
 Product Designer
@@ -42,10 +42,9 @@ export default function ResumeOptimizer() {
     resumeMatchedKeywords,
     resumeMissingKeywords,
     resumeHydrated,
+    resumePersistenceError,
     updateResumeWorkspace,
     setResumeAnalysis,
-    applyResumeSuggestion,
-    applyAllResumeSuggestions,
     clearResumeWorkspace,
   } = useAppStore()
   const t = useTranslation()
@@ -54,29 +53,10 @@ export default function ResumeOptimizer() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [status, setStatus] = useState<PageStatus>(null)
-  const [persistenceError, setPersistenceError] = useState(false)
+  const [reviewedOptimizedText, setReviewedOptimizedText] = useState('')
+  const analysisRequests = useRef(createResumeAnalysisRequestCoordinator())
 
-  useEffect(() => {
-    if (!resumeHydrated) return
-    const timer = window.setTimeout(() => {
-      const workspace = selectResumeWorkspace(useAppStore.getState())
-      const hasContent = Boolean(
-        resumeOriginal.trim() || resumeOptimized.trim() || jobDescription.trim() || resumeSourceFileName,
-      )
-      const request = hasContent ? saveResumeWorkspace(workspace) : clearSavedResumeWorkspace()
-      request.then(() => setPersistenceError(false)).catch(() => setPersistenceError(true))
-    }, 300)
-    return () => window.clearTimeout(timer)
-  }, [
-    jobDescription,
-    resumeHydrated,
-    resumeMatchedKeywords,
-    resumeMissingKeywords,
-    resumeOptimized,
-    resumeOriginal,
-    resumeSourceFileName,
-    resumeSuggestions,
-  ])
+  useEffect(() => () => analysisRequests.current.cancel(), [])
 
   const validationMessage = (error: ResumeFileValidationError) => t(`resume.upload.${error}`)
 
@@ -89,6 +69,8 @@ export default function ResumeOptimizer() {
       return
     }
 
+    analysisRequests.current.cancel()
+    setIsAnalyzing(false)
     setIsParsing(true)
     setStatus(null)
     try {
@@ -101,6 +83,7 @@ export default function ResumeOptimizer() {
         matchedKeywords: [],
         missingKeywords: [],
       })
+      setReviewedOptimizedText('')
       setStatus({
         kind: result.warnings.length ? 'warning' : 'success',
         text: result.warnings.length
@@ -109,7 +92,12 @@ export default function ResumeOptimizer() {
       })
     } catch (error) {
       console.warn('Failed to import resume', error)
-      setStatus({ kind: 'error', text: t('resume.importError') })
+      setStatus({
+        kind: 'error',
+        text: t(error instanceof Error && error.message === 'resume-text-too-long'
+          ? 'resume.textTooLong'
+          : 'resume.importError'),
+      })
     } finally {
       setIsParsing(false)
     }
@@ -135,7 +123,7 @@ export default function ResumeOptimizer() {
     maxFiles: 1,
     maxSize: MAX_RESUME_FILE_SIZE,
     multiple: false,
-    disabled: isParsing || !resumeHydrated,
+    disabled: isParsing || isAnalyzing || isExporting || !resumeHydrated,
   })
 
   const runAnalysis = async (source: string) => {
@@ -143,43 +131,38 @@ export default function ResumeOptimizer() {
       setStatus({ kind: 'error', text: t('resume.missingResume') })
       return
     }
+    const request = analysisRequests.current.start()
     setIsAnalyzing(true)
+    setReviewedOptimizedText('')
     setStatus(null)
     try {
-      setResumeAnalysis(await optimizeResumeWithLlm(source, jobDescription, language))
+      const result = await optimizeResumeWithLlm(source, jobDescription, language, request.signal)
+      if (!request.isLatest()) return
+      setResumeAnalysis(result)
       setStatus({ kind: 'success', text: t('resume.analysisComplete') })
     } catch (error) {
+      if (!request.isLatest()) return
       console.warn('Failed to optimize resume with LLM', error)
-      setStatus({ kind: 'error', text: t('resume.analysisError') })
+      const key = request.signal.aborted
+        ? 'resume.analysisTimeout'
+        : error instanceof Error && error.message === 'resume-text-too-long'
+          ? 'resume.textTooLong'
+          : 'resume.analysisError'
+      setStatus({ kind: 'error', text: t(key) })
     } finally {
-      setIsAnalyzing(false)
+      const latest = request.isLatest()
+      request.finish()
+      if (latest) setIsAnalyzing(false)
     }
-  }
-
-  const handleApply = (id: string) => {
-    if (applyResumeSuggestion(id)) {
-      setStatus({ kind: 'success', text: t('resume.suggestionApplied') })
-    } else {
-      setStatus({ kind: 'error', text: t('resume.suggestionStale') })
-    }
-  }
-
-  const handleApplyAll = () => {
-    const pendingActionable = resumeSuggestions.some((suggestion) => suggestion.replacement && !suggestion.applied)
-    const count = applyAllResumeSuggestions()
-    setStatus({
-      kind: count > 0 ? 'success' : pendingActionable ? 'error' : 'warning',
-      text: count > 0
-        ? t('resume.suggestionsApplied')
-        : pendingActionable
-          ? t('resume.suggestionStale')
-          : t('resume.noActionableSuggestions'),
-    })
   }
 
   const handleExport = async () => {
     if (!resumeOptimized.trim()) {
       setStatus({ kind: 'error', text: t('resume.missingOptimized') })
+      return
+    }
+    if (reviewedOptimizedText !== resumeOptimized) {
+      setStatus({ kind: 'error', text: t('resume.factReviewRequired') })
       return
     }
     setIsExporting(true)
@@ -197,6 +180,7 @@ export default function ResumeOptimizer() {
 
   const handleClear = async () => {
     if (!window.confirm(t('resume.clearConfirm'))) return
+    setReviewedOptimizedText('')
     clearResumeWorkspace()
     try {
       await clearSavedResumeWorkspace()
@@ -215,11 +199,13 @@ export default function ResumeOptimizer() {
       matchedKeywords: [],
       missingKeywords: [],
     })
+    setReviewedOptimizedText('')
     setStatus({ kind: 'success', text: t('resume.sampleLoaded') })
   }
 
   const categoryLabel = (category: ResumeSuggestionCategory) => t(`resume.category.${category}`)
   const busy = !resumeHydrated || isParsing || isAnalyzing || isExporting
+  const factsReviewed = Boolean(resumeOptimized.trim()) && reviewedOptimizedText === resumeOptimized
 
   return (
     <div className="w-full p-8">
@@ -232,24 +218,24 @@ export default function ResumeOptimizer() {
           <button type="button" onClick={handleClear} disabled={busy} className="flex items-center gap-1 rounded-xl border px-3 py-1.5 text-sm disabled:opacity-50">
             <Trash2 className="h-4 w-4" /> {t('resume.clear')}
           </button>
-          <button type="button" onClick={handleExport} disabled={busy || !resumeOptimized.trim()} className="flex items-center gap-1 rounded-xl border px-4 py-1.5 text-sm disabled:opacity-50">
+          <button type="button" onClick={handleExport} disabled={busy || !factsReviewed} className="flex items-center gap-1 rounded-xl border px-4 py-1.5 text-sm disabled:opacity-50">
             {isExporting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} {t('resume.export')}
           </button>
         </div>
       </div>
 
-      {(status || persistenceError) && (
+      {(status || resumePersistenceError) && (
         <div
-          role={status?.kind === 'error' || persistenceError ? 'alert' : 'status'}
+          role={status?.kind === 'error' || resumePersistenceError ? 'alert' : 'status'}
           className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
-            status?.kind === 'error' || persistenceError
+            status?.kind === 'error' || resumePersistenceError
               ? 'border-red-200 bg-red-50 text-red-700'
               : status?.kind === 'warning'
                 ? 'border-amber-200 bg-amber-50 text-amber-700'
                 : 'border-emerald-200 bg-emerald-50 text-emerald-700'
           }`}
         >
-          {persistenceError ? t('resume.persistenceError') : status?.text}
+          {resumePersistenceError ? t('resume.persistenceError') : status?.text}
         </div>
       )}
 
@@ -312,11 +298,21 @@ export default function ResumeOptimizer() {
             placeholder={t('resume.optimizedPlaceholder')}
             aria-label={t('resume.optimized')}
           />
+          <label className="mt-3 flex items-start gap-2 text-xs leading-relaxed text-[#475569]">
+            <input
+              type="checkbox"
+              checked={factsReviewed}
+              disabled={busy || !resumeOptimized.trim()}
+              onChange={(event) => setReviewedOptimizedText(event.target.checked ? resumeOptimized : '')}
+              className="mt-0.5"
+            />
+            <span>{t('resume.factReviewConfirm')}</span>
+          </label>
         </section>
       </div>
 
       <section className="card mt-4 p-5">
-        <div className="flex items-center justify-between gap-4">
+        <div>
           <div>
             <div className="font-medium">{t('resume.suggestions')}</div>
             {jobDescription.trim() && (
@@ -325,23 +321,21 @@ export default function ResumeOptimizer() {
               </div>
             )}
           </div>
-          <button type="button" onClick={handleApplyAll} disabled={busy || !resumeSuggestions.some((suggestion) => suggestion.replacement && !suggestion.applied)} className="text-sm text-[#6366f1] disabled:opacity-40">{t('common.applyAll')}</button>
         </div>
         {resumeSuggestions.length === 0 ? (
           <p className="mt-4 text-sm text-[#64748b]">{t('resume.noSuggestions')}</p>
         ) : (
           <div className="mt-4 grid grid-cols-2 gap-3">
             {resumeSuggestions.map((suggestion) => (
-              <article key={suggestion.id} className={`rounded-xl border p-3 ${suggestion.applied ? 'bg-[#f8fafc] opacity-65' : 'bg-white'}`}>
+              <article key={suggestion.id} className="rounded-xl border bg-white p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-xs text-[#6366f1]">{categoryLabel(suggestion.category)}</div>
-                    <div className={suggestion.applied ? 'mt-1 text-sm font-medium line-through' : 'mt-1 text-sm font-medium'}>{suggestion.title ?? t(suggestion.titleKey ?? '')}</div>
+                    <div className="mt-1 text-sm font-medium">{suggestion.title ?? t(suggestion.titleKey ?? '')}</div>
                   </div>
-                  {!suggestion.applied && suggestion.replacement && (
-                    <button type="button" onClick={() => handleApply(suggestion.id)} className="shrink-0 rounded-lg border px-2 py-1 text-xs">{t('common.apply')}</button>
-                  )}
-                  {!suggestion.applied && !suggestion.replacement && <span className="shrink-0 text-xs text-[#b45309]">{t('resume.manualRequired')}</span>}
+                  <span className={`shrink-0 text-xs ${suggestion.applied ? 'text-[#047857]' : 'text-[#b45309]'}`}>
+                    {t(suggestion.applied ? 'resume.includedInDraft' : 'resume.manualRequired')}
+                  </span>
                 </div>
                 <p className="mt-2 text-xs leading-relaxed text-[#64748b]">{suggestion.description ?? t(suggestion.descriptionKey ?? '', suggestion.descriptionParams)}</p>
               </article>

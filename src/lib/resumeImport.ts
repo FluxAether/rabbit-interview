@@ -1,6 +1,8 @@
 export const MAX_RESUME_FILE_SIZE = 5 * 1024 * 1024
+export const MAX_RESUME_TEXT_LENGTH = 6_000
 
 export type ResumeFileValidationError = 'file-empty' | 'file-too-large' | 'unsupported-file-type'
+export type ResumeTextValidationError = 'empty-resume-text' | 'resume-text-too-long'
 
 export interface ResumeImportResult {
   text: string
@@ -11,6 +13,18 @@ export function validateResumeFile(file: Pick<File, 'name' | 'size'>): ResumeFil
   if (file.size === 0) return 'file-empty'
   if (file.size > MAX_RESUME_FILE_SIZE) return 'file-too-large'
   return /\.(?:pdf|docx)$/i.test(file.name) ? null : 'unsupported-file-type'
+}
+
+export function validateResumeText(text: string): ResumeTextValidationError | null {
+  const length = text.trim().length
+  if (length === 0) return 'empty-resume-text'
+  return length > MAX_RESUME_TEXT_LENGTH ? 'resume-text-too-long' : null
+}
+
+function resumeImportResult(text: string, warnings: string[]): ResumeImportResult {
+  const validationError = validateResumeText(text)
+  if (validationError) throw new Error(validationError)
+  return { text: text.trim(), warnings }
 }
 
 export function pdfItemsToText(items: readonly unknown[]): string {
@@ -40,19 +54,15 @@ export async function extractResumeText(file: File): Promise<ResumeImportResult>
       const content = await page.getTextContent()
       pages.push(pdfItemsToText(content.items))
     }
-    const text = pages.join('\n').trim()
-    if (!text) throw new Error('empty-resume-text')
-    return { text, warnings: [] }
+    return resumeImportResult(pages.join('\n'), [])
   }
 
   const mammoth = await import('mammoth')
   const result = await mammoth.extractRawText(
     typeof window === 'undefined' ? { buffer: Buffer.from(arrayBuffer) } : { arrayBuffer },
   )
-  const text = result.value.trim()
-  if (!text) throw new Error('empty-resume-text')
-  return {
-    text,
-    warnings: result.messages.map((message) => message.message).filter(Boolean),
-  }
+  return resumeImportResult(
+    result.value,
+    result.messages.map((message) => message.message).filter(Boolean),
+  )
 }
