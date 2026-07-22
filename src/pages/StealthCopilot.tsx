@@ -28,10 +28,10 @@ export default function StealthCopilot() {
   const [audioSettingsOpen, setAudioSettingsOpen] = useState(false)
   const running = copilot.phase === 'starting' || copilot.phase === 'listening' || copilot.phase === 'stopping'
 
-  const loadDevices = async () => {
-    const values = await invoke<string[]>('list_audio_devices').catch(() => [])
+  const loadDevices = async (preferredDevice = selectedDevice) => {
+    const values: string[] = await invoke<string[]>('list_audio_devices').catch(() => [])
     setDevices(values)
-    setSelectedDevice((current) => current || values[0] || '')
+    setSelectedDevice(values.includes(preferredDevice) ? preferredDevice : values[0] || '')
   }
 
   useEffect(() => {
@@ -42,13 +42,12 @@ export default function StealthCopilot() {
       else unsubscribeWindowStatus = cleanup
     })
     void Promise.all([
-      loadDevices(),
       invoke<AudioCapabilities>('get_audio_capabilities').then(setCapabilities),
       getCopilotWindowStatus().then(setWindowStatus),
       loadAppSettings().then((settings) => {
         setUseSystemAudio(settings.useSystemAudio ?? true)
         setUseMicrophone(settings.useMicWithSystem ?? true)
-        setSelectedDevice(settings.micDevice || '')
+        return loadDevices(settings.micDevice || '')
       }),
     ]).catch((error) => console.warn('Unable to load Copilot capabilities', error))
     return () => {

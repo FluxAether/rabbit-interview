@@ -57,6 +57,7 @@ const tauriConfig = source('src-tauri/tauri.conf.json')
 
 check(session.length > 0, 'single Copilot session host exists')
 check(panel.length > 0 && app.includes('CopilotPanel') && page.includes('CopilotPanel'), 'main and floating views share CopilotPanel')
+check(page.includes('values.includes(preferredDevice) ? preferredDevice : values[0] ||'), 'unavailable saved microphone falls back to an available device')
 check(!app.includes('startDeepgramStream') && !page.includes('startDeepgramStream'), 'views do not own STT connections')
 check(!app.includes("listen<number[]>('audio-chunk'") && !page.includes("listen<number[]>('audio-chunk'"), 'views do not own audio listeners')
 check(

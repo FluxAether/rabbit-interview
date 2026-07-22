@@ -47,6 +47,7 @@ function protectedFactCounts(text: string): Map<string, number> {
     .replace(/￥/g, '¥')
     .replace(/＄/g, '$')
     .replace(/([$€£¥])\s*([+-])\s*/g, '$2$1')
+    .replace(/(?<=\d)\s*-\s*(?=\d)/g, '–')
     .replace(/(?<=\d),(?=\d{3}(?:\D|$))/g, '')
   const numbers = [...normalizedNumbers.matchAll(
     /(?<![\p{L}\p{N}])([+-])?\s*([$€£¥])?\s*(\d[\d,]*(?:\.\d+)?)\s*(%)?/gu,

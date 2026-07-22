@@ -65,6 +65,11 @@ const formattedFullWidthNumber = normalizeLlmResumeResult({
   suggestions: [],
 }, '成果：￥２０％', '')
 assert.equal(formattedFullWidthNumber.optimizedText, '成果：¥20%', 'accepts equivalent full-width numeric formatting')
+const formattedDateRange = normalizeLlmResumeResult({
+  optimizedText: '示例公司｜产品经理｜2020 - 2024',
+  suggestions: [],
+}, '示例公司｜产品经理｜2020-2024', '')
+assert.equal(formattedDateRange.optimizedText, '示例公司｜产品经理｜2020 - 2024', 'accepts harmless date-range spacing')
 assert.throws(
   () => normalizeLlmResumeResult({ optimizedText: '', suggestions: [] }, 'Original', ''),
   'rejects an empty LLM result',
