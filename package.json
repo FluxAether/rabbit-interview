@@ -16,15 +16,18 @@
     "sign:mac": "echo 'Run: xcrun notarytool submit --keychain-profile \"AC_PASSWORD\" --wait dist/RabbitInterview.app.tar.gz'",
     "package": "tauri build",
     "verify:copilot": "node scripts/verify-copilot.mjs",
-    "verify:mock": "node scripts/verify-mock-interview.mjs"
+    "verify:mock": "node scripts/verify-mock-interview.mjs",
+    "verify:resume": "node scripts/verify-resume-optimizer.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-sql": "^2.4.0",
     "@tauri-apps/plugin-store": "^2.4.3",
+    "docx": "^9.7.1",
     "framer-motion": "^12.42.2",
     "lucide-react": "^1.25.0",
+    "mammoth": "^1.12.0",
     "pdfjs-dist": "^6.1.200",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

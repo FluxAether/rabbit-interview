@@ -24,6 +24,7 @@ import {
   type CopilotWindowStatus,
 } from './lib/copilotWindow'
 import { loadAppSettings } from './lib/settingsStore'
+import { loadResumeWorkspace } from './lib/resumeWorkspaceStore'
 import { useAppStore } from './stores/useAppStore'
 
 export type Page = 'dashboard' | 'copilot' | 'mock' | 'resume' | 'history' | 'settings'
@@ -80,6 +81,7 @@ export default function App() {
   const floating = window.location.hash === '#copilot-floating'
   const settings = useAppStore((state) => state.settings)
   const loadHistory = useAppStore((state) => state.loadHistory)
+  const hydrateResumeWorkspace = useAppStore((state) => state.hydrateResumeWorkspace)
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
   const [windowStatus, setWindowStatus] = useState<CopilotWindowStatus | null>(null)
   const floatingRef = useRef<HTMLDivElement>(null)
@@ -113,12 +115,19 @@ export default function App() {
       loadInterviewHistory().then(loadHistory).catch((error) => {
         console.warn('Failed to load interview history', error)
       })
+      loadResumeWorkspace().then(hydrateResumeWorkspace).catch((error) => {
+        console.warn('Failed to load resume workspace', error)
+        hydrateResumeWorkspace({
+          original: '', optimized: '', jobDescription: '', suggestions: [], sourceFileName: '',
+          matchedKeywords: [], missingKeywords: [],
+        })
+      })
     }
     return () => {
       cancelled = true
       disposers.forEach((cleanup) => cleanup())
     }
-  }, [floating, loadHistory])
+  }, [floating, hydrateResumeWorkspace, loadHistory])
 
   useEffect(() => {
     if (floating) return

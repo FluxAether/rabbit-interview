@@ -1,163 +1,354 @@
-import { useState } from 'react'
-import { Upload, FileText } from 'lucide-react'
-import { useDropzone } from 'react-dropzone'
-import { useAppStore } from '../stores/useAppStore'
-import * as pdfjsLib from 'pdfjs-dist'
+import { useEffect, useState } from 'react'
+import { Download, FileText, LoaderCircle, Trash2, Upload } from 'lucide-react'
+import { useDropzone, type FileRejection } from 'react-dropzone'
 import { useTranslation } from '../i18n'
+import { downloadResumeDocx } from '../lib/resumeDocuments'
+import { extractResumeText } from '../lib/resumeImport'
+import {
+  analyzeResume,
+  countResumeWords,
+  sanitizeResumeFilename,
+  validateResumeFile,
+  type ResumeFileValidationError,
+  type ResumeSuggestionCategory,
+} from '../lib/resumeOptimizer'
+import {
+  clearResumeWorkspace as clearSavedResumeWorkspace,
+  saveResumeWorkspace,
+} from '../lib/resumeWorkspaceStore'
+import { useAppStore } from '../stores/useAppStore'
 
-// Configure PDF.js worker (use CDN for simplicity in desktop build)
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+const SAMPLE_RESUME = `Alex Morgan
+Product Designer
+
+EXPERIENCE
+I was responsible for product onboarding and design system improvements.
+• Improved collaboration between design and engineering teams.
+
+SKILLS
+Product design • Figma • User research`
+
+type PageStatus = { kind: 'error' | 'success' | 'warning'; text: string } | null
 
 export default function ResumeOptimizer() {
-  const { 
-    resumeOriginal, resumeOptimized, jobDescription, resumeSuggestions, 
-    setResumeData, applyResumeSuggestion 
+  const {
+    resumeOriginal,
+    resumeOptimized,
+    jobDescription,
+    resumeSuggestions,
+    resumeSourceFileName,
+    resumeMatchedKeywords,
+    resumeMissingKeywords,
+    resumeHydrated,
+    updateResumeWorkspace,
+    setResumeAnalysis,
+    applyResumeSuggestion,
+    applyAllResumeSuggestions,
+    clearResumeWorkspace,
   } = useAppStore()
   const t = useTranslation()
-
-  const [jd, setJd] = useState(jobDescription)
+  const [isParsing, setIsParsing] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [status, setStatus] = useState<PageStatus>(null)
+  const [persistenceError, setPersistenceError] = useState(false)
 
-  const onDrop = async (acceptedFiles: File[]) => {
-    const file = acceptedFiles[0]
-    if (!file) return
-
-    try {
-      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        const arrayBuffer = await file.arrayBuffer()
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-        let fullText = ''
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i)
-          const textContent = await page.getTextContent()
-          const pageText = textContent.items.map((item: any) => item.str).join(' ')
-          fullText += pageText + '\n'
-        }
-        setResumeData(fullText.trim() || 'Extracted text from PDF.', fullText.trim(), jd)
-      } else {
-        // For other files or DOCX fallback to text read
-        const text = await file.text()
-        setResumeData(text, text, jd)
+  useEffect(() => {
+    if (!resumeHydrated) return
+    const timer = window.setTimeout(() => {
+      const workspace = {
+        original: resumeOriginal,
+        optimized: resumeOptimized,
+        jobDescription,
+        suggestions: resumeSuggestions,
+        sourceFileName: resumeSourceFileName,
+        matchedKeywords: resumeMatchedKeywords,
+        missingKeywords: resumeMissingKeywords,
       }
-    } catch (e) {
-      // Fallback
-      const text = await file.text()
-      const mock = text || `Alex Morgan\nProduct Designer\n\nEXPERIENCE\nSenior Product Designer — TechNova Inc. (2021–Present)`
-      setResumeData(mock, mock, jd)
+      const hasContent = Boolean(
+        resumeOriginal.trim() || resumeOptimized.trim() || jobDescription.trim() || resumeSourceFileName,
+      )
+      const request = hasContent ? saveResumeWorkspace(workspace) : clearSavedResumeWorkspace()
+      request.then(() => setPersistenceError(false)).catch(() => setPersistenceError(true))
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [
+    jobDescription,
+    resumeHydrated,
+    resumeMatchedKeywords,
+    resumeMissingKeywords,
+    resumeOptimized,
+    resumeOriginal,
+    resumeSourceFileName,
+    resumeSuggestions,
+  ])
+
+  const validationMessage = (error: ResumeFileValidationError) => t(`resume.upload.${error}`)
+
+  const handleAcceptedFile = async (files: File[]) => {
+    const file = files[0]
+    if (!file) return
+    const validationError = validateResumeFile(file)
+    if (validationError) {
+      setStatus({ kind: 'error', text: validationMessage(validationError) })
+      return
+    }
+
+    setIsParsing(true)
+    setStatus(null)
+    try {
+      const result = await extractResumeText(file)
+      updateResumeWorkspace({
+        original: result.text,
+        optimized: '',
+        suggestions: [],
+        sourceFileName: file.name,
+        matchedKeywords: [],
+        missingKeywords: [],
+      })
+      setStatus({
+        kind: result.warnings.length ? 'warning' : 'success',
+        text: result.warnings.length
+          ? `${t('resume.importWarning')} ${result.warnings.join('; ')}`
+          : t('resume.importSuccess'),
+      })
+    } catch (error) {
+      console.warn('Failed to import resume', error)
+      setStatus({ kind: 'error', text: t('resume.importError') })
+    } finally {
+      setIsParsing(false)
     }
   }
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
-    onDrop, 
-    accept: { 'application/pdf': ['.pdf'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] } 
+  const handleRejectedFile = (rejections: FileRejection[]) => {
+    const code = rejections[0]?.errors[0]?.code
+    const key = code === 'file-too-large'
+      ? 'resume.upload.file-too-large'
+      : code === 'too-many-files'
+        ? 'resume.upload.too-many-files'
+        : 'resume.upload.unsupported-file-type'
+    setStatus({ kind: 'error', text: t(key) })
+  }
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDropAccepted: handleAcceptedFile,
+    onDropRejected: handleRejectedFile,
+    accept: {
+      'application/pdf': ['.pdf'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+    },
+    maxFiles: 1,
+    maxSize: 5 * 1024 * 1024,
+    multiple: false,
+    disabled: isParsing || !resumeHydrated,
   })
 
-  const analyze = async () => {
+  const runAnalysis = async (source: string) => {
+    if (!source.trim()) {
+      setStatus({ kind: 'error', text: t('resume.missingResume') })
+      return
+    }
     setIsAnalyzing(true)
-    // Simulate LLM analysis (in real call Groq / OpenAI / Claude / Gemini)
-    await new Promise(r => setTimeout(r, 850))
-    
-    const optimized = resumeOriginal ? 
-      resumeOriginal.replace('Led the design', 'Led the design of the core product platform used by 100k+ customers, resulting in a 40% improvement') : 
-      'Optimized resume content...'
-    
-    setResumeData(resumeOriginal || 'Original resume text here...', optimized, jd)
+    setStatus(null)
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+    setResumeAnalysis(analyzeResume(source, jobDescription))
+    setStatus({ kind: 'success', text: t('resume.analysisComplete') })
     setIsAnalyzing(false)
   }
 
-  const applyAll = () => {
-    resumeSuggestions.forEach(s => applyResumeSuggestion(s.id))
+  const handleApply = (id: string) => {
+    if (applyResumeSuggestion(id)) {
+      setStatus({ kind: 'success', text: t('resume.suggestionApplied') })
+    } else {
+      setStatus({ kind: 'error', text: t('resume.suggestionStale') })
+    }
   }
 
-  const exportResume = () => {
-    const blob = new Blob([resumeOptimized || 'Optimized content'], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'optimized_resume.txt'
-    a.click()
+  const handleApplyAll = () => {
+    const pendingActionable = resumeSuggestions.some((suggestion) => suggestion.replacement && !suggestion.applied)
+    const count = applyAllResumeSuggestions()
+    setStatus({
+      kind: count > 0 ? 'success' : pendingActionable ? 'error' : 'warning',
+      text: count > 0
+        ? t('resume.suggestionsApplied')
+        : pendingActionable
+          ? t('resume.suggestionStale')
+          : t('resume.noActionableSuggestions'),
+    })
   }
+
+  const handleExport = async () => {
+    if (!resumeOptimized.trim()) {
+      setStatus({ kind: 'error', text: t('resume.missingOptimized') })
+      return
+    }
+    setIsExporting(true)
+    setStatus(null)
+    try {
+      await downloadResumeDocx(resumeOptimized, sanitizeResumeFilename(resumeSourceFileName))
+      setStatus({ kind: 'success', text: t('resume.exportSuccess') })
+    } catch (error) {
+      console.warn('Failed to export resume', error)
+      setStatus({ kind: 'error', text: t('resume.exportError') })
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  const handleClear = async () => {
+    if (!window.confirm(t('resume.clearConfirm'))) return
+    clearResumeWorkspace()
+    try {
+      await clearSavedResumeWorkspace()
+      setStatus({ kind: 'success', text: t('resume.cleared') })
+    } catch {
+      setStatus({ kind: 'error', text: t('resume.persistenceError') })
+    }
+  }
+
+  const useSample = () => {
+    updateResumeWorkspace({
+      original: SAMPLE_RESUME,
+      optimized: '',
+      suggestions: [],
+      sourceFileName: 'sample-resume.docx',
+      matchedKeywords: [],
+      missingKeywords: [],
+    })
+    setStatus({ kind: 'success', text: t('resume.sampleLoaded') })
+  }
+
+  const categoryLabel = (category: ResumeSuggestionCategory) => t(`resume.category.${category}`)
+  const busy = !resumeHydrated || isParsing || isAnalyzing || isExporting
 
   return (
     <div className="w-full p-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
-          <div className="text-[#6366f1] font-medium text-lg">{t('resume.title')}</div>
-          <div className="text-xs bg-[#6366f1] text-white px-2 py-px rounded">{t('resume.badge')}</div>
+          <div className="text-lg font-medium text-[#6366f1]">{t('resume.title')}</div>
+          <div className="rounded bg-[#6366f1] px-2 py-px text-xs text-white">{t('resume.badge')}</div>
         </div>
-        <button onClick={exportResume} className="text-sm px-4 py-1 border rounded-xl">{t('resume.export')}</button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        {/* Upload */}
-        <div className="card p-6">
-          <div className="flex items-center gap-2 mb-4 text-sm font-medium"><Upload className="w-4 h-4" /> {t('resume.upload.title')}</div>
-          <div {...getRootProps()} className={`border border-dashed border-[#cbd5e1] rounded-2xl h-36 flex flex-col items-center justify-center text-center cursor-pointer ${isDragActive ? 'bg-[#f8fafc]' : ''}`}>
-            <input {...getInputProps()} />
-            <FileText className="w-8 h-8 text-[#64748b] mb-2" />
-            <div className="text-sm">{isDragActive ? t('resume.upload.drop') : t('resume.upload.choose')}</div>
-            <div className="text-xs text-[#64748b]">{t('resume.upload.hint')}</div>
-          </div>
-          <button onClick={() => setResumeData('Alex Morgan\nProduct Designer\n• Led design of core product...', 'Alex Morgan\nProduct Designer\n• Led design...', jd)} className="mt-4 w-full bg-[#6366f1] text-white py-2 rounded-2xl text-sm">{t('common.useSample')}</button>
-        </div>
-
-        {/* JD */}
-        <div className="card p-6">
-          <div className="flex items-center gap-2 mb-4 text-sm font-medium"><FileText className="w-4 h-4" /> {t('resume.jd.title')}</div>
-          <textarea 
-            value={jd} 
-            onChange={e => setJd(e.target.value)}
-            className="w-full h-36 border border-[#e2e8f0] rounded-xl p-3 text-sm" 
-            placeholder={t('resume.jd.placeholder')} 
-          />
-          <button onClick={analyze} disabled={isAnalyzing} className="mt-4 w-full bg-[#6366f1] text-white py-2 rounded-2xl text-sm flex items-center justify-center gap-2 disabled:opacity-60">
-            {isAnalyzing ? t('common.analyzing') : t('common.analyze')}
+        <div className="flex gap-2">
+          <button type="button" onClick={handleClear} disabled={busy} className="flex items-center gap-1 rounded-xl border px-3 py-1.5 text-sm disabled:opacity-50">
+            <Trash2 className="h-4 w-4" /> {t('resume.clear')}
+          </button>
+          <button type="button" onClick={handleExport} disabled={busy || !resumeOptimized.trim()} className="flex items-center gap-1 rounded-xl border px-4 py-1.5 text-sm disabled:opacity-50">
+            {isExporting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} {t('resume.export')}
           </button>
         </div>
       </div>
 
-      {/* Comparison + Suggestions */}
-      <div className="grid grid-cols-2 gap-4 relative">
-        <div className="card p-5">
-          <div className="flex justify-between mb-2 text-sm">
-            <div>{t('resume.original')} <span className="text-xs bg-[#e2e8f0] px-1.5 rounded">v1</span></div>
-            <div className="text-[#64748b]">{t('resume.wordCount')}: {(resumeOriginal || '').split(' ').length}</div>
-          </div>
-          <div className="text-sm leading-relaxed text-[#334155] border p-4 rounded-xl bg-[#fafafa] whitespace-pre-wrap min-h-[160px]">
-            {resumeOriginal || t('resume.originalPlaceholder')}
-          </div>
+      {(status || persistenceError) && (
+        <div
+          role={status?.kind === 'error' || persistenceError ? 'alert' : 'status'}
+          className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
+            status?.kind === 'error' || persistenceError
+              ? 'border-red-200 bg-red-50 text-red-700'
+              : status?.kind === 'warning'
+                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          }`}
+        >
+          {persistenceError ? t('resume.persistenceError') : status?.text}
         </div>
+      )}
 
-        <div className="card p-5">
-          <div className="flex justify-between mb-2 text-sm">
-            <div>{t('resume.optimized')} <span className="text-xs bg-[#e0e7ff] px-1.5 rounded text-[#4338ca]">v2</span></div>
-            <button onClick={analyze} className="text-xs text-[#6366f1]">{t('common.reoptimize')}</button>
+      <div className="mb-4 grid grid-cols-2 gap-4">
+        <section className="card p-6">
+          <div className="mb-4 flex items-center gap-2 text-sm font-medium"><Upload className="h-4 w-4" /> {t('resume.upload.title')}</div>
+          <div {...getRootProps()} className={`flex h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-[#cbd5e1] text-center ${isDragActive ? 'bg-[#f8fafc]' : ''} ${isParsing ? 'cursor-wait opacity-60' : ''}`}>
+            <input {...getInputProps()} />
+            {isParsing ? <LoaderCircle className="mb-2 h-8 w-8 animate-spin text-[#6366f1]" /> : <FileText className="mb-2 h-8 w-8 text-[#64748b]" />}
+            <div className="text-sm">{isParsing ? t('resume.upload.parsing') : isDragActive ? t('resume.upload.drop') : t('resume.upload.choose')}</div>
+            <div className="text-xs text-[#64748b]">{resumeSourceFileName || t('resume.upload.hint')}</div>
           </div>
-          <div className="text-sm leading-relaxed border p-4 rounded-xl bg-white whitespace-pre-wrap min-h-[160px]">
-            {resumeOptimized || t('resume.optimizedPlaceholder')}
-          </div>
-        </div>
+          <button type="button" onClick={useSample} disabled={busy} className="mt-4 w-full rounded-2xl bg-[#6366f1] py-2 text-sm text-white disabled:opacity-50">{t('common.useSample')}</button>
+        </section>
 
-        {/* Floating suggestions panel matching design */}
-        {resumeSuggestions.length > 0 && (
-          <div className="absolute -right-1 top-2 bg-white border shadow rounded-2xl p-3 w-[210px] text-xs z-10">
-            <div className="font-medium mb-2 flex items-center gap-1">{t('resume.suggestions')}</div>
-            <div className="space-y-1.5">
-              {resumeSuggestions.map((s) => (
-                <div key={s.id} className="flex justify-between items-center bg-[#f8fafc] px-2 py-1 rounded">
-                  <span className={s.applied ? 'line-through opacity-50' : ''}>{s.text}</span>
-                  {!s.applied && (
-                    <button onClick={() => applyResumeSuggestion(s.id)} className="text-[10px] bg-white border px-2 py-px rounded">Apply</button>
-                  )}
-                </div>
-              ))}
-            </div>
-            <button onClick={applyAll} className="mt-2 text-[#6366f1] text-xs w-full">{t('common.applyAll')}</button>
+        <section className="card p-6">
+          <div className="mb-4 flex items-center justify-between text-sm font-medium">
+            <span className="flex items-center gap-2"><FileText className="h-4 w-4" /> {t('resume.jd.title')}</span>
+            <span className="text-xs font-normal text-[#64748b]">{jobDescription.length}/5000</span>
           </div>
-        )}
+          <textarea
+            value={jobDescription}
+            maxLength={5000}
+            onChange={(event) => updateResumeWorkspace({ jobDescription: event.target.value })}
+            className="h-36 w-full rounded-xl border border-[#e2e8f0] p-3 text-sm"
+            placeholder={t('resume.jd.placeholder')}
+          />
+          <button type="button" onClick={() => runAnalysis(resumeOriginal)} disabled={busy || !resumeOriginal.trim()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6366f1] py-2 text-sm text-white disabled:opacity-50">
+            {isAnalyzing && <LoaderCircle className="h-4 w-4 animate-spin" />}
+            {isAnalyzing ? t('common.analyzing') : t('common.analyze')}
+          </button>
+        </section>
       </div>
 
-      <div className="text-center mt-5 text-xs text-[#64748b]">{t('resume.confidential')}</div>
+      <div className="grid grid-cols-2 gap-4">
+        <section className="card p-5">
+          <div className="mb-2 flex justify-between text-sm">
+            <div>{t('resume.original')} <span className="rounded bg-[#e2e8f0] px-1.5 text-xs">v1</span></div>
+            <div className="text-[#64748b]">{t('resume.wordCount')}: {countResumeWords(resumeOriginal)}</div>
+          </div>
+          <div className="max-h-[360px] min-h-[260px] overflow-auto whitespace-pre-wrap rounded-xl border bg-[#fafafa] p-4 text-sm leading-relaxed text-[#334155]">
+            {resumeOriginal || t('resume.originalPlaceholder')}
+          </div>
+        </section>
+
+        <section className="card p-5">
+          <div className="mb-2 flex justify-between text-sm">
+            <div>{t('resume.optimized')} <span className="rounded bg-[#e0e7ff] px-1.5 text-xs text-[#4338ca]">v2</span></div>
+            <div className="flex items-center gap-3">
+              <span className="text-[#64748b]">{t('resume.wordCount')}: {countResumeWords(resumeOptimized)}</span>
+              <button type="button" onClick={() => runAnalysis(resumeOptimized || resumeOriginal)} disabled={busy || !(resumeOptimized || resumeOriginal).trim()} className="text-xs text-[#6366f1] disabled:opacity-40">{t('common.reoptimize')}</button>
+            </div>
+          </div>
+          <textarea
+            value={resumeOptimized}
+            onChange={(event) => updateResumeWorkspace({ optimized: event.target.value })}
+            className="min-h-[260px] w-full resize-y rounded-xl border bg-white p-4 text-sm leading-relaxed"
+            placeholder={t('resume.optimizedPlaceholder')}
+            aria-label={t('resume.optimized')}
+          />
+        </section>
+      </div>
+
+      <section className="card mt-4 p-5">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="font-medium">{t('resume.suggestions')}</div>
+            {jobDescription.trim() && (
+              <div className="mt-1 text-xs text-[#64748b]">
+                {t('resume.keywordMatch')}: {resumeMatchedKeywords.length} · {t('resume.keywordMissing')}: {resumeMissingKeywords.length}
+              </div>
+            )}
+          </div>
+          <button type="button" onClick={handleApplyAll} disabled={busy || !resumeSuggestions.some((suggestion) => suggestion.replacement && !suggestion.applied)} className="text-sm text-[#6366f1] disabled:opacity-40">{t('common.applyAll')}</button>
+        </div>
+        {resumeSuggestions.length === 0 ? (
+          <p className="mt-4 text-sm text-[#64748b]">{t('resume.noSuggestions')}</p>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            {resumeSuggestions.map((suggestion) => (
+              <article key={suggestion.id} className={`rounded-xl border p-3 ${suggestion.applied ? 'bg-[#f8fafc] opacity-65' : 'bg-white'}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs text-[#6366f1]">{categoryLabel(suggestion.category)}</div>
+                    <div className={suggestion.applied ? 'mt-1 text-sm font-medium line-through' : 'mt-1 text-sm font-medium'}>{suggestion.title}</div>
+                  </div>
+                  {!suggestion.applied && suggestion.replacement && (
+                    <button type="button" onClick={() => handleApply(suggestion.id)} className="shrink-0 rounded-lg border px-2 py-1 text-xs">{t('common.apply')}</button>
+                  )}
+                  {!suggestion.applied && !suggestion.replacement && <span className="shrink-0 text-xs text-[#b45309]">{t('resume.manualRequired')}</span>}
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-[#64748b]">{suggestion.description}</p>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div className="mt-5 text-center text-xs text-[#64748b]">{t('resume.confidential')}</div>
     </div>
   )
 }
