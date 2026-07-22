@@ -1,16 +1,42 @@
-import { ArrowUp, Users, TrendingUp, Briefcase, Rocket } from 'lucide-react'
-
-interface DashboardProps {
-  onLaunchCopilot: () => void
-}
-
+import { ArrowDown, ArrowUp, Users, TrendingUp, ClipboardCheck, Rocket } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
+import { computeDashboardStats } from '../lib/dashboardStats'
 
-export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
+interface DashboardProps {
+  onLaunchCopilot: () => void
+  onViewHistory: () => void
+}
+
+function formatSigned(value: number, unit: string) {
+  const sign = value > 0 ? '+' : ''
+  return `${sign}${value}${unit}`
+}
+
+function DeltaBadge({ value, unit }: { value: number | null; unit: string }) {
+  if (value == null) {
+    return <div className="text-[10px] text-[#94a3b8]">—</div>
+  }
+
+  const positive = value >= 0
+  const Icon = positive ? ArrowUp : ArrowDown
+  return (
+    <div
+      className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded ${
+        positive ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'
+      }`}
+    >
+      <Icon className="w-3 h-3 mr-0.5" />
+      {formatSigned(value, unit)}
+    </div>
+  )
+}
+
+export default function Dashboard({ onLaunchCopilot, onViewHistory }: DashboardProps) {
   const { history } = useAppStore()
   const t = useTranslation()
+  const stats = computeDashboardStats(history)
 
   const launch = async () => {
     try {
@@ -51,12 +77,10 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
               <div className="flex items-center gap-2 text-[#64748b] text-sm">
                 <Users className="w-4 h-4" /> {t('dashboard.stat.interviews')}
               </div>
-              <div className="text-[42px] font-semibold tracking-[-1.5px] leading-none mt-1">24</div>
+              <div className="text-[42px] font-semibold tracking-[-1.5px] leading-none mt-1">{stats.interviewCount}</div>
             </div>
             <div className="text-right">
-              <div className="inline-flex items-center text-emerald-600 text-xs font-medium bg-emerald-50 px-2 py-0.5 rounded">
-                <ArrowUp className="w-3 h-3 mr-0.5" /> 18%
-              </div>
+              <DeltaBadge value={stats.interviewDeltaPct} unit="%" />
               <div className="text-[10px] text-[#64748b] mt-1">{t('dashboard.vsLastMonth')}</div>
             </div>
           </div>
@@ -68,13 +92,13 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
               <div className="flex items-center gap-2 text-[#64748b] text-sm">
                 <TrendingUp className="w-4 h-4" /> {t('dashboard.stat.score')}
               </div>
-              <div className="text-[42px] font-semibold tracking-[-1.5px] leading-none mt-1">82</div>
-              <div className="text-xs text-[#64748b]">/100</div>
+              <div className="text-[42px] font-semibold tracking-[-1.5px] leading-none mt-1">
+                {stats.averageScore == null ? '—' : stats.averageScore}
+              </div>
+              {stats.averageScore != null && <div className="text-xs text-[#64748b]">/100</div>}
             </div>
             <div className="text-right">
-              <div className="inline-flex items-center text-emerald-600 text-xs font-medium bg-emerald-50 px-2 py-0.5 rounded">
-                <ArrowUp className="w-3 h-3 mr-0.5" /> 8 pts
-              </div>
+              <DeltaBadge value={stats.scoreDeltaPts} unit=" pts" />
               <div className="text-[10px] text-[#64748b] mt-1">{t('dashboard.vsLastMonth')}</div>
             </div>
           </div>
@@ -84,14 +108,12 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2 text-[#64748b] text-sm">
-                <Briefcase className="w-4 h-4" /> {t('dashboard.stat.offers')}
+                <ClipboardCheck className="w-4 h-4" /> {t('dashboard.stat.scored')}
               </div>
-              <div className="text-[42px] font-semibold tracking-[-1.5px] leading-none mt-1">3</div>
+              <div className="text-[42px] font-semibold tracking-[-1.5px] leading-none mt-1">{stats.scoredCount}</div>
             </div>
             <div className="text-right">
-              <div className="inline-flex items-center text-emerald-600 text-xs font-medium bg-emerald-50 px-2 py-0.5 rounded">
-                <ArrowUp className="w-3 h-3 mr-0.5" /> 50%
-              </div>
+              <DeltaBadge value={stats.scoredDeltaPct} unit="%" />
               <div className="text-[10px] text-[#64748b] mt-1">{t('dashboard.vsLastMonth')}</div>
             </div>
           </div>
@@ -132,15 +154,15 @@ export default function Dashboard({ onLaunchCopilot }: DashboardProps) {
       <div>
         <div className="flex items-center justify-between mb-3 px-1">
           <div className="font-semibold">{t('dashboard.recentActivity')}</div>
-          <button className="text-xs text-[#6366f1] hover:underline" onClick={() => window.location.hash = '#history'}>{t('dashboard.viewAllHistory')}</button>
+          <button className="text-xs text-[#6366f1] hover:underline" onClick={onViewHistory}>{t('dashboard.viewAllHistory')}</button>
         </div>
         
         {history.length > 0 ? (
           <div className="space-y-2">
             {history.slice(0, 3).map((item, idx) => (
-              <div key={idx} className="card flex items-center px-4 py-3 text-sm">
+              <div key={item.id ?? idx} className="card flex items-center px-4 py-3 text-sm">
                 <div className="flex-1">{item.date} — {item.role} @ {item.company}</div>
-                <div className="font-semibold text-[#6366f1]">{item.score}</div>
+                <div className="font-semibold text-[#6366f1]">{item.score ?? '—'}</div>
               </div>
             ))}
           </div>

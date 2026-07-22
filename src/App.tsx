@@ -167,7 +167,7 @@ export default function App() {
       case 'resume': return <ResumeOptimizer />
       case 'history': return <History />
       case 'settings': return <Settings />
-      default: return <Dashboard onLaunchCopilot={() => setCurrentPage('copilot')} />
+      default: return <Dashboard onLaunchCopilot={() => setCurrentPage('copilot')} onViewHistory={() => setCurrentPage('history')} />
     }
   }
 
