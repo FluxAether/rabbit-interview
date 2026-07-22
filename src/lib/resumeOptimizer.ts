@@ -36,23 +36,29 @@ export interface ResumeWorkspace {
 
 const RESUME_SUGGESTION_CATEGORIES: ResumeSuggestionCategory[] = ['format', 'clarity', 'impact', 'keywords']
 
-const NEUTRAL_EDITOR_TOKENS = new Set([
-  ...'a an and are as at by for from in into is of on or the to using via with'.split(' '),
-  ...'achievements certifications competencies contact core education employment experience included mainly professional profile projects skills summary technical work'.split(' '),
-  ...'工作经历教育技能项目个人总结简介证书联系方式核心能力的与和及并在通过使用'.split(''),
-])
-const OMITTABLE_EDITOR_TOKENS = new Set([
-  ...NEUTRAL_EDITOR_TOKENS,
-  ...'i my responsible responsibilities was were included mainly'.split(' '),
-  ...'负责本人主要曾经相关'.split(''),
-])
-
-function resumeTokenCounts(text: string): Map<string, number> {
-  const tokens = text.toLocaleLowerCase().match(
-    /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|\p{Script=Latin}[\p{Script=Latin}\p{N}+#]*(?:[.-][\p{Script=Latin}\p{N}+#]+)*|\p{N}+(?:[.,]\p{N}+)?/gu,
-  ) ?? []
+function protectedFactCounts(text: string): Map<string, number> {
+  const normalizedNumbers = text
+    .replace(/[０-９]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0))
+    .replace(/，/g, ',')
+    .replace(/．/g, '.')
+    .replace(/％/g, '%')
+    .replace(/[＋]/g, '+')
+    .replace(/[－−]/g, '-')
+    .replace(/￥/g, '¥')
+    .replace(/＄/g, '$')
+    .replace(/([$€£¥])\s*([+-])\s*/g, '$2$1')
+    .replace(/(?<=\d),(?=\d{3}(?:\D|$))/g, '')
+  const numbers = [...normalizedNumbers.matchAll(
+    /(?<![\p{L}\p{N}])([+-])?\s*([$€£¥])?\s*(\d[\d,]*(?:\.\d+)?)\s*(%)?/gu,
+  )].map((match) => `number:${match[1] ?? ''}${match[2] ?? ''}${match[3].replace(/,/g, '.')}${match[4] ?? ''}`)
+  const facts = [
+    ...numbers,
+    ...(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []).map((value) => `email:${value.toLocaleLowerCase()}`),
+    ...(text.match(/(?:(?:https?:\/\/|www\.)\S+|(?:[a-z0-9-]+\.)+[a-z]{2,24}(?:[/?#]\S*)?)/gi) ?? [])
+      .map((value) => `url:${value.replace(/[)\],.;:!?，。]+$/, '').toLocaleLowerCase()}`),
+  ]
   const counts = new Map<string, number>()
-  for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1)
+  for (const fact of facts) counts.set(fact, (counts.get(fact) ?? 0) + 1)
   return counts
 }
 
@@ -70,23 +76,19 @@ export function normalizeLlmResumeResult(
 
   const optimizedText = normalizeResumeText(result.optimizedText)
   const normalizedSource = normalizeResumeText(sourceText)
-  // ponytail: lexical preservation catches added/removed facts, not semantic repurposing;
-  // require source-grounded NLI or user-approved diffs if stronger guarantees become necessary.
+  // ponytail: protect verifiable literals and contacts; add source-grounded semantic
+  // validation if users still see invented claims after reviewing the draft.
   if (optimizedText.length < normalizedSource.length * 0.5) {
     throw new Error('The LLM returned an incomplete optimized resume.')
   }
-  const sourceTokens = resumeTokenCounts(normalizedSource)
-  const optimizedTokens = resumeTokenCounts(optimizedText)
-  const changedFact = [...new Set([...sourceTokens.keys(), ...optimizedTokens.keys()])].find((token) => {
-    const sourceCount = sourceTokens.get(token) ?? 0
-    const optimizedCount = optimizedTokens.get(token) ?? 0
-    return optimizedCount > sourceCount
-      ? !NEUTRAL_EDITOR_TOKENS.has(token)
-      : optimizedCount < sourceCount && !OMITTABLE_EDITOR_TOKENS.has(token)
-  })
-  if (changedFact) {
-    throw new Error('The LLM changed unsupported factual content.')
+  const sourceFacts = protectedFactCounts(normalizedSource)
+  const optimizedFacts = protectedFactCounts(optimizedText)
+  if ([...new Set([...sourceFacts.keys(), ...optimizedFacts.keys()])].some((fact) =>
+    sourceFacts.get(fact) !== optimizedFacts.get(fact)
+  )) {
+    throw new Error('The LLM changed protected factual content.')
   }
+  const keywordMatch = matchResumeKeywords(optimizedText, jobDescription)
 
   const suggestions = result.suggestions
     .slice(0, 12)
@@ -110,7 +112,7 @@ export function normalizeLlmResumeResult(
       }
     })
 
-  return { optimizedText, suggestions, ...matchResumeKeywords(optimizedText, jobDescription) }
+  return { optimizedText, suggestions, ...keywordMatch }
 }
 
 const ENGLISH_STOPWORDS = new Set([

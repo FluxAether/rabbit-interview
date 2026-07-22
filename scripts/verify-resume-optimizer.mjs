@@ -50,25 +50,72 @@ assert.equal(llmAnalysis.suggestions[0]?.title, 'Improved formatting', 'keeps LL
 assert.equal(llmAnalysis.suggestions[0]?.applied, true, 'marks changes already included by the LLM as applied')
 assert.equal(llmAnalysis.suggestions[1]?.applied, false, 'leaves factual gaps for manual input')
 assert.ok(llmAnalysis.missingKeywords.some((keyword) => keyword.toLowerCase() === 'typescript'), 'derives keyword gaps locally')
+const faithfulRewrite = normalizeLlmResumeResult({
+  optimizedText: 'Contributed to product onboarding',
+  suggestions: [],
+}, 'Responsible for product onboarding', 'Candidates contributed to product onboarding')
+assert.equal(faithfulRewrite.optimizedText, 'Contributed to product onboarding', 'accepts a faithful wording improvement')
+const formattedNumber = normalizeLlmResumeResult({
+  optimizedText: 'Supported 1000 users',
+  suggestions: [],
+}, 'Served 1,000 users', '')
+assert.equal(formattedNumber.optimizedText, 'Supported 1000 users', 'accepts harmless thousands-separator formatting')
+const formattedFullWidthNumber = normalizeLlmResumeResult({
+  optimizedText: '成果：¥20%',
+  suggestions: [],
+}, '成果：￥２０％', '')
+assert.equal(formattedFullWidthNumber.optimizedText, '成果：¥20%', 'accepts equivalent full-width numeric formatting')
 assert.throws(
   () => normalizeLlmResumeResult({ optimizedText: '', suggestions: [] }, 'Original', ''),
   'rejects an empty LLM result',
 )
 assert.throws(
   () => normalizeLlmResumeResult({ optimizedText: 'Increased revenue by 40%', suggestions: [] }, 'Improved revenue', ''),
-  'rejects factual tokens not present in the source resume',
+  'rejects numeric facts not present in the source resume',
 )
 assert.throws(
-  () => normalizeLlmResumeResult({ optimizedText: 'Kubernetes product design', suggestions: [] }, 'Product design', ''),
-  'rejects invented non-numeric skills',
+  () => normalizeLlmResumeResult({ optimizedText: 'Improved revenue', suggestions: [] }, 'Improved revenue by 20%', ''),
+  'rejects removal of a protected numeric fact',
 )
 assert.throws(
-  () => normalizeLlmResumeResult({ optimizedText: 'Responsible for Python project', suggestions: [] }, 'Python project', ''),
-  'rejects an invented English responsibility',
+  () => normalizeLlmResumeResult({ optimizedText: 'Variance: +20%', suggestions: [] }, 'Variance: -20%', ''),
+  'rejects a changed numeric sign',
 )
 assert.throws(
-  () => normalizeLlmResumeResult({ optimizedText: '负责支付系统项目', suggestions: [] }, '支付系统项目', ''),
-  'rejects an invented Chinese responsibility',
+  () => normalizeLlmResumeResult({ optimizedText: 'Score: 5.3', suggestions: [] }, 'Score: 3.5', ''),
+  'rejects reordered decimal digits',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'Score: 35', suggestions: [] }, 'Score: 3,5', ''),
+  'rejects collapsing a decimal comma into an integer',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'Impact: +$20', suggestions: [] }, 'Impact: -$20', ''),
+  'rejects a changed sign before currency',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'Budget: € 20', suggestions: [] }, 'Budget: $ 20', ''),
+  'rejects a spaced currency change',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'Growth: 20', suggestions: [] }, 'Growth: 20 %', ''),
+  'rejects removal of a spaced percent sign',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: '成果：€２０％', suggestions: [] }, '成果：¥２０％', ''),
+  'rejects a changed currency around full-width digits',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'linkedin.com/in/sam', suggestions: [] }, 'linkedin.com/in/alex', ''),
+  'rejects a changed bare profile URL',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'portfolio.dev?ref=two', suggestions: [] }, 'portfolio.dev?ref=one', ''),
+  'rejects a changed bare-domain query',
+)
+assert.throws(
+  () => normalizeLlmResumeResult({ optimizedText: 'sam@example.com', suggestions: [] }, 'alex@example.com', ''),
+  'rejects a changed email address',
 )
 assert.throws(
   () => normalizeLlmResumeResult({ optimizedText: 'Improved revenue' }, 'Improved revenue', ''),

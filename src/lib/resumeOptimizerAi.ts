@@ -15,7 +15,7 @@ export async function optimizeResumeWithLlm(
 Requirements:
 - Return the complete optimized resume as plain text with clear section headings and bullet points.
 - Keep the resume in its original language.
-- Preserve every name, domain term, factual verb, and number exactly; only remove filler, reorder existing wording, and improve formatting.
+- Preserve every factual claim, name, domain term, and number; improve phrasing without changing its meaning.
 - Use job-description keywords only when the resume already supports them.
 - Suggestions must use ${outputLanguage}.
 - Set requiresUserInput to false for changes already included in optimizedText.
