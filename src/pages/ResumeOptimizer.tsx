@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Download, FileText, LoaderCircle, Trash2, Upload } from 'lucide-react'
 import { useDropzone, type FileRejection } from 'react-dropzone'
-import { useCurrentLanguage, useTranslation } from '../i18n'
+import { useTranslation } from '../i18n'
 import { downloadResumeDocx, sanitizeResumeFilename } from '../lib/resumeDocuments'
 import {
   MAX_RESUME_FILE_SIZE,
@@ -49,7 +49,6 @@ export default function ResumeOptimizer() {
     clearResumeWorkspace,
   } = useAppStore()
   const t = useTranslation()
-  const language = useCurrentLanguage()
   const [isParsing, setIsParsing] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
@@ -146,7 +145,7 @@ export default function ResumeOptimizer() {
     setIsAnalyzing(true)
     setStatus(null)
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
-    setResumeAnalysis(analyzeResume(source, jobDescription, language))
+    setResumeAnalysis(analyzeResume(source, jobDescription))
     setStatus({ kind: 'success', text: t('resume.analysisComplete') })
     setIsAnalyzing(false)
   }
@@ -329,14 +328,14 @@ export default function ResumeOptimizer() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-xs text-[#6366f1]">{categoryLabel(suggestion.category)}</div>
-                    <div className={suggestion.applied ? 'mt-1 text-sm font-medium line-through' : 'mt-1 text-sm font-medium'}>{suggestion.title}</div>
+                    <div className={suggestion.applied ? 'mt-1 text-sm font-medium line-through' : 'mt-1 text-sm font-medium'}>{t(suggestion.titleKey)}</div>
                   </div>
                   {!suggestion.applied && suggestion.replacement && (
                     <button type="button" onClick={() => handleApply(suggestion.id)} className="shrink-0 rounded-lg border px-2 py-1 text-xs">{t('common.apply')}</button>
                   )}
                   {!suggestion.applied && !suggestion.replacement && <span className="shrink-0 text-xs text-[#b45309]">{t('resume.manualRequired')}</span>}
                 </div>
-                <p className="mt-2 text-xs leading-relaxed text-[#64748b]">{suggestion.description}</p>
+                <p className="mt-2 text-xs leading-relaxed text-[#64748b]">{t(suggestion.descriptionKey, suggestion.descriptionParams)}</p>
               </article>
             ))}
           </div>

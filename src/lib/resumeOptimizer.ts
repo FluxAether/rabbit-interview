@@ -1,5 +1,4 @@
 export type ResumeSuggestionCategory = 'format' | 'clarity' | 'impact' | 'keywords'
-export type ResumeAnalysisLanguage = 'zh-CN' | 'zh-TW' | 'en-US'
 
 export interface ResumeReplacement {
   before: string
@@ -8,8 +7,9 @@ export interface ResumeReplacement {
 
 export interface ResumeSuggestion {
   id: string
-  title: string
-  description: string
+  titleKey: string
+  descriptionKey: string
+  descriptionParams?: Record<string, string | number>
   category: ResumeSuggestionCategory
   replacement: ResumeReplacement | null
   applied: boolean
@@ -94,52 +94,20 @@ function excerpt(text: string, max = 72): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
 }
 
-function getRuleCopy(language: ResumeAnalysisLanguage) {
-  if (language === 'en-US') return {
-    formatTitle: 'Formatting normalized',
-    formatDescription: 'Whitespace, line breaks, and bullet markers were normalized.',
-    clarityTitle: 'Remove first-person filler',
-    clarityDescription: (line: string) => `Rewrite “${excerpt(line)}” as a more direct resume statement.`,
-    impactTitle: 'Add a verifiable outcome',
-    impactDescription: (line: string) => `“${excerpt(line)}” has no verifiable scale, efficiency, or outcome. Add only factual details.`,
-    longTitle: 'Split a long statement',
-    longDescription: (line: string) => `“${excerpt(line)}” is dense. Split it into shorter bullets manually.`,
-    keywordTitle: 'Review job keywords',
-    keywordDescription: (keywords: string[]) => `Not found from the JD: ${keywords.join(', ')}. Add them only when supported by your experience.`,
-  }
-  if (language === 'zh-TW') return {
-    formatTitle: '已規範文字格式',
-    formatDescription: '已統一空白、換行和項目符號。',
-    clarityTitle: '精簡第一人稱表達',
-    clarityDescription: (line: string) => `將「${excerpt(line)}」改為更直接的履歷表達。`,
-    impactTitle: '補充可驗證成果',
-    impactDescription: (line: string) => `「${excerpt(line)}」缺少可驗證的規模、效率或結果，請按真實情況手動補充。`,
-    longTitle: '拆分過長表述',
-    longDescription: (line: string) => `「${excerpt(line)}」資訊較密集，建議手動拆分為更短的項目符號。`,
-    keywordTitle: '核對職缺關鍵字',
-    keywordDescription: (keywords: string[]) => `JD 中尚未出現：${keywords.join('、')}。僅在符合真實經歷時手動補充。`,
-  }
+export function matchResumeKeywords(resumeText: string, jobDescription: string): {
+  matchedKeywords: string[]
+  missingKeywords: string[]
+} {
+  const keywords = extractKeywords(jobDescription)
+  const comparableResume = resumeText.toLocaleLowerCase()
   return {
-    formatTitle: '已规范文本格式',
-    formatDescription: '已统一空白、换行和项目符号。',
-    clarityTitle: '精简第一人称表达',
-    clarityDescription: (line: string) => `将“${excerpt(line)}”改为更直接的简历表达。`,
-    impactTitle: '补充可验证成果',
-    impactDescription: (line: string) => `“${excerpt(line)}”缺少可验证的规模、效率或结果，请按真实情况手动补充。`,
-    longTitle: '拆分过长表述',
-    longDescription: (line: string) => `“${excerpt(line)}”信息较密集，建议手动拆分为更短的项目符号。`,
-    keywordTitle: '核对职位关键词',
-    keywordDescription: (keywords: string[]) => `JD 中尚未出现：${keywords.join('、')}。仅在与你的真实经历相符时手动补充。`,
+    matchedKeywords: keywords.filter((keyword) => comparableResume.includes(keyword.toLocaleLowerCase())),
+    missingKeywords: keywords.filter((keyword) => !comparableResume.includes(keyword.toLocaleLowerCase())),
   }
 }
 
-export function analyzeResume(
-  sourceText: string,
-  jobDescription: string,
-  language: ResumeAnalysisLanguage = 'zh-CN',
-): ResumeAnalysisResult {
+export function analyzeResume(sourceText: string, jobDescription: string): ResumeAnalysisResult {
   const optimizedText = normalizeResumeText(sourceText)
-  const copy = getRuleCopy(language)
   const suggestions: ResumeSuggestion[] = []
   let sequence = 0
   const add = (suggestion: Omit<ResumeSuggestion, 'id'>) => {
@@ -148,8 +116,8 @@ export function analyzeResume(
 
   if (optimizedText !== sourceText.trim().replace(/\r\n?/g, '\n')) {
     add({
-      title: copy.formatTitle,
-      description: copy.formatDescription,
+      titleKey: 'resume.rule.format.title',
+      descriptionKey: 'resume.rule.format.description',
       category: 'format',
       replacement: null,
       applied: true,
@@ -166,8 +134,9 @@ export function analyzeResume(
     for (const [pattern, replacement] of safePatterns) {
       if (!pattern.test(line)) continue
       add({
-        title: copy.clarityTitle,
-        description: copy.clarityDescription(line),
+        titleKey: 'resume.rule.clarity.title',
+        descriptionKey: 'resume.rule.clarity.description',
+        descriptionParams: { text: excerpt(line) },
         category: 'clarity',
         replacement: { before: line, after: line.replace(pattern, replacement) },
         applied: false,
@@ -178,8 +147,9 @@ export function analyzeResume(
 
   for (const line of lines.filter((line) => IMPACT_CUES.test(line) && !METRIC_CUES.test(line)).slice(0, 3)) {
     add({
-      title: copy.impactTitle,
-      description: copy.impactDescription(line),
+      titleKey: 'resume.rule.impact.title',
+      descriptionKey: 'resume.rule.impact.description',
+      descriptionParams: { text: excerpt(line) },
       category: 'impact',
       replacement: null,
       applied: false,
@@ -188,22 +158,21 @@ export function analyzeResume(
 
   for (const line of lines.filter((line) => countResumeWords(line) > 45).slice(0, 2)) {
     add({
-      title: copy.longTitle,
-      description: copy.longDescription(line),
+      titleKey: 'resume.rule.long.title',
+      descriptionKey: 'resume.rule.long.description',
+      descriptionParams: { text: excerpt(line) },
       category: 'clarity',
       replacement: null,
       applied: false,
     })
   }
 
-  const keywords = extractKeywords(jobDescription)
-  const comparableResume = optimizedText.toLocaleLowerCase()
-  const matchedKeywords = keywords.filter((keyword) => comparableResume.includes(keyword.toLocaleLowerCase()))
-  const missingKeywords = keywords.filter((keyword) => !comparableResume.includes(keyword.toLocaleLowerCase()))
+  const { matchedKeywords, missingKeywords } = matchResumeKeywords(optimizedText, jobDescription)
   if (missingKeywords.length > 0) {
     add({
-      title: copy.keywordTitle,
-      description: copy.keywordDescription(missingKeywords.slice(0, 6)),
+      titleKey: 'resume.rule.keywords.title',
+      descriptionKey: 'resume.rule.keywords.description',
+      descriptionParams: { keywords: missingKeywords.slice(0, 6).join(', ') },
       category: 'keywords',
       replacement: null,
       applied: false,

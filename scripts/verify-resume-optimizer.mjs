@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import * as mammoth from 'mammoth'
 import {
   analyzeResume,
@@ -16,6 +17,7 @@ import {
 } from '../src/lib/resumeImport.ts'
 import {
   createResumeWriteQueue,
+  normalizeResumeWorkspace,
   toPersistedResumeWorkspace,
 } from '../src/lib/resumeWorkspaceStore.ts'
 
@@ -29,17 +31,12 @@ assert.equal(normalizeResumeText(normalized), normalized, 'normalization is idem
 const analysis = analyzeResume(
   'I was responsible for product design\n• Improved onboarding',
   'Product design, TypeScript and 用户研究',
-  'en-US',
 )
-assert.doesNotMatch(analysis.suggestions.map((suggestion) => suggestion.title).join(''), /[\u3400-\u9fff]/, 'localizes English suggestion titles')
-assert.match(analysis.suggestions.find((suggestion) => suggestion.category === 'keywords')?.description ?? '', /^Not found from the JD:/, 'localizes English suggestion guidance')
+assert.ok(analysis.suggestions.every((suggestion) => suggestion.titleKey.startsWith('resume.rule.')), 'returns structured suggestion message keys')
 assert.equal(analysis.optimizedText.includes('TypeScript'), false, 'never invents missing JD keywords')
 assert.ok(analysis.matchedKeywords.some((keyword) => keyword.toLowerCase() === 'product'), 'reports matched JD keywords')
 assert.ok(analysis.missingKeywords.some((keyword) => keyword.toLowerCase() === 'typescript'), 'reports missing English JD keywords')
 assert.ok(analysis.missingKeywords.includes('用户研究'), 'reports missing Chinese JD keywords')
-
-const chineseAnalysis = analyzeResume('本人负责产品设计', '用户研究', 'zh-CN')
-assert.match(chineseAnalysis.suggestions[0]?.title ?? '', /[\u3400-\u9fff]/, 'localizes Chinese suggestions')
 
 const actionable = analysis.suggestions.find((suggestion) => suggestion.replacement)
 assert.ok(actionable, 'creates a safe actionable suggestion')
@@ -86,11 +83,21 @@ const persisted = toPersistedResumeWorkspace({
 })
 assert.equal('matchedKeywords' in persisted, false, 'does not persist derived matched keywords')
 assert.equal('missingKeywords' in persisted, false, 'does not persist derived missing keywords')
+const restored = normalizeResumeWorkspace({
+  original: 'Product design', optimized: 'Product design', jobDescription: 'Product design TypeScript',
+  suggestions: [], sourceFileName: 'resume.docx',
+})
+assert.ok(restored.missingKeywords.some((keyword) => keyword.toLowerCase() === 'typescript'), 'recomputes JD match counts when restoring a workspace')
 
 const enqueue = createResumeWriteQueue()
 await assert.rejects(enqueue(async () => { throw new Error('disk failure') }), 'reports the current persistence failure')
 let recoveredWriteRan = false
 await enqueue(async () => { recoveredWriteRan = true })
 assert.equal(recoveredWriteRan, true, 'continues persistence after an earlier write failure')
+
+const translations = fs.readFileSync('src/i18n/translations.ts', 'utf8')
+for (const key of new Set(analysis.suggestions.flatMap((suggestion) => [suggestion.titleKey, suggestion.descriptionKey]))) {
+  assert.equal(translations.split(`'${key}'`).length - 1, 3, `translates ${key} in all supported UI languages`)
+}
 
 console.log('Resume optimizer verification passed')

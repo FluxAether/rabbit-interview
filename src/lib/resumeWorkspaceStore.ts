@@ -1,6 +1,7 @@
 import { Store } from '@tauri-apps/plugin-store'
 import {
   createEmptyResumeWorkspace,
+  matchResumeKeywords,
   type ResumeSuggestion,
   type ResumeWorkspace,
 } from './resumeOptimizer.ts'
@@ -26,11 +27,16 @@ function isSuggestion(value: unknown): value is ResumeSuggestion {
   if (!value || typeof value !== 'object') return false
   const suggestion = value as Partial<ResumeSuggestion>
   const replacement = suggestion.replacement
+  const params = suggestion.descriptionParams
   return typeof suggestion.id === 'string'
-    && typeof suggestion.title === 'string'
-    && typeof suggestion.description === 'string'
+    && typeof suggestion.titleKey === 'string'
+    && typeof suggestion.descriptionKey === 'string'
     && ['format', 'clarity', 'impact', 'keywords'].includes(String(suggestion.category))
     && typeof suggestion.applied === 'boolean'
+    && (params === undefined || (
+      typeof params === 'object'
+      && Object.values(params).every((item) => typeof item === 'string' || typeof item === 'number')
+    ))
     && (replacement === null || (
       typeof replacement === 'object'
       && typeof replacement.before === 'string'
@@ -38,18 +44,21 @@ function isSuggestion(value: unknown): value is ResumeSuggestion {
     ))
 }
 
-function normalizeWorkspace(value: unknown): ResumeWorkspace {
+export function normalizeResumeWorkspace(value: unknown): ResumeWorkspace {
   const empty = createEmptyResumeWorkspace()
   if (!value || typeof value !== 'object') return empty
   const saved = value as Partial<ResumeWorkspace>
+  const original = typeof saved.original === 'string' ? saved.original : ''
+  const optimized = typeof saved.optimized === 'string' ? saved.optimized : ''
+  const jobDescription = typeof saved.jobDescription === 'string' ? saved.jobDescription.slice(0, 5000) : ''
+  const keywordMatch = matchResumeKeywords(optimized || original, jobDescription)
   return {
-    original: typeof saved.original === 'string' ? saved.original : '',
-    optimized: typeof saved.optimized === 'string' ? saved.optimized : '',
-    jobDescription: typeof saved.jobDescription === 'string' ? saved.jobDescription.slice(0, 5000) : '',
+    original,
+    optimized,
+    jobDescription,
     suggestions: Array.isArray(saved.suggestions) ? saved.suggestions.filter(isSuggestion) : [],
     sourceFileName: typeof saved.sourceFileName === 'string' ? saved.sourceFileName : '',
-    matchedKeywords: [],
-    missingKeywords: [],
+    ...keywordMatch,
   }
 }
 
@@ -64,7 +73,7 @@ export function toPersistedResumeWorkspace(workspace: ResumeWorkspace): Omit<Res
 }
 
 export async function loadResumeWorkspace(): Promise<ResumeWorkspace> {
-  return normalizeWorkspace(await (await getStore()).get<unknown>('workspace'))
+  return normalizeResumeWorkspace(await (await getStore()).get<unknown>('workspace'))
 }
 
 export async function saveResumeWorkspace(workspace: ResumeWorkspace): Promise<void> {
