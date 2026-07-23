@@ -10,8 +10,8 @@ use audio::{
 };
 use commands::{get_history, get_settings, save_interview_record, save_settings};
 use copilot_window::{
-    close_copilot_window, get_copilot_window_status, hide_copilot_window, show_copilot_window,
-    toggle_copilot_window,
+    close_copilot_window, get_copilot_window_status, hide_copilot_window,
+    set_copilot_window_opacity, show_copilot_window, toggle_copilot_window,
 };
 use speech::{speak_text, stop_speaking};
 use tauri::Emitter;
@@ -61,6 +61,7 @@ pub fn run() {
             hide_copilot_window,
             toggle_copilot_window,
             get_copilot_window_status,
+            set_copilot_window_opacity,
             close_copilot_window,
             get_history,
             save_interview_record,

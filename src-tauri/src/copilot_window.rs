@@ -126,6 +126,46 @@ fn apply_and_verify_protection(window: &WebviewWindow, protected: bool) -> Resul
         .map_err(|error| format!("Timed out while verifying capture protection: {error}"))?
 }
 
+fn validate_opacity(opacity: f64) -> Result<f64, String> {
+    if opacity.is_finite() && (0.3..=1.0).contains(&opacity) {
+        Ok(opacity)
+    } else {
+        Err("Opacity must be between 0.3 and 1.0".into())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn set_native_window_opacity(window: &WebviewWindow, opacity: f64) -> Result<(), String> {
+    use objc2_app_kit::NSWindow;
+    let pointer = window.ns_window().map_err(|error| error.to_string())?;
+    let window = unsafe { &*pointer.cast::<NSWindow>() };
+    window.setAlphaValue(opacity);
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn set_native_window_opacity(window: &WebviewWindow, opacity: f64) -> Result<(), String> {
+    use windows::Win32::{
+        Foundation::COLORREF,
+        UI::WindowsAndMessaging::{SetLayeredWindowAttributes, LWA_ALPHA},
+    };
+    let alpha = (opacity * f64::from(u8::MAX)).round() as u8;
+    unsafe {
+        SetLayeredWindowAttributes(
+            window.hwnd().map_err(|error| error.to_string())?,
+            COLORREF(0),
+            alpha,
+            LWA_ALPHA,
+        )
+        .map_err(|error| error.to_string())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn set_native_window_opacity(_window: &WebviewWindow, _opacity: f64) -> Result<(), String> {
+    Err("Window opacity is not supported on this platform".into())
+}
+
 fn create_copilot_window(app: &AppHandle, protected: bool) -> Result<WebviewWindow, String> {
     let window = WebviewWindowBuilder::new(
         app,
@@ -142,6 +182,7 @@ fn create_copilot_window(app: &AppHandle, protected: bool) -> Result<WebviewWind
     .always_on_top(true)
     .shadow(true)
     .skip_taskbar(true)
+    .transparent(true)
     .content_protected(protected)
     .build()
     .map_err(|error| error.to_string())?;
@@ -196,6 +237,24 @@ pub async fn get_copilot_window_status(app: AppHandle) -> CopilotWindowStatus {
 }
 
 #[tauri::command]
+pub async fn set_copilot_window_opacity(app: AppHandle, opacity: f64) -> Result<(), String> {
+    let opacity = validate_opacity(opacity)?;
+    let window = app
+        .get_webview_window(COPILOT_WINDOW_LABEL)
+        .ok_or_else(|| "Copilot window is not available".to_string())?;
+    let opacity_window = window.clone();
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    window
+        .run_on_main_thread(move || {
+            let _ = sender.send(set_native_window_opacity(&opacity_window, opacity));
+        })
+        .map_err(|error| error.to_string())?;
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .map_err(|error| format!("Timed out while updating window opacity: {error}"))?
+}
+
+#[tauri::command]
 pub async fn close_copilot_window(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(COPILOT_WINDOW_LABEL) {
         window.close().map_err(|error| error.to_string())?;
@@ -206,7 +265,16 @@ pub async fn close_copilot_window(app: AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::CopilotWindowStatus;
+    use super::{validate_opacity, CopilotWindowStatus};
+
+    #[test]
+    fn validates_window_opacity_range() {
+        assert_eq!(validate_opacity(0.3), Ok(0.3));
+        assert_eq!(validate_opacity(1.0), Ok(1.0));
+        assert!(validate_opacity(0.29).is_err());
+        assert!(validate_opacity(1.01).is_err());
+        assert!(validate_opacity(f64::NAN).is_err());
+    }
 
     #[test]
     fn serializes_truthful_protection_fields() {

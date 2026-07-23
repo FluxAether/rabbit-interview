@@ -48,6 +48,7 @@ const db = source('src/lib/db.ts')
 const archive = source('src/lib/copilotArchive.ts')
 const turnDetector = source('src/lib/interviewerTurnDetector.ts')
 const llm = source('src/lib/llm.ts')
+const windowBridge = source('src/lib/copilotWindow.ts')
 const rustLib = source('src-tauri/src/lib.rs')
 const rustWindow = source('src-tauri/src/copilot_window.rs')
 const rustAudio = source('src-tauri/src/audio/mod.rs')
@@ -145,6 +146,15 @@ check(panel.includes('formatClock') && panel.includes('formatElapsed') && panel.
 check(rustWindow.includes('.content_protected(protected)') && rustWindow.includes('set_content_protected(protected)'), 'window protection is applied on create and reuse')
 check(rustWindow.includes('protection_requested') && rustWindow.includes('protection_applied'), 'native window returns truthful protection status')
 check(rustWindow.includes('toggle_copilot_window'), 'native window has a real visibility toggle')
+check(
+  panel.includes('setCopilotWindowOpacity(value / 100)')
+    && windowBridge.includes("invoke('set_copilot_window_opacity', { opacity })")
+    && (rustLib.match(/set_copilot_window_opacity/g)?.length ?? 0) >= 2
+    && rustWindow.includes('setAlphaValue')
+    && rustWindow.includes('SetLayeredWindowAttributes')
+    && cargo.includes('"Win32_Foundation"'),
+  'opacity control updates the entire native Copilot window on macOS and Windows',
+)
 
 check(!cargo.includes('screencapturekit') && !cargo.includes('macos-system-audio'), 'ScreenCaptureKit dependency and feature are removed')
 check(!rustAudio.includes('start_macos_capture') && !rustAudio.includes('stop_macos_capture'), 'platform-specific ScreenCaptureKit commands are removed')

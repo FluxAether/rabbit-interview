@@ -34,6 +34,10 @@ export async function hideCopilotWindow(): Promise<CopilotWindowStatus> {
   return publish(await invoke('hide_copilot_window'))
 }
 
+export async function setCopilotWindowOpacity(opacity: number): Promise<void> {
+  await invoke('set_copilot_window_opacity', { opacity })
+}
+
 export async function getCopilotWindowStatus(): Promise<CopilotWindowStatus> {
   return invoke('get_copilot_window_status')
 }
