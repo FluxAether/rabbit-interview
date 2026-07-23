@@ -308,11 +308,11 @@ export default function Settings() {
                     emit('app-theme-changed', val).catch((error) => console.warn('Theme sync failed:', error))
                   ))
                 }}
-                className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
+                className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
               >
-                <option>Light</option>
-                <option>Dark</option>
-                <option>System</option>
+                <option value="Light">{t('settings.theme.light')}</option>
+                <option value="Dark">{t('settings.theme.dark')}</option>
+                <option value="System">{t('settings.theme.system')}</option>
               </select>
             </div>
 
@@ -378,10 +378,10 @@ export default function Settings() {
                 onChange={e => {
                   setUpdateChannel(e.target.value as any)
                 }}
-                className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
+                className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
               >
-                <option>Stable</option>
-                <option>Beta</option>
+                <option value="Stable">Stable</option>
+                <option value="Beta">Beta</option>
               </select>
             </div>
           </div>
@@ -401,7 +401,7 @@ export default function Settings() {
             <select
               value={language}
               onChange={e => handleLanguageChange(e.target.value as SupportedLanguage)}
-              className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm min-w-[190px]"
+              className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm min-w-[190px] dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
             >
               {LANGUAGE_OPTIONS.map(opt => (
                 <option key={opt.code} value={opt.code}>{opt.label}</option>
@@ -441,7 +441,7 @@ export default function Settings() {
                   <select
                     value={groqModel}
                     onChange={(e) => updateProviderModel('groq', e.target.value)}
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
                   >
                     <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant</option>
                     <option value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile</option>
@@ -451,7 +451,7 @@ export default function Settings() {
                 <div className="flex items-center gap-3">
                   <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Key</span>
                   <input
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
                     placeholder={keyStatus.groq ? "•••••••• (configured)" : "GROQ_API_KEY"}
                     onBlur={(e) => saveProviderKey('groq', e.target.value)}
                     defaultValue=""
@@ -486,7 +486,7 @@ export default function Settings() {
                   <select
                     value={openaiModel}
                     onChange={(e) => updateProviderModel('openai', e.target.value)}
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
                   >
                     <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
                     <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
@@ -496,7 +496,7 @@ export default function Settings() {
                 <div className="flex items-center gap-3">
                   <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Key</span>
                   <input
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
                     placeholder={keyStatus.openai ? "•••••••• (configured)" : "OPENAI_API_KEY"}
                     onBlur={(e) => saveProviderKey('openai', e.target.value)}
                     defaultValue=""
@@ -531,7 +531,7 @@ export default function Settings() {
                   <select
                     value={anthropicModel}
                     onChange={(e) => updateProviderModel('anthropic', e.target.value)}
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
                   >
                     <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
                     <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
@@ -541,7 +541,7 @@ export default function Settings() {
                 <div className="flex items-center gap-3">
                   <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Key</span>
                   <input
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
                     placeholder={keyStatus.anthropic ? "•••••••• (configured)" : "ANTHROPIC_API_KEY"}
                     onBlur={(e) => saveProviderKey('anthropic', e.target.value)}
                     defaultValue=""
@@ -580,7 +580,7 @@ export default function Settings() {
                 <div className="flex items-center gap-3">
                   <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Key</span>
                   <input
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
                     placeholder={keyStatus.gemini ? "•••••••• (configured)" : "GEMINI_API_KEY (Google AI Studio)"}
                     onBlur={(e) => saveProviderKey('gemini', e.target.value)}
                     defaultValue=""
@@ -620,7 +620,7 @@ export default function Settings() {
                   <select
                     value={sttModel}
                     onChange={(e) => updateSttConfig('deepgram', e.target.value)}
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
                   >
                     <option value="nova-3">nova-3 (Recommended - multilingual)</option>
                     <option value="nova-2">nova-2 (general)</option>
@@ -635,7 +635,7 @@ export default function Settings() {
                     aria-label="Deepgram language"
                     value={sttLanguage}
                     onChange={(e) => setSttLanguage(e.target.value as SttLanguage)}
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
                   >
                     <option value="zh-CN">简体中文</option>
                     <option value="zh-TW">繁體中文</option>
@@ -646,7 +646,7 @@ export default function Settings() {
                 <div className="flex items-center gap-3">
                   <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Key</span>
                   <input
-                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
+                    className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
                     placeholder={keyStatus.deepgram ? "•••••••• (configured)" : "DEEPGRAM_API_KEY"}
                     onBlur={(e) => saveProviderKey('deepgram', e.target.value)}
                     defaultValue=""
