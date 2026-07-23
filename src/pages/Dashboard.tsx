@@ -68,7 +68,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
             className="p-2 hover:bg-white dark:hover:bg-[#1e293b] rounded-full border border-transparent hover:border-[#e2e8f0] dark:hover:border-[#334155] text-[#64748b] dark:text-[#94a3b8]"
             aria-label="Settings"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-[#64748b]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 002.572 1.065c1.755.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 011.066-2.573z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
@@ -138,7 +138,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
           </div>
           
           <h2 className="text-3xl font-semibold tracking-[-1px] mb-2">{t('dashboard.launch.title')}</h2>
-          <p className="text-[#475569] max-w-md">
+          <p className="text-[#475569] dark:text-[#94a3b8] max-w-md">
             {t('dashboard.launch.subtitle')}
           </p>
           
@@ -174,7 +174,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
             ))}
           </div>
         ) : (
-          <div className="card p-8 text-center text-[#64748b] text-sm">
+          <div className="card p-8 text-center text-[#64748b] dark:text-[#94a3b8] text-sm">
             {t('dashboard.noActivity')}
           </div>
         )}

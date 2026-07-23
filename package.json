@@ -17,7 +17,8 @@
     "package": "tauri build",
     "verify:copilot": "node scripts/verify-copilot.mjs",
     "verify:mock": "node scripts/verify-mock-interview.mjs",
-    "verify:resume": "node scripts/verify-resume-optimizer.mjs"
+    "verify:resume": "node scripts/verify-resume-optimizer.mjs",
+    "verify:theme": "node scripts/verify-theme.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

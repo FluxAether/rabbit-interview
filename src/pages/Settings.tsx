@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { emit } from '@tauri-apps/api/event'
 import { Sun, Mic, Shield } from 'lucide-react'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
@@ -40,6 +41,7 @@ export default function Settings() {
 
   // --- Auto-save implementation ---
   const saveTimeoutRef = useRef<number | null>(null)
+  const pendingSaveRef = useRef<Partial<PersistedSettings> | null>(null)
   const isHydratedRef = useRef(false)
 
   // Build payload from current local state values
@@ -62,7 +64,7 @@ export default function Settings() {
     sttLanguage,
   })
 
-  const persistToDisk = async (payload: ReturnType<typeof buildPayload>) => {
+  const persistToDisk = async (payload: Partial<PersistedSettings>) => {
     try {
       // Real persistence for copilot/LLM etc is via tauri-plugin-store (app-settings.json).
       // The Rust get/save_settings are stubs and not used by copilot flows.
@@ -77,6 +79,7 @@ export default function Settings() {
     if (!isHydratedRef.current) return
 
     const payload = buildPayload()
+    pendingSaveRef.current = payload
 
     // Make change visible to the rest of the app right away (LLM, STT, language, etc.)
     useAppStore.setState((s) => ({ settings: { ...s.settings, ...payload } }))
@@ -86,7 +89,9 @@ export default function Settings() {
       window.clearTimeout(saveTimeoutRef.current)
     }
     saveTimeoutRef.current = window.setTimeout(() => {
-      void persistToDisk(payload)
+      const pending = pendingSaveRef.current
+      pendingSaveRef.current = null
+      if (pending) void persistToDisk(pending)
     }, 350)
 
     // Cleanup pending timer on unmount or before next run
@@ -101,6 +106,13 @@ export default function Settings() {
     groqModel, openaiModel, anthropicModel, geminiModel,
     sttProvider, sttModel, sttLanguage,
   ])
+
+  useEffect(() => () => {
+    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current)
+    const pending = pendingSaveRef.current
+    pendingSaveRef.current = null
+    if (pending) void persistToDisk(pending)
+  }, [])
 
   // Load key configuration status (presence only)
   useEffect(() => {
@@ -271,7 +283,7 @@ export default function Settings() {
     <div className="p-8 overflow-auto">
       <div className="w-full">
         <h1 className="text-3xl font-semibold tracking-tight mb-1">{t('settings.title')}</h1>
-        <p className="text-[#475569] mb-8">{t('settings.description')}</p>
+        <p className="text-[#475569] dark:text-[#94a3b8] mb-8">{t('settings.description')}</p>
 
         {/* Application Card */}
         <div className="card p-6 mb-4">
@@ -280,10 +292,10 @@ export default function Settings() {
           <div className="space-y-4">
             <div className="flex items-center justify-between py-1">
               <div className="flex items-center gap-3">
-                <Sun className="w-4 h-4 text-[#64748b]" />
+                <Sun className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
                 <div>
                   <div className="font-medium">{t('settings.theme')}</div>
-                  <div className="text-xs text-[#64748b]">{t('settings.themeDesc')}</div>
+                  <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.themeDesc')}</div>
                 </div>
               </div>
               <select
@@ -291,6 +303,10 @@ export default function Settings() {
                 onChange={(e) => {
                   const val = e.target.value as 'Light' | 'Dark' | 'System'
                   setTheme(val)
+                  useAppStore.setState((s) => ({ settings: { ...s.settings, theme: val } }))
+                  void persistToDisk({ theme: val }).then(() => (
+                    emit('app-theme-changed', val).catch((error) => console.warn('Theme sync failed:', error))
+                  ))
                 }}
                 className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm"
               >
@@ -302,10 +318,10 @@ export default function Settings() {
 
             <div className="flex items-center justify-between py-1">
               <div className="flex items-center gap-3">
-                <Mic className="w-4 h-4 text-[#64748b]" />
+                <Mic className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
                 <div>
                   <div className="font-medium">{t('settings.launchAtStartup')}</div>
-                  <div className="text-xs text-[#64748b]">{t('settings.launchAtStartupDesc')}</div>
+                  <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.launchAtStartupDesc')}</div>
                 </div>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
@@ -317,7 +333,7 @@ export default function Settings() {
                   }}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-[#e2e8f0] peer-focus:outline-none peer-focus:ring-0 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#6366f1]"></div>
+                <div className="w-9 h-5 bg-[#e2e8f0] peer-focus:outline-none peer-focus:ring-0 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#6366f1] dark:bg-[#334155]"></div>
               </label>
             </div>
           </div>
@@ -330,10 +346,10 @@ export default function Settings() {
           <div className="space-y-4">
             <div className="flex items-center justify-between py-1">
               <div className="flex items-center gap-3">
-                <Mic className="w-4 h-4 text-[#64748b]" />
+                <Mic className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
                 <div>
                   <div className="font-medium">{t('settings.autoUpdate')}</div>
-                  <div className="text-xs text-[#64748b]">{t('settings.autoUpdateDesc')}</div>
+                  <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.autoUpdateDesc')}</div>
                 </div>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
@@ -345,16 +361,16 @@ export default function Settings() {
                   }}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-[#e2e8f0] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#6366f1]"></div>
+                <div className="w-9 h-5 bg-[#e2e8f0] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#6366f1] dark:bg-[#334155]"></div>
               </label>
             </div>
 
             <div className="flex items-center justify-between py-1">
               <div className="flex items-center gap-3">
-                <Mic className="w-4 h-4 text-[#64748b]" />
+                <Mic className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
                 <div>
                   <div className="font-medium">{t('settings.updateChannel')}</div>
-                  <div className="text-xs text-[#64748b]">{t('settings.updateChannelDesc')}</div>
+                  <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.updateChannelDesc')}</div>
                 </div>
               </div>
               <select
@@ -376,10 +392,10 @@ export default function Settings() {
           <div className="font-semibold text-[#6366f1] mb-4">{t('settings.language')}</div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Shield className="w-4 h-4 text-[#64748b]" />
+              <Shield className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
               <div>
                 <div className="font-medium">{t('settings.language')}</div>
-                <div className="text-xs text-[#64748b]">{t('settings.languageDesc')}</div>
+                <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.languageDesc')}</div>
               </div>
             </div>
             <select
@@ -397,22 +413,22 @@ export default function Settings() {
         {/* AI Providers - each provider has its own section for model + API key */}
         <div className="card p-6 mb-4">
           <div className="font-semibold text-[#6366f1] mb-1">{t('settings.aiModel')}</div>
-          <div className="text-xs text-[#64748b] mb-4">{t('settings.aiModel.lowLatency')}</div>
+          <div className="text-xs text-[#64748b] dark:text-[#94a3b8] mb-4">{t('settings.aiModel.lowLatency')}</div>
 
           <div className="space-y-4">
             {/* Groq */}
-            <div className={`border rounded-xl p-4 transition-colors ${activeProvider === 'groq' ? 'border-[#6366f1] bg-[#f5f5ff]' : 'border-[#e2e8f0] hover:border-[#cbd5e1]'}`}>
+            <div className={`border rounded-xl p-4 transition-colors ${activeProvider === 'groq' ? 'border-[#6366f1] bg-[#f5f5ff] dark:bg-[#1e1b4b]' : 'border-[#e2e8f0] hover:border-[#cbd5e1] dark:border-[#334155] dark:hover:border-[#64748b]'}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold">Groq</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Fast &amp; cheap</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">Fast &amp; cheap</span>
                 </div>
                 {activeProvider === 'groq' ? (
                   <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">Active</span>
                 ) : (
                   <button
                     onClick={() => activateProvider('groq', groqModel)}
-                    className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors"
+                    className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors dark:border-[#818cf8] dark:text-[#a5b4fc] dark:hover:bg-[#312e81]"
                   >
                     Use Groq
                   </button>
@@ -421,7 +437,7 @@ export default function Settings() {
 
               <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Model</span>
+                  <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Model</span>
                   <select
                     value={groqModel}
                     onChange={(e) => updateProviderModel('groq', e.target.value)}
@@ -433,7 +449,7 @@ export default function Settings() {
                   </select>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Key</span>
+                  <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Key</span>
                   <input
                     className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
                     placeholder={keyStatus.groq ? "•••••••• (configured)" : "GROQ_API_KEY"}
@@ -446,18 +462,18 @@ export default function Settings() {
             </div>
 
             {/* OpenAI */}
-            <div className={`border rounded-xl p-4 transition-colors ${activeProvider === 'openai' ? 'border-[#6366f1] bg-[#f5f5ff]' : 'border-[#e2e8f0] hover:border-[#cbd5e1]'}`}>
+            <div className={`border rounded-xl p-4 transition-colors ${activeProvider === 'openai' ? 'border-[#6366f1] bg-[#f5f5ff] dark:bg-[#1e1b4b]' : 'border-[#e2e8f0] hover:border-[#cbd5e1] dark:border-[#334155] dark:hover:border-[#64748b]'}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold">OpenAI</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">GPT family</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">GPT family</span>
                 </div>
                 {activeProvider === 'openai' ? (
                   <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">Active</span>
                 ) : (
                   <button
                     onClick={() => activateProvider('openai', openaiModel)}
-                    className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors"
+                    className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors dark:border-[#818cf8] dark:text-[#a5b4fc] dark:hover:bg-[#312e81]"
                   >
                     Use OpenAI
                   </button>
@@ -466,7 +482,7 @@ export default function Settings() {
 
               <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Model</span>
+                  <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Model</span>
                   <select
                     value={openaiModel}
                     onChange={(e) => updateProviderModel('openai', e.target.value)}
@@ -478,7 +494,7 @@ export default function Settings() {
                   </select>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Key</span>
+                  <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Key</span>
                   <input
                     className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
                     placeholder={keyStatus.openai ? "•••••••• (configured)" : "OPENAI_API_KEY"}
@@ -491,18 +507,18 @@ export default function Settings() {
             </div>
 
             {/* Anthropic / Claude */}
-            <div className={`border rounded-xl p-4 transition-colors ${activeProvider === 'anthropic' ? 'border-[#6366f1] bg-[#f5f5ff]' : 'border-[#e2e8f0] hover:border-[#cbd5e1]'}`}>
+            <div className={`border rounded-xl p-4 transition-colors ${activeProvider === 'anthropic' ? 'border-[#6366f1] bg-[#f5f5ff] dark:bg-[#1e1b4b]' : 'border-[#e2e8f0] hover:border-[#cbd5e1] dark:border-[#334155] dark:hover:border-[#64748b]'}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold">Anthropic</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">Claude</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300">Claude</span>
                 </div>
                 {activeProvider === 'anthropic' ? (
                   <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">Active</span>
                 ) : (
                   <button
                     onClick={() => activateProvider('anthropic', anthropicModel)}
-                    className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors"
+                    className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors dark:border-[#818cf8] dark:text-[#a5b4fc] dark:hover:bg-[#312e81]"
                   >
                     Use Claude
                   </button>
@@ -511,7 +527,7 @@ export default function Settings() {
 
               <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Model</span>
+                  <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Model</span>
                   <select
                     value={anthropicModel}
                     onChange={(e) => updateProviderModel('anthropic', e.target.value)}
@@ -523,7 +539,7 @@ export default function Settings() {
                   </select>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Key</span>
+                  <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Key</span>
                   <input
                     className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
                     placeholder={keyStatus.anthropic ? "•••••••• (configured)" : "ANTHROPIC_API_KEY"}
@@ -536,18 +552,18 @@ export default function Settings() {
             </div>
 
             {/* Google Gemini */}
-            <div className={`border rounded-xl p-4 transition-colors ${activeProvider === 'gemini' ? 'border-[#6366f1] bg-[#f5f5ff]' : 'border-[#e2e8f0] hover:border-[#cbd5e1]'}`}>
+            <div className={`border rounded-xl p-4 transition-colors ${activeProvider === 'gemini' ? 'border-[#6366f1] bg-[#f5f5ff] dark:bg-[#1e1b4b]' : 'border-[#e2e8f0] hover:border-[#cbd5e1] dark:border-[#334155] dark:hover:border-[#64748b]'}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold">Google Gemini</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Multimodal</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">Multimodal</span>
                 </div>
                 {activeProvider === 'gemini' ? (
                   <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">Active</span>
                 ) : (
                   <button
                     onClick={() => activateProvider('gemini', 'gemini-3.5-flash')}
-                    className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors"
+                    className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors dark:border-[#818cf8] dark:text-[#a5b4fc] dark:hover:bg-[#312e81]"
                   >
                     Use Gemini
                   </button>
@@ -556,13 +572,13 @@ export default function Settings() {
 
               <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Model</span>
-                  <div className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm text-[#0f172a] font-medium">
+                  <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Model</span>
+                  <div className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm text-[#0f172a] font-medium dark:border-[#334155] dark:bg-[#0f172a] dark:text-[#f8fafc]">
                     gemini-3.5-flash <span className="text-[10px] ml-1 text-emerald-600">(latest)</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Key</span>
+                  <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Key</span>
                   <input
                     className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
                     placeholder={keyStatus.gemini ? "•••••••• (configured)" : "GEMINI_API_KEY (Google AI Studio)"}
@@ -575,7 +591,7 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="mt-3 text-[10px] text-[#64748b]">
+          <div className="mt-3 text-[10px] text-[#64748b] dark:text-[#94a3b8]">
             {t('settings.apiKeys.help')}
           </div>
         </div>
@@ -583,24 +599,24 @@ export default function Settings() {
         {/* Speech-to-Text (Real-time Transcription Provider) */}
         <div className="card p-6 mb-4">
           <div className="font-semibold text-[#6366f1] mb-1">Speech-to-Text</div>
-          <div className="text-xs text-[#64748b] mb-4">
+          <div className="text-xs text-[#64748b] dark:text-[#94a3b8] mb-4">
             Real-time transcription for Stealth Copilot. Currently powered by Deepgram (high accuracy, low latency).
           </div>
 
           <div className="space-y-4">
             {/* Deepgram STT Provider */}
-            <div className="border border-[#6366f1] bg-[#f5f5ff] rounded-xl p-4">
+            <div className="border border-[#6366f1] bg-[#f5f5ff] rounded-xl p-4 dark:bg-[#1e1b4b]">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold">Deepgram</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-700">Real-time WS</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300">Real-time WS</span>
                 </div>
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">Active</span>
               </div>
 
               <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Model</span>
+                  <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Model</span>
                   <select
                     value={sttModel}
                     onChange={(e) => updateSttConfig('deepgram', e.target.value)}
@@ -614,7 +630,7 @@ export default function Settings() {
                   </select>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Language</span>
+                  <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Language</span>
                   <select
                     aria-label="Deepgram language"
                     value={sttLanguage}
@@ -628,7 +644,7 @@ export default function Settings() {
                   </select>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="w-12 text-[#64748b] text-xs">Key</span>
+                  <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs">Key</span>
                   <input
                     className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-xs font-mono"
                     placeholder={keyStatus.deepgram ? "•••••••• (configured)" : "DEEPGRAM_API_KEY"}
@@ -641,7 +657,7 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="mt-3 text-[10px] text-[#64748b]">
+          <div className="mt-3 text-[10px] text-[#64748b] dark:text-[#94a3b8]">
             The selected STT model is used for live transcription. Deepgram keys are separate from LLM keys.
           </div>
         </div>
@@ -659,7 +675,7 @@ export default function Settings() {
             />
             <span>{t('settings.stealth.desc')}</span>
           </label>
-          <p className="text-xs mt-2 text-[#64748b]">{t('settings.stealth.note')}</p>
+          <p className="text-xs mt-2 text-[#64748b] dark:text-[#94a3b8]">{t('settings.stealth.note')}</p>
         </div>
 
         {/* Audio Capture */}
@@ -673,17 +689,17 @@ export default function Settings() {
               const devices = await invoke<string[]>('list_audio_devices');
               alert(t('settings.audio.listDevices') + ':\n' + devices.join('\n'));
             }}
-            className="text-xs px-3 py-1 border rounded mb-3"
+            className="text-xs px-3 py-1 border border-[#e2e8f0] rounded mb-3 dark:border-[#334155]"
           >
             {t('settings.audio.listDevices')}
           </button>
 
-          <div className="text-xs p-3 bg-emerald-50 border border-emerald-200 rounded space-y-2">
+          <div className="text-xs p-3 bg-emerald-50 border border-emerald-200 rounded space-y-2 dark:border-emerald-900 dark:bg-emerald-950/60">
             <div><b>✅ macOS system audio: AudioTee</b></div>
-            <div className="text-emerald-700">
+            <div className="text-emerald-700 dark:text-emerald-300">
               The bundled, pinned AudioTee sidecar captures the default system output. Microphone capture remains a separate option.
             </div>
-            <div className="pt-1 text-[10px] text-emerald-600">Requires macOS 14.2+. macOS 13.0–14.1 and unsupported platforms use microphone-only mode.</div>
+            <div className="pt-1 text-[10px] text-emerald-600 dark:text-emerald-400">Requires macOS 14.2+. macOS 13.0–14.1 and unsupported platforms use microphone-only mode.</div>
           </div>
         </div>
 
@@ -691,8 +707,8 @@ export default function Settings() {
         <div className="card p-6 mb-4">
           <div className="font-semibold text-[#6366f1] mb-3">{t('settings.shortcuts.title')}</div>
           <div className="space-y-2 text-sm">
-            <div className="flex justify-between"><span>{t('settings.shortcuts.toggle')}</span> <span className="font-mono text-xs bg-[#f1f5f9] px-1.5 py-px rounded">⌘⇧I</span></div>
-            <div className="flex justify-between"><span>{t('settings.shortcuts.capture')}</span> <span className="font-mono text-xs bg-[#f1f5f9] px-1.5 py-px rounded">⌘⇧C</span></div>
+            <div className="flex justify-between"><span>{t('settings.shortcuts.toggle')}</span> <span className="font-mono text-xs bg-[#f1f5f9] px-1.5 py-px rounded dark:bg-[#0f172a]">⌘⇧I</span></div>
+            <div className="flex justify-between"><span>{t('settings.shortcuts.capture')}</span> <span className="font-mono text-xs bg-[#f1f5f9] px-1.5 py-px rounded dark:bg-[#0f172a]">⌘⇧C</span></div>
           </div>
         </div>
 
@@ -704,16 +720,16 @@ export default function Settings() {
         </div>
 
         {/* Auto-save is enabled — no manual save required */}
-        <div className="mt-6 text-xs text-[#64748b]">
+        <div className="mt-6 text-xs text-[#64748b] dark:text-[#94a3b8]">
           {t('settings.saved')} automatically
         </div>
 
-        <div className="mt-8 text-xs text-[#64748b] flex items-center gap-1.5">
+        <div className="mt-8 text-xs text-[#64748b] dark:text-[#94a3b8] flex items-center gap-1.5">
           <Shield className="w-3.5 h-3.5" /> {t('settings.secureNote')}
         </div>
 
         {/* Saved indicator matching design */}
-        <div className="fixed bottom-6 right-8 bg-white shadow border border-[#e2e8f0] text-sm px-4 py-2 rounded-2xl flex items-center gap-2 text-[#166534]">
+        <div className="fixed bottom-6 right-8 bg-white shadow border border-[#e2e8f0] text-sm px-4 py-2 rounded-2xl flex items-center gap-2 text-[#166534] dark:border-[#334155] dark:bg-[#1e293b] dark:text-emerald-300">
           <div className="w-5 h-5 rounded-full bg-[#22c55e] flex items-center justify-center">
             <span className="text-white text-[10px]">✓</span>
           </div>

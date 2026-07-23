@@ -24,7 +24,7 @@ import {
   toggleCopilotWindow,
   type CopilotWindowStatus,
 } from './lib/copilotWindow'
-import { loadAppSettings } from './lib/settingsStore'
+import { loadAppSettings, type AppSettings } from './lib/settingsStore'
 import { loadResumeWorkspace, persistResumeWorkspace } from './lib/resumeWorkspaceStore'
 import { selectResumeWorkspace, useAppStore } from './stores/useAppStore'
 
@@ -162,15 +162,12 @@ export default function App() {
   useEffect(() => {
     document.documentElement.lang = String(settings.language || DEFAULT_LANGUAGE)
 
-    // Dark mode toggle based on theme setting
-    if (settings.theme === 'Dark') {
-      document.documentElement.classList.add('dark')
-    } else if (settings.theme === 'Light') {
-      document.documentElement.classList.remove('dark')
-    } else {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-      document.documentElement.classList.toggle('dark', prefersDark)
+    const colorScheme = window.matchMedia('(prefers-color-scheme: dark)')
+    const syncTheme = () => {
+      const dark = settings.theme === 'Dark' || (settings.theme === 'System' && colorScheme.matches)
+      document.documentElement.classList.toggle('dark', dark)
     }
+    syncTheme()
 
     if (floating) {
       document.documentElement.classList.add('floating-mode')
@@ -185,6 +182,11 @@ export default function App() {
       const rootEl = document.getElementById('root')
       if (rootEl) rootEl.style.backgroundColor = ''
     }
+
+    if (settings.theme === 'System') {
+      colorScheme.addEventListener('change', syncTheme)
+      return () => colorScheme.removeEventListener('change', syncTheme)
+    }
   }, [settings.language, settings.theme, floating])
 
   useEffect(() => {
@@ -194,6 +196,9 @@ export default function App() {
       if (cancelled) cleanup()
       else disposers.push(cleanup)
     }
+    listen<AppSettings['theme']>('app-theme-changed', (event) => {
+      useAppStore.getState().setSettings({ theme: event.payload })
+    }).then(register)
     loadAppSettings().then((saved) => {
       useAppStore.getState().setSettings({ ...saved, language: saved.language || DEFAULT_LANGUAGE })
     }).catch(() => {})
@@ -320,4 +325,3 @@ export default function App() {
     </div>
   )
 }
-
