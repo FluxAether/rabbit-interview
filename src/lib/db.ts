@@ -1,62 +1,45 @@
-import Database from '@tauri-apps/plugin-sql';
-import type { CopilotMessage } from './copilotSessionState';
+import Database from "@tauri-apps/plugin-sql";
+import type { CopilotMessage } from "./copilotSessionState";
 
 let db: any = null;
+let dbPromise: Promise<any> | null = null;
 
 export async function getDb() {
-  if (!db) {
-    db = await Database.load('sqlite:rabbitinterview.db');
-    // Ensure tables
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-    `);
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS interviews (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT NOT NULL,
-        role TEXT,
-        company TEXT,
-        score INTEGER,
-        transcript TEXT,
-        duration INTEGER,
-        mode TEXT,
-        recording_path TEXT,
-        details_json TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    const interviewColumns = await db.select(`PRAGMA table_info(interviews)`);
-    if (!interviewColumns.some((column: { name: string }) => column.name === 'recording_path')) {
-      await db.execute(`ALTER TABLE interviews ADD COLUMN recording_path TEXT`);
+  if (db) return db;
+  if (dbPromise) return dbPromise;
+
+  dbPromise = (async () => {
+    try {
+      const instance = await Database.load("sqlite:rabbitinterview.db");
+      // Ensure tables
+      await instance.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
+      await instance.execute("CREATE TABLE IF NOT EXISTS interviews (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, role TEXT, company TEXT, score INTEGER, transcript TEXT, duration INTEGER, mode TEXT, recording_path TEXT, details_json TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);");
+      
+      const interviewColumns = (await instance.select("PRAGMA table_info(interviews)")) as Array<{ name: string }>;
+      if (!interviewColumns.some((column: { name: string }) => column.name === "recording_path")) {
+        await instance.execute("ALTER TABLE interviews ADD COLUMN recording_path TEXT");
+      }
+      if (!interviewColumns.some((column: { name: string }) => column.name === "details_json")) {
+        await instance.execute("ALTER TABLE interviews ADD COLUMN details_json TEXT");
+      }
+      await instance.execute("CREATE TABLE IF NOT EXISTS copilot_messages (session_id TEXT NOT NULL, message_id INTEGER NOT NULL, message_order INTEGER NOT NULL, role TEXT NOT NULL, source TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (session_id, message_id));");
+      
+      db = instance;
+      return instance;
+    } catch (error) {
+      db = null;
+      dbPromise = null;
+      throw error;
     }
-    if (!interviewColumns.some((column: { name: string }) => column.name === 'details_json')) {
-      await db.execute(`ALTER TABLE interviews ADD COLUMN details_json TEXT`);
-    }
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS copilot_messages (
-        session_id TEXT NOT NULL,
-        message_id INTEGER NOT NULL,
-        message_order INTEGER NOT NULL,
-        role TEXT NOT NULL,
-        source TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (session_id, message_id)
-      );
-    `);
-  }
-  return db;
+  })();
+
+  return dbPromise;
 }
 
 export async function saveInterview(record: any): Promise<number> {
   const database = await getDb();
   const result = await database.execute(
-    `INSERT INTO interviews (date, role, company, score, transcript, duration, mode, recording_path, details_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+    "INSERT INTO interviews (date, role, company, score, transcript, duration, mode, recording_path, details_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
     [
       record.date,
       record.role,
@@ -75,11 +58,7 @@ export async function saveInterview(record: any): Promise<number> {
 export async function loadHistory(): Promise<any[]> {
   const database = await getDb();
   return await database.select(
-    `SELECT id, date, role, company, score, transcript, duration, mode,
-            recording_path AS recordingPath,
-            details_json AS detailsJson
-     FROM interviews
-     ORDER BY created_at DESC`
+    "SELECT id, date, role, company, score, transcript, duration, mode, recording_path AS recordingPath, details_json AS detailsJson FROM interviews ORDER BY created_at DESC"
   );
 }
 
@@ -90,15 +69,7 @@ export async function upsertCopilotMessage(
 ): Promise<void> {
   const database = await getDb();
   await database.execute(
-    `INSERT INTO copilot_messages (
-       session_id, message_id, message_order, role, source, content
-     ) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(session_id, message_id) DO UPDATE SET
-       message_order = excluded.message_order,
-       role = excluded.role,
-       source = excluded.source,
-       content = excluded.content,
-       updated_at = CURRENT_TIMESTAMP`,
+    "INSERT INTO copilot_messages (session_id, message_id, message_order, role, source, content) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(session_id, message_id) DO UPDATE SET message_order = excluded.message_order, role = excluded.role, source = excluded.source, content = excluded.content, updated_at = CURRENT_TIMESTAMP",
     [sessionId, message.id, messageOrder, message.role, message.source, message.text]
   );
 }
@@ -106,13 +77,13 @@ export async function upsertCopilotMessage(
 export async function saveSetting(key: string, value: string) {
   const database = await getDb();
   await database.execute(
-    `INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`,
+    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
     [key, value]
   );
 }
 
 export async function loadSetting(key: string): Promise<string | null> {
   const database = await getDb();
-  const rows = await database.select(`SELECT value FROM settings WHERE key = ?`, [key]);
+  const rows = await database.select("SELECT value FROM settings WHERE key = ?", [key]);
   return rows.length > 0 ? rows[0].value : null;
 }

@@ -60,12 +60,7 @@ export interface AppState {
   clearResumeWorkspace: () => void
   setResumePersistenceError: (failed: boolean) => void
   
-  // Mock Interview
-  mockConversation: Array<{role: 'ai' | 'user', text: string}>
-  mockFeedback: Array<{label: string, score: number, text: string}>
-  addMockMessage: (role: 'ai' | 'user', text: string) => void
-  setMockFeedback: (fb: any[]) => void
-  resetMock: () => void
+
 }
 
 function resumeStateFromWorkspace(workspace: ResumeWorkspace) {
@@ -134,26 +129,16 @@ export const useAppStore = create<AppState>((set) => ({
   updateResumeWorkspace: (workspace) => set((state) => resumeStateFromWorkspace(
     mergeResumeWorkspace(selectResumeWorkspace(state), workspace),
   )),
-  setResumeAnalysis: (result) => set({
-    resumeOptimized: result.optimizedText,
-    resumeSuggestions: result.suggestions,
-    resumeMatchedKeywords: result.matchedKeywords,
-    resumeMissingKeywords: result.missingKeywords,
-  }),
+  setResumeAnalysis: (result) => set((state) => resumeStateFromWorkspace(
+    mergeResumeWorkspace(selectResumeWorkspace(state), {
+      optimized: result.optimizedText,
+      suggestions: result.suggestions,
+    }),
+  )),
   clearResumeWorkspace: () => {
     set(resumeStateFromWorkspace(createEmptyResumeWorkspace()))
   },
   setResumePersistenceError: (failed) => set({ resumePersistenceError: failed }),
-
-  mockConversation: [],
-  mockFeedback: [],
-  addMockMessage: (role, text) =>
-    set((state) => ({
-      mockConversation: [...state.mockConversation, { role, text }],
-    })),
-  setMockFeedback: (fb) => set({ mockFeedback: fb }),
-  resetMock: () =>
-    set({ mockConversation: [], mockFeedback: [] }),
 
   setLanguage: (lang) =>
     set((state) => ({

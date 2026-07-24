@@ -90,8 +90,8 @@ static AUDIO_STATE: once_cell::sync::Lazy<AudioCapture> =
     once_cell::sync::Lazy::new(AudioCapture::default);
 
 fn remember_audio_state(mode: &str, failure_reason: Option<String>) {
-    *AUDIO_STATE.current_mode.lock().unwrap() = mode.into();
-    *AUDIO_STATE.failure_reason.lock().unwrap() = failure_reason;
+    *AUDIO_STATE.current_mode.lock().unwrap_or_else(|e| e.into_inner()) = mode.into();
+    *AUDIO_STATE.failure_reason.lock().unwrap_or_else(|e| e.into_inner()) = failure_reason;
 }
 
 fn remember_audio_failure(error: impl Into<String>) {
@@ -152,7 +152,7 @@ impl MonoResampler {
     fn new(channels: usize, input_rate: u32) -> Self {
         Self {
             channels: channels.max(1),
-            input_rate,
+            input_rate: input_rate.max(8000),
             accumulator: 0,
             window_sum: 0.0,
             window_frames: 0,
@@ -262,7 +262,7 @@ fn recordings_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn discard_live_recording() {
-    let live = AUDIO_STATE.live_recording.lock().unwrap().take();
+    let live = AUDIO_STATE.live_recording.lock().unwrap_or_else(|e| e.into_inner()).take();
     if let Some(live) = live {
         drop(live.writer);
         let _ = fs::remove_file(live.path);
@@ -286,7 +286,7 @@ fn begin_live_recording(app: &AppHandle) -> Result<(), String> {
     let mut writer = BufWriter::new(file);
     write_wav_header(&mut writer, TARGET_SAMPLE_RATE, 0)?;
     writer.flush().map_err(|error| error.to_string())?;
-    *AUDIO_STATE.live_recording.lock().unwrap() = Some(LiveRecording {
+    *AUDIO_STATE.live_recording.lock().unwrap_or_else(|e| e.into_inner()) = Some(LiveRecording {
         path,
         writer,
         sample_count: 0,
@@ -294,11 +294,11 @@ fn begin_live_recording(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn append_live_recording(samples: &[f32]) {
+fn append_live_recording(app: &AppHandle, samples: &[f32]) {
     if samples.is_empty() {
         return;
     }
-    let mut live_guard = AUDIO_STATE.live_recording.lock().unwrap();
+    let mut live_guard = AUDIO_STATE.live_recording.lock().unwrap_or_else(|e| e.into_inner());
     let Some(live) = live_guard.as_mut() else {
         return;
     };
@@ -314,7 +314,10 @@ fn append_live_recording(samples: &[f32]) {
     };
     for sample in samples {
         let pcm = sample_to_pcm16(*sample);
-        if live.writer.write_all(&pcm.to_le_bytes()).is_err() {
+        if let Err(error) = live.writer.write_all(&pcm.to_le_bytes()) {
+            let error_msg = format!("Disk write failed for live recording: {error}");
+            remember_audio_failure(&error_msg);
+            let _ = app.emit("audio-error", error_msg);
             return;
         }
         live.sample_count += 1;
@@ -324,7 +327,7 @@ fn append_live_recording(samples: &[f32]) {
 }
 
 fn finalize_live_recording(final_path: &Path) -> Result<Option<SavedRecording>, String> {
-    let Some(mut live) = AUDIO_STATE.live_recording.lock().unwrap().take() else {
+    let Some(mut live) = AUDIO_STATE.live_recording.lock().unwrap_or_else(|e| e.into_inner()).take() else {
         return Ok(None);
     };
     live.writer.flush().map_err(|error| error.to_string())?;
@@ -362,7 +365,7 @@ fn finalize_live_recording(final_path: &Path) -> Result<Option<SavedRecording>, 
 }
 
 fn export_live_recording_snapshot(path: &Path) -> Result<Option<SavedRecording>, String> {
-    let mut live_guard = AUDIO_STATE.live_recording.lock().unwrap();
+    let mut live_guard = AUDIO_STATE.live_recording.lock().unwrap_or_else(|e| e.into_inner());
     let Some(live) = live_guard.as_mut() else {
         return Ok(None);
     };
@@ -391,7 +394,7 @@ fn emit_audio_chunk(app: &AppHandle, data: Vec<f32>) {
         return;
     }
     let (processed, rms) = process_output_audio(data);
-    append_live_recording(&processed);
+    append_live_recording(app, &processed);
     let _ = app.emit("audio-amplitude", rms.min(1.0));
 }
 
@@ -472,25 +475,25 @@ fn preferred_input_config(device: &cpal::Device) -> Result<cpal::SupportedStream
 }
 
 pub(crate) fn stop_audio_capture_sync() {
-    if let Some(tx) = AUDIO_STATE.tx.lock().unwrap().take() {
+    if let Some(tx) = AUDIO_STATE.tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
         let _ = tx.send(AudioCommand::Stop);
     }
-    if let Some(handle) = AUDIO_STATE.handle.lock().unwrap().take() {
+    if let Some(handle) = AUDIO_STATE.handle.lock().unwrap_or_else(|e| e.into_inner()).take() {
         thread::spawn(move || {
             let _ = handle.join();
         });
     }
-    *AUDIO_STATE.current_mode.lock().unwrap() = "idle".into();
+    *AUDIO_STATE.current_mode.lock().unwrap_or_else(|e| e.into_inner()) = "idle".into();
 }
 
 pub(crate) fn stop_audio_capture_and_wait() {
-    if let Some(tx) = AUDIO_STATE.tx.lock().unwrap().take() {
+    if let Some(tx) = AUDIO_STATE.tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
         let _ = tx.send(AudioCommand::Stop);
     }
-    if let Some(handle) = AUDIO_STATE.handle.lock().unwrap().take() {
+    if let Some(handle) = AUDIO_STATE.handle.lock().unwrap_or_else(|e| e.into_inner()).take() {
         let _ = handle.join();
     }
-    *AUDIO_STATE.current_mode.lock().unwrap() = "idle".into();
+    *AUDIO_STATE.current_mode.lock().unwrap_or_else(|e| e.into_inner()) = "idle".into();
 }
 
 #[cfg(target_os = "macos")]
@@ -507,7 +510,7 @@ fn system_audio_capability() -> Result<(), String> {
 pub async fn get_audio_capabilities() -> AudioCapabilities {
     let system_audio = system_audio_capability();
     let microphone_available = cpal::default_host().default_input_device().is_some();
-    let current_mode = AUDIO_STATE.current_mode.lock().unwrap().clone();
+    let current_mode = AUDIO_STATE.current_mode.lock().unwrap_or_else(|e| e.into_inner()).clone();
     AudioCapabilities {
         system_audio_available: system_audio.is_ok(),
         microphone_available,
@@ -519,7 +522,7 @@ pub async fn get_audio_capabilities() -> AudioCapabilities {
         } else {
             current_mode
         },
-        failure_reason: AUDIO_STATE.failure_reason.lock().unwrap().clone(),
+        failure_reason: AUDIO_STATE.failure_reason.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         sample_rate: TARGET_SAMPLE_RATE,
         audiotee_commit: integration_version().into(),
     }
@@ -547,7 +550,7 @@ pub async fn start_audio_capture(
 
     stop_audio_capture_and_wait();
     discard_live_recording();
-    *AUDIO_STATE.last_recording.lock().unwrap() = None;
+    *AUDIO_STATE.last_recording.lock().unwrap_or_else(|e| e.into_inner()) = None;
     begin_live_recording(&app)?;
     remember_audio_state("starting", None);
     let (cmd_tx, cmd_rx) = mpsc::channel();
@@ -733,12 +736,12 @@ pub async fn start_audio_capture(
         if let Some(process) = audiotee.take() {
             process.stop();
         }
-        let remaining = mixer.lock().unwrap().flush();
+        let remaining = mixer.lock().unwrap_or_else(|e| e.into_inner()).flush();
         emit_audio_chunk(&thread_app, remaining);
     });
 
-    *AUDIO_STATE.tx.lock().unwrap() = Some(cmd_tx);
-    *AUDIO_STATE.handle.lock().unwrap() = Some(handle);
+    *AUDIO_STATE.tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(cmd_tx);
+    *AUDIO_STATE.handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
 
     match startup_rx.recv_timeout(Duration::from_secs(8)) {
         Ok(Ok(payload)) => {
@@ -789,7 +792,7 @@ pub async fn save_audio_recording(
     let path = recording_dir.join(file_name);
     let saved = finalize_live_recording(&path)?;
     if let Some(saved) = &saved {
-        *AUDIO_STATE.last_recording.lock().unwrap() = Some(saved.clone());
+        *AUDIO_STATE.last_recording.lock().unwrap_or_else(|e| e.into_inner()) = Some(saved.clone());
     }
     Ok(saved)
 }
@@ -808,7 +811,7 @@ pub async fn export_audio_recording(app: AppHandle) -> Result<Option<SavedRecord
         return Ok(Some(saved));
     }
 
-    let Some(last_recording) = AUDIO_STATE.last_recording.lock().unwrap().clone() else {
+    let Some(last_recording) = AUDIO_STATE.last_recording.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
         return Ok(None);
     };
     fs::copy(&last_recording.path, &path).map_err(|error| error.to_string())?;

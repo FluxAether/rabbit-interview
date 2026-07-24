@@ -31,7 +31,7 @@ fn platform_supported() -> bool {
 }
 
 fn remember_protection(requested: bool, result: Result<bool, String>) {
-    let mut state = PROTECTION_STATE.lock().unwrap();
+    let mut state = PROTECTION_STATE.lock().unwrap_or_else(|e| e.into_inner());
     state.requested = requested;
     state.request_dispatched = result.is_ok();
     match result {
@@ -54,7 +54,7 @@ fn remember_protection(requested: bool, result: Result<bool, String>) {
 }
 
 fn status(window: Option<&WebviewWindow>) -> CopilotWindowStatus {
-    let state = PROTECTION_STATE.lock().unwrap().clone();
+    let state = PROTECTION_STATE.lock().unwrap_or_else(|e| e.into_inner()).clone();
     CopilotWindowStatus {
         visible: window
             .and_then(|value| value.is_visible().ok())
@@ -71,6 +71,9 @@ fn status(window: Option<&WebviewWindow>) -> CopilotWindowStatus {
 fn native_protection_matches(window: &WebviewWindow, protected: bool) -> Result<bool, String> {
     use objc2_app_kit::{NSWindow, NSWindowSharingType};
     let pointer = window.ns_window().map_err(|error| error.to_string())?;
+    if pointer.is_null() {
+        return Err("Native window pointer is null".into());
+    }
     let window = unsafe { &*pointer.cast::<NSWindow>() };
     let expected = if protected {
         NSWindowSharingType::None
@@ -138,6 +141,9 @@ fn validate_opacity(opacity: f64) -> Result<f64, String> {
 fn set_native_window_opacity(window: &WebviewWindow, opacity: f64) -> Result<(), String> {
     use objc2_app_kit::NSWindow;
     let pointer = window.ns_window().map_err(|error| error.to_string())?;
+    if pointer.is_null() {
+        return Err("Native window pointer is null".into());
+    }
     let window = unsafe { &*pointer.cast::<NSWindow>() };
     window.setAlphaValue(opacity);
     Ok(())
@@ -259,7 +265,7 @@ pub async fn close_copilot_window(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(COPILOT_WINDOW_LABEL) {
         window.close().map_err(|error| error.to_string())?;
     }
-    *PROTECTION_STATE.lock().unwrap() = ProtectionState::default();
+    *PROTECTION_STATE.lock().unwrap_or_else(|e| e.into_inner()) = ProtectionState::default();
     Ok(())
 }
 

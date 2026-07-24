@@ -51,10 +51,8 @@ export default function MockInterview() {
   useEffect(() => () => {
     abortRef.current?.abort()
     acceptingAudioRef.current = false
-    closeDeepgramStream(deepgramRef.current)
-    unlistenRef.current?.()
+    void stopVoice()
     void invoke('stop_speaking')
-    void invoke('stop_audio_capture').catch(() => {})
   }, [])
 
   const patch = (update: Partial<MockInterviewSnapshot>) => setSession(current => ({ ...current, ...update }))

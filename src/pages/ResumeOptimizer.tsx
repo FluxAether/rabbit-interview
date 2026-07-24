@@ -57,8 +57,15 @@ export default function ResumeOptimizer() {
   const [reviewedOptimizedText, setReviewedOptimizedText] = useState("")
   const [viewMode, setViewMode] = useState<"split" | "diff">("split")
   const analysisRequests = useRef(createResumeAnalysisRequestCoordinator())
+  const isMounted = useRef(true)
 
-  useEffect(() => () => analysisRequests.current.cancel(), [])
+  useEffect(() => {
+    isMounted.current = true
+    return () => {
+      isMounted.current = false
+      analysisRequests.current.cancel()
+    }
+  }, [])
 
   const validationMessage = (error: ResumeFileValidationError) => t(`resume.upload.${error}`)
 
@@ -77,6 +84,7 @@ export default function ResumeOptimizer() {
     setStatus(null)
     try {
       const result = await extractResumeText(file)
+      if (!isMounted.current) return
       updateResumeWorkspace({
         original: result.text,
         optimized: "",
@@ -94,6 +102,7 @@ export default function ResumeOptimizer() {
       })
     } catch (error) {
       console.warn("Failed to import resume", error)
+      if (!isMounted.current) return
       setStatus({
         kind: "error",
         text: t(error instanceof Error && error.message === "resume-text-too-long"
@@ -101,7 +110,7 @@ export default function ResumeOptimizer() {
           : "resume.importError"),
       })
     } finally {
-      setIsParsing(false)
+      if (isMounted.current) setIsParsing(false)
     }
   }
 
@@ -139,11 +148,11 @@ export default function ResumeOptimizer() {
     setStatus(null)
     try {
       const result = await optimizeResumeWithLlm(source, jobDescription, language, request.signal)
-      if (!request.isLatest()) return
+      if (!request.isLatest() || !isMounted.current) return
       setResumeAnalysis(result)
       setStatus({ kind: "success", text: t("resume.analysisComplete") })
     } catch (error) {
-      if (!request.isLatest()) return
+      if (!request.isLatest() || !isMounted.current) return
       console.warn("Failed to optimize resume with LLM", error)
       const key = request.signal.aborted
         ? "resume.analysisTimeout"
@@ -154,7 +163,7 @@ export default function ResumeOptimizer() {
     } finally {
       const latest = request.isLatest()
       request.finish()
-      if (latest) setIsAnalyzing(false)
+      if (latest && isMounted.current) setIsAnalyzing(false)
     }
   }
 
@@ -171,12 +180,14 @@ export default function ResumeOptimizer() {
     setStatus(null)
     try {
       await downloadResumeDocx(resumeOptimized, sanitizeResumeFilename(resumeSourceFileName))
+      if (!isMounted.current) return
       setStatus({ kind: "success", text: t("resume.exportSuccess") })
     } catch (error) {
       console.warn("Failed to export resume", error)
+      if (!isMounted.current) return
       setStatus({ kind: "error", text: t("resume.exportError") })
     } finally {
-      setIsExporting(false)
+      if (isMounted.current) setIsExporting(false)
     }
   }
 
@@ -186,8 +197,10 @@ export default function ResumeOptimizer() {
     clearResumeWorkspace()
     try {
       await clearSavedResumeWorkspace()
+      if (!isMounted.current) return
       setStatus({ kind: "success", text: t("resume.cleared") })
     } catch {
+      if (!isMounted.current) return
       setStatus({ kind: "error", text: t("resume.persistenceError") })
     }
   }
@@ -288,7 +301,7 @@ export default function ResumeOptimizer() {
             </button>
             {!factsReviewed && resumeOptimized.trim() && (
               <div className="absolute right-0 top-full mt-2 hidden w-64 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 shadow-lg group-hover:block dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200 z-10">
-                <div className="font-semibold mb-1 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5 text-amber-600" /> 导出未解锁</div>
+                <div className="font-semibold mb-1 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5 text-amber-600" /> {t("resume.exportLocked")}</div>
                 {t("resume.factReviewRequired")}
               </div>
             )}
@@ -316,8 +329,8 @@ export default function ResumeOptimizer() {
           <div className="flex items-center gap-3">
             <AlertCircle className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
             <div>
-              <span className="font-semibold">未完成事实核对确认：</span>
-              <span>导出功能目前已锁定。请在下方核对优化内容后勾选“事实核对确认”复选框。</span>
+              <span className="font-semibold">{t("resume.factReviewPending")}</span>
+              <span>{t("resume.factReviewLockNotice")}</span>
             </div>
           </div>
           <button
@@ -325,7 +338,7 @@ export default function ResumeOptimizer() {
             onClick={() => setReviewedOptimizedText(resumeOptimized)}
             className="shrink-0 rounded-lg bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
           >
-            一键确认核对
+            {t("resume.oneClickConfirm")}
           </button>
         </div>
       )}
@@ -373,7 +386,7 @@ export default function ResumeOptimizer() {
                 : "text-[#64748b] hover:text-[#0f172a] dark:text-[#94a3b8] dark:hover:text-white"
             }`}
           >
-            左右对比 (Split View)
+            {t("resume.viewSplit")}
           </button>
           <button
             type="button"
@@ -384,7 +397,7 @@ export default function ResumeOptimizer() {
                 : "text-[#64748b] hover:text-[#0f172a] dark:text-[#94a3b8] dark:hover:text-white"
             }`}
           >
-            差异对比 (Diff View)
+            {t("resume.viewDiff")}
           </button>
         </div>
       </div>
@@ -392,13 +405,13 @@ export default function ResumeOptimizer() {
       {viewMode === "diff" ? (
         <section className="card p-5">
           <div className="mb-3 flex items-center justify-between text-sm">
-            <div className="font-medium text-[#334155] dark:text-[#e2e8f0]">修改差异对比 (Diff View)</div>
+            <div className="font-medium text-[#334155] dark:text-[#e2e8f0]">{t("resume.diffTitle")}</div>
             <div className="flex items-center gap-4 text-xs">
               <span className="flex items-center gap-1 text-red-600 dark:text-red-400">
-                <span className="h-2 w-2 rounded-full bg-red-500" /> 原文删改
+                <span className="h-2 w-2 rounded-full bg-red-500" /> {t("resume.diffRemoved")}
               </span>
               <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" /> 优化精进/新增
+                <span className="h-2 w-2 rounded-full bg-emerald-500" /> {t("resume.diffAdded")}
               </span>
             </div>
           </div>
@@ -465,7 +478,7 @@ export default function ResumeOptimizer() {
                 />
                 <div>
                   <span className="font-medium">
-                    {!factsReviewed && resumeOptimized.trim() ? "⚠️ [导出前必读] 事实核对确认" : "事实核对确认"}
+                    {!factsReviewed && resumeOptimized.trim() ? t("resume.factReviewConfirmWarning") : t("resume.factReviewConfirmLabel")}
                   </span>
                   <p className="mt-0.5 text-[11px] opacity-90">{t("resume.factReviewConfirm")}</p>
                 </div>
@@ -508,7 +521,7 @@ export default function ResumeOptimizer() {
                       className="flex items-center gap-1 rounded-lg bg-[#6366f1] px-2.5 py-1 text-xs text-white hover:bg-[#4f46e5] disabled:opacity-40"
                     >
                       <Sparkles className="h-3 w-3" />
-                      {suggestion.applied ? "已应用" : "一键应用"}
+                      {suggestion.applied ? t("resume.applied") : t("resume.applyOneClick")}
                     </button>
                   </div>
                 </div>

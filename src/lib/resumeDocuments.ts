@@ -1,7 +1,7 @@
 import { Document, HeadingLevel, Packer, Paragraph } from 'docx'
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-const SECTION_HEADINGS = /^(?:experience|education|skills|projects|summary|profile|certifications|工作经历|教育经历|技能|项目经历|个人总结|个人简介|证书)$/i
+const SECTION_HEADINGS = /^(?:experience|education|skills|projects|summary|profile|certifications|工作经历|实习经历|教育经历|技能|专业技能|技能专长|项目经历|项目课题|个人总结|个人简介|自我评价|证书|获奖情况|荣誉证书|荣誉奖项|求职意向|基本信息|校内职务|论文成果|语言能力)$/i
 
 function isSectionHeading(line: string): boolean {
   if (SECTION_HEADINGS.test(line)) return true

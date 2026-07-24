@@ -8,7 +8,10 @@
     "opener:default",
     "sql:default",
     "sql:allow-execute",
-    "fs:default",
+    {
+      "identifier": "fs:scope",
+      "allow": ["$APPDATA/recordings/**"]
+    },
     "dialog:default",
     "global-shortcut:default",
     "core:window:default",

@@ -209,7 +209,14 @@ export function reduceCopilotSnapshot(
   }
 
   if (action.type === 'error') {
-    if (action.sessionId !== null && !isCurrent(snapshot, action.sessionId)) return snapshot
+    if (
+      action.sessionId !== null
+      && !isCurrent(snapshot, action.sessionId)
+      && snapshot.phase !== 'stopping'
+      && snapshot.sessionId !== null
+    ) {
+      return snapshot
+    }
     return {
       ...snapshot,
       phase: 'error',

@@ -1,4 +1,5 @@
 import { ArrowDown, ArrowUp, Users, TrendingUp, ClipboardCheck, Rocket } from 'lucide-react'
+import { useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
@@ -37,9 +38,9 @@ function DeltaBadge({ value, unit }: { value: number | null; unit: string }) {
 }
 
 export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateToSettings }: DashboardProps) {
-  const { history } = useAppStore()
+  const history = useAppStore((state) => state.history)
   const t = useTranslation()
-  const stats = computeDashboardStats(history)
+  const stats = useMemo(() => computeDashboardStats(history), [history])
 
   const launch = async () => {
     try {

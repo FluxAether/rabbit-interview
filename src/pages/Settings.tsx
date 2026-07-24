@@ -336,7 +336,7 @@ export default function Settings() {
     if (!targetKey) {
       setTestResults((prev) => ({
         ...prev,
-        [provider]: { loading: false, success: false, message: '请先输入或保存 API Key' },
+        [provider]: { loading: false, success: false, message: t('settings.test.promptKey') },
       }))
       return
     }
@@ -385,7 +385,7 @@ export default function Settings() {
             loading: false,
             success: true,
             latencyMs: elapsed,
-            message: `${elapsed}ms - 连接正常`,
+            message: `${elapsed}ms - ${t('settings.test.connected')}`,
           },
         }))
       } else {
@@ -401,7 +401,7 @@ export default function Settings() {
           [provider]: {
             loading: false,
             success: false,
-            message: `连接失败: ${errDetail || 'API Key 无效'}`,
+            message: `${t('settings.test.failed')}: ${errDetail || t('settings.test.invalidKey')}`,
           },
         }))
       }
@@ -411,7 +411,7 @@ export default function Settings() {
         [provider]: {
           loading: false,
           success: false,
-          message: `连接失败: ${e?.message || '网络无法连接'}`,
+          message: `${t('settings.test.failed')}: ${e?.message || t('settings.test.networkError')}`,
         },
       }))
     }
@@ -459,12 +459,12 @@ export default function Settings() {
             {testResult.loading ? (
               <>
                 <Loader2 className="w-3 h-3 animate-spin text-[#6366f1]" />
-                <span>测试中...</span>
+                <span>{t('settings.test.testing')}</span>
               </>
             ) : (
               <>
                 <Zap className="w-3 h-3 text-[#6366f1]" />
-                <span>测试连通性</span>
+                <span>{t('settings.test.testConnection')}</span>
               </>
             )}
           </button>
@@ -524,7 +524,7 @@ export default function Settings() {
               }`}
             >
               <Sliders className="w-4 h-4" />
-              <span>通用设置 General</span>
+              <span>{t('settings.tab.general')}</span>
             </button>
 
             <button
@@ -536,7 +536,7 @@ export default function Settings() {
               }`}
             >
               <Cpu className="w-4 h-4" />
-              <span>AI 模型与 Key</span>
+              <span>{t('settings.tab.ai')}</span>
             </button>
 
             <button
@@ -548,7 +548,7 @@ export default function Settings() {
               }`}
             >
               <Mic className="w-4 h-4" />
-              <span>语音识别 STT</span>
+              <span>{t('settings.tab.stt')}</span>
             </button>
 
             <button
@@ -560,7 +560,7 @@ export default function Settings() {
               }`}
             >
               <Shield className="w-4 h-4" />
-              <span>快捷键与隐私</span>
+              <span>{t('settings.tab.shortcutsPrivacy')}</span>
             </button>
           </nav>
 
@@ -949,7 +949,7 @@ export default function Settings() {
                           <option value="zh-CN">简体中文</option>
                           <option value="zh-TW">繁體中文</option>
                           <option value="en-US">English</option>
-                          <option value="multi">多语言自动识别</option>
+                          <option value="multi">{t('settings.stt.langMulti')}</option>
                         </select>
                       </div>
 

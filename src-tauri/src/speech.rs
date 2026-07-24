@@ -5,7 +5,7 @@ use std::sync::Mutex;
 static SPEECH_PROCESS: Lazy<Mutex<Option<Child>>> = Lazy::new(|| Mutex::new(None));
 
 fn stop_current() {
-    if let Some(mut child) = SPEECH_PROCESS.lock().unwrap().take() {
+    if let Some(mut child) = SPEECH_PROCESS.lock().unwrap_or_else(|e| e.into_inner()).take() {
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -52,7 +52,7 @@ pub async fn speak_text(text: String, language: String, rate: Option<u16>) -> Re
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         let child = command.spawn().map_err(|error| error.to_string())?;
-        *SPEECH_PROCESS.lock().unwrap() = Some(child);
+        *SPEECH_PROCESS.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
         Ok(())
     }
 

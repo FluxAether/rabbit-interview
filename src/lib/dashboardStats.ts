@@ -1,4 +1,4 @@
-import type { InterviewRecord } from '../stores/useAppStore'
+import type { InterviewRecord } from "../stores/useAppStore"
 
 export interface DashboardStats {
   interviewCount: number
@@ -9,10 +9,14 @@ export interface DashboardStats {
   scoredDeltaPct: number | null
 }
 
-type InterviewLike = Pick<InterviewRecord, 'date' | 'score'>
+type InterviewLike = Pick<InterviewRecord, "date" | "score">
 
 function parseInterviewDate(date: string): Date | null {
-  const normalized = date.includes('T') ? date : date.replace(' ', 'T')
+  if (!date) return null
+  let normalized = date.includes("T") ? date : date.replace(" ", "T")
+  if (!normalized.endsWith("Z") && !/[+-]\d{2}:?\d{2}$/.test(normalized)) {
+    normalized += "Z"
+  }
   const parsed = new Date(normalized)
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
@@ -27,7 +31,7 @@ function averageScore(scores: number[]): number | null {
 }
 
 function percentDelta(current: number, previous: number): number | null {
-  if (previous === 0) return null
+  if (previous === 0) return current > 0 ? 100 : 0
   return Math.round(((current - previous) / previous) * 100)
 }
 
@@ -40,7 +44,7 @@ function collectMonthStats(records: InterviewLike[], targetMonth: number) {
     const date = parseInterviewDate(record.date)
     if (!date || monthIndex(date) !== targetMonth) continue
     interviewCount += 1
-    if (typeof record.score === 'number' && Number.isFinite(record.score)) {
+    if (typeof record.score === "number" && Number.isFinite(record.score)) {
       scoredCount += 1
       scores.push(record.score)
     }
@@ -62,7 +66,7 @@ export function computeDashboardStats(
   const current = collectMonthStats(records, currentMonth)
   const previous = collectMonthStats(records, previousMonth)
   const scoredScores = records.flatMap((record) =>
-    typeof record.score === 'number' && Number.isFinite(record.score) ? [record.score] : [],
+    typeof record.score === "number" && Number.isFinite(record.score) ? [record.score] : [],
   )
 
   return {

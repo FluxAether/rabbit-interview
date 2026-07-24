@@ -546,8 +546,8 @@ class CopilotSessionHost {
 
   private async installAudioListeners(sessionId: number): Promise<void> {
     await this.cleanupRuntime()
-    this.unlisteners.push(
-      await listen<{ sample_rate: number }>('audio-config', (event) => {
+    const listeners = await Promise.all([
+      listen<{ sample_rate: number }>('audio-config', (event) => {
         if (!this.isCurrent(sessionId)) return
         const nextRate = event.payload.sample_rate || 16_000
         if (nextRate !== this.sampleRate) {
@@ -557,22 +557,29 @@ class CopilotSessionHost {
           })
         }
       }),
-      await listen<AudioSourceChunk>('audio-source-chunk', (event) => {
+      listen<AudioSourceChunk>('audio-source-chunk', (event) => {
         if (!this.isCurrent(sessionId)) return
         sendAudioChunk(this.deepgrams[event.payload.source], new Float32Array(event.payload.samples))
       }),
-      await listen<number>('audio-amplitude', (event) => {
+      listen<number>('audio-amplitude', (event) => {
         if (!this.isCurrent(sessionId)) return
         if (!this.snapshot.hasRecording) {
           this.transition({ type: 'recording', sessionId })
         }
         this.transition({ type: 'amplitude', sessionId, amplitude: event.payload })
       }),
-      await listen<string>('audio-error', (event) => {
+      listen<string>('audio-error', (event) => {
         if (!this.isCurrent(sessionId)) return
         void this.fail(sessionId, event.payload)
       }),
-    )
+    ])
+
+    if (!this.isCurrent(sessionId)) {
+      listeners.forEach((unlisten) => unlisten())
+      return
+    }
+
+    this.unlisteners.push(...listeners)
   }
 
   private async startDeepgrams(
@@ -788,8 +795,11 @@ class CopilotSessionHost {
         error: error instanceof Error ? error.message : String(error),
       })
     } finally {
-      if (this.activeAnswer?.controller === controller) {
+      const wasActive = this.activeAnswer?.controller === controller
+      if (wasActive) {
         this.activeAnswer = null
+      }
+      if (wasActive || controller.signal.aborted) {
         this.resumePendingInterviewerAnswer(sessionId)
       }
     }
@@ -822,12 +832,23 @@ export async function mountCopilotSessionHost(): Promise<() => void> {
   activeHostUsers += 1
   if (!activeHostPromise) {
     const host = new CopilotSessionHost()
-    activeHostPromise = host.mount().then(() => {
-      activeHost = host
-      return host
-    })
+    activeHostPromise = host
+      .mount()
+      .then(() => {
+        activeHost = host
+        return host
+      })
+      .catch((error) => {
+        activeHostPromise = null
+        throw error
+      })
   }
-  await activeHostPromise
+  try {
+    await activeHostPromise
+  } catch (error) {
+    activeHostUsers -= 1
+    throw error
+  }
   let released = false
   return () => {
     if (released) return
