@@ -31,6 +31,7 @@ build_target() {
   actual=$(shasum -a 256 "$built" | awk '{print $1}')
   cp "$built" "$BINARY_DIR/audiotee-$tauri_target"
   chmod 755 "$BINARY_DIR/audiotee-$tauri_target"
+  codesign -f -s - "$BINARY_DIR/audiotee-$tauri_target"
   printf '%s  %s\n' "$actual" "audiotee-$tauri_target" >> "$CHECKSUM_LOG"
   echo "AudioTee $tauri_target SHA-256: $actual"
 }
@@ -56,6 +57,7 @@ if [ "$requested" = "universal" ]; then
   printf '%s  %s\n' "$universal_checksum" "audiotee-universal-apple-darwin" >> "$CHECKSUM_LOG"
   echo "AudioTee universal-apple-darwin SHA-256: $universal_checksum"
   chmod 755 "$universal"
+  codesign -f -s - "$universal"
 elif [ -n "$requested" ]; then
   build_target "$requested"
 elif [ "$(uname -m)" = "arm64" ]; then
