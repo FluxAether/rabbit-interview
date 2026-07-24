@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
-import { Clock, FileText, LayoutDashboard, Mic, PanelLeftClose, PanelLeftOpen, Rocket, Settings as SettingsIcon, Shield, Sparkles } from 'lucide-react'
+import { Clock, FileText, LayoutDashboard, Mic, PanelLeftClose, PanelLeftOpen, Rocket, Settings as SettingsIcon, Sparkles } from 'lucide-react'
 import CopilotPanel from './components/CopilotPanel'
 import Dashboard from './pages/Dashboard'
 import History from './pages/History'
@@ -60,9 +60,7 @@ function Sidebar({
       {/* Brand Header */}
       {collapsed ? (
         <div className="mb-4 flex flex-col items-center gap-2 py-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#6366f1] shadow-sm">
-            <Shield className="h-5 w-5 text-white" />
-          </div>
+          <img src="/logo.png" alt="Logo" className="h-9 w-9 shrink-0 rounded-xl object-contain shadow-sm" />
           <button
             type="button"
             onClick={onToggleCollapse}
@@ -75,9 +73,7 @@ function Sidebar({
       ) : (
         <div className="mb-4 flex items-center justify-between px-2 py-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#6366f1] shadow-sm">
-              <Shield className="h-5 w-5 text-white" />
-            </div>
+            <img src="/logo.png" alt="Logo" className="h-9 w-9 shrink-0 rounded-xl object-contain shadow-sm" />
             <div className="min-w-0">
               <div className="truncate text-base font-semibold tracking-tight text-[#0f172a] dark:text-[#f8fafc]">
                 {t('app.name')}
