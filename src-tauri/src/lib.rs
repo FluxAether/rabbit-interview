@@ -96,7 +96,7 @@ fn greet(name: &str) -> String {
         .run(|_app_handle, event| {
             if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
                 audio::stop_audio_capture_and_wait();
-                speech::stop_speaking();
+                speech::stop_current();
             }
         });
 }

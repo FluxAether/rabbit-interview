@@ -398,6 +398,7 @@ fn emit_audio_chunk(app: &AppHandle, data: Vec<f32>) {
     let _ = app.emit("audio-amplitude", rms.min(1.0));
 }
 
+#[allow(dead_code)]
 fn write_pcm16_wav<W: Write>(
     writer: &mut W,
     samples: &[f32],
@@ -501,7 +502,17 @@ fn system_audio_capability() -> Result<(), String> {
     audiotee::system_audio_support()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn system_audio_capability() -> Result<(), String> {
+    let host = cpal::default_host();
+    if host.default_output_device().is_some() {
+        Ok(())
+    } else {
+        Err("No default output audio device available for WASAPI loopback capture".into())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn system_audio_capability() -> Result<(), String> {
     Err("Built-in system audio capture is not available on this platform; microphone-only mode is available".into())
 }
@@ -732,6 +743,8 @@ pub async fn start_audio_capture(
 
         let _ = cmd_rx.recv();
         drop(microphone_stream);
+        #[cfg(target_os = "windows")]
+        drop(system_stream);
         #[cfg(target_os = "macos")]
         if let Some(process) = audiotee.take() {
             process.stop();

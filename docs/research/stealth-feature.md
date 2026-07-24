@@ -1,12 +1,12 @@
-# 即答侠（HireMe AI）隐身功能一手资料研究
+# 同类软件（HireMe AI）隐身功能一手资料研究
 
 > 核验日期：2026-07-20  
 > 当前官网桌面端版本：v0.3.44；官方教程标注适用于桌面端 v0.3.34+，最后更新于 2026 年 5 月。  
-> 研究边界：只记录即答侠官方站点及官方教程的公开信息，不把厂商自测等同于第三方验证。
+> 研究边界：只记录同类软件官方站点及官方教程的公开信息，不把厂商自测等同于第三方验证。
 
 ## 结论摘要
 
-即答侠的“隐身”不是单一的隐藏窗口开关，而是一组覆盖不同风险层的能力：操作系统级窗口捕获排除、始终置顶浮窗、快捷键无鼠标操作、截图前临时自隐藏、窗口名称伪装、副屏放置、透明度与工具栏控制，以及手机端物理隔离。官方明确把它用于实时语音面试和截图解题，并公开宣称浮窗不会出现在屏幕共享和录屏中。[官方首页](https://interviewasssistant.com/zh) [官方教程](https://interviewasssistant.com/tutorial)
+同类软件的“隐身”不是单一的隐藏窗口开关，而是一组覆盖不同风险层的能力：操作系统级窗口捕获排除、始终置顶浮窗、快捷键无鼠标操作、截图前临时自隐藏、窗口名称伪装、副屏放置、透明度与工具栏控制，以及手机端物理隔离。官方明确把它用于实时语音面试和截图解题，并公开宣称浮窗不会出现在屏幕共享和录屏中。[官方首页](https://interviewasssistant.com/zh) [官方教程](https://interviewasssistant.com/tutorial)
 
 但“不会被共享/录屏捕获”不等于“不会被检测”：官方教程明确区分了屏幕共享豁免、窗口焦点变化、进程扫描和物理摄像头，并承认隐身豁免存在“极少数”失效可能。因此对比其他产品时，应将其表述为**厂商声明的软件捕获排除能力**，不能外推成所有会议、监考或物理拍摄条件下均绝对不可见。[官方教程：浮窗调整、隐身设置与排障](https://interviewasssistant.com/tutorial)
 
@@ -41,7 +41,7 @@
 | Windows | Windows 10/11 64 位 | 官网直接下载 EXE |
 | Linux | 官方下载页未列出 | 未发现官方版本 |
 
-来源：[官方下载页](https://interviewasssistant.com/zh/download)；首页当前列出的安装包版本为 v0.3.44：[官方首页](https://interviewasssistant.com/zh)。本次未找到即答侠的 App Store 或 Microsoft Store 开发者页面，不能写成已通过应用商店分发。
+来源：[官方下载页](https://interviewasssistant.com/zh/download)；首页当前列出的安装包版本为 v0.3.44：[官方首页](https://interviewasssistant.com/zh)。本次未找到同类软件的 App Store 或 Microsoft Store 开发者页面，不能写成已通过应用商店分发。
 
 ### Web 版边界
 
@@ -79,7 +79,7 @@
 
 ### 研究判断
 
-“共享/录屏不可见”是即答侠官方对自身实现和自测结果的声明，本次未找到独立实验室或会议软件厂商的验证材料。最稳妥的比较口径是：**它提供 OS 级内容保护并针对多款常见软件做了厂商自测，但官方也明确提供了失效时的副屏与手机降级路径。**
+“共享/录屏不可见”是同类软件官方对自身实现和自测结果的声明，本次未找到独立实验室或会议软件厂商的验证材料。最稳妥的比较口径是：**它提供 OS 级内容保护并针对多款常见软件做了厂商自测，但官方也明确提供了失效时的副屏与手机降级路径。**
 
 ## 4. UI 结构
 
@@ -173,7 +173,7 @@
 - **物理摄像头不受保护。** 双机位或拍屏场景只能通过副屏或手机位置做物理隔离，不能靠窗口捕获排除解决。[官方教程：双机位与现场监考](https://interviewasssistant.com/tutorial)
 - **网络是硬依赖。** 下载页要求稳定网络；教程在网络失败时建议切热点、关闭 VPN 或稍后恢复转录。[官方下载页](https://interviewasssistant.com/zh/download) [官方教程：网络排障](https://interviewasssistant.com/tutorial)
 - **答案质量依赖上下文和模型档位。** 官方教程明确警告未填写简历、JD、自我介绍或知识库时可能答非所问、编造经历；低档模型生成代码也可能无法编译。[官方教程：答案与代码排障](https://interviewasssistant.com/tutorial)
-- **服务条款限制考试使用。** 即答侠条款明确禁止在不允许辅助工具的考试或测评中使用服务，因此“产品提供伪装/监考场景指引”不等于用户被授权绕过考试规则。[官方服务条款](https://interviewasssistant.com/zh/terms)
+- **服务条款限制考试使用。** 同类软件条款明确禁止在不允许辅助工具的考试或测评中使用服务，因此“产品提供伪装/监考场景指引”不等于用户被授权绕过考试规则。[官方服务条款](https://interviewasssistant.com/zh/terms)
 
 ## 8. 付费边界
 
@@ -202,10 +202,10 @@
 
 ## 主要一手来源
 
-- [即答侠官方首页、当前下载与定价](https://interviewasssistant.com/zh)
-- [即答侠 Copilot 完整使用教程](https://interviewasssistant.com/tutorial)
-- [即答侠 Dashboard Copilot 页面](https://interviewasssistant.com/zh/dashboard/copilot)
-- [即答侠 Copilot 功能页](https://interviewasssistant.com/zh/interview-copilot)
+- [同类软件官方首页、当前下载与定价](https://interviewasssistant.com/zh)
+- [同类软件 Copilot 完整使用教程](https://interviewasssistant.com/tutorial)
+- [同类软件 Dashboard Copilot 页面](https://interviewasssistant.com/zh/dashboard/copilot)
+- [同类软件 Copilot 功能页](https://interviewasssistant.com/zh/interview-copilot)
 - [官方技术博客：系统音频与隐身窗口实现](https://interviewasssistant.com/zh/blog/hireme-ai-core-tech)
 - [官方下载页](https://interviewasssistant.com/zh/download)
 - [官方服务条款](https://interviewasssistant.com/zh/terms)

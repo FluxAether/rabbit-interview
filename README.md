@@ -1,8 +1,8 @@
-# RabbitInterview (即答侠) — Desktop Interview Copilot
+# RabbitInterview — Desktop Interview Copilot
 
 Full-featured cross-platform desktop app built with **Tauri 2 + React 19**.
 
-Replicates and enhances all core features of 即答侠:
+Replicates and enhances core interview copilot features:
 - Real-time Stealth Copilot (system audio + AI suggestions in floating window)
 - AI Mock Interviews
 - Intelligent Resume Optimizer

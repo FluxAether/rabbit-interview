@@ -27,8 +27,14 @@ impl Pcm16LeDecoder {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn integration_version() -> &'static str {
     AUDIOTEE_COMMIT
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn integration_version() -> &'static str {
+    "wasapi-loopback"
 }
 
 #[cfg(target_os = "macos")]
