@@ -95,6 +95,7 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
+            src-tauri/target/${{ matrix.target }}/release/latest.json
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz.sig

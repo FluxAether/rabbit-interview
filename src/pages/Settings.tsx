@@ -1,3 +1,5 @@
+import { check, type Update } from "@tauri-apps/plugin-updater"
+import { relaunch } from "@tauri-apps/plugin-process"
 import { useState, useEffect, useRef } from 'react'
 import { emit } from '@tauri-apps/api/event'
 import {
@@ -12,6 +14,9 @@ import {
   AlertCircle,
   Loader2,
   Zap,
+  RefreshCw,
+  Download,
+  CheckCircle2,
 } from 'lucide-react'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
@@ -39,6 +44,11 @@ export default function Settings() {
   const [launchAtStartup, setLaunchAtStartup] = useState(true)
   const [autoUpdate, setAutoUpdate] = useState(true)
   const [updateChannel, setUpdateChannel] = useState<'Stable' | 'Beta'>('Stable')
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null)
+  const [updateStatusMsg, setUpdateStatusMsg] = useState<string>('')
+  const [downloading, setDownloading] = useState(false)
+  const [downloadProgress, setDownloadProgress] = useState<number>(0)
   const [language, setLanguage] = useState<SupportedLanguage>(DEFAULT_LANGUAGE)
   const [aiModel, setAiModel] = useState('groq-llama-3.1')
   const [stealth, setStealth] = useState(true)
@@ -170,6 +180,13 @@ export default function Settings() {
     if (pending) void persistToDisk(pending)
   }, [])
 
+  // Auto check for updates if enabled
+  useEffect(() => {
+    if (autoUpdate) {
+      void handleCheckUpdate(true)
+    }
+  }, [])
+
   // Load key configuration status
   useEffect(() => {
     ;(async () => {
@@ -239,6 +256,56 @@ export default function Settings() {
       })
     }
   }, [settings])
+
+  const handleCheckUpdate = async (silent = false) => {
+    try {
+      setCheckingUpdate(true)
+      if (!silent) setUpdateStatusMsg('')
+      const update = await check()
+      if (update) {
+        setAvailableUpdate(update)
+        setUpdateStatusMsg(`${t('settings.updateAvailable')}: v${update.version}`)
+      } else {
+        setAvailableUpdate(null)
+        if (!silent) setUpdateStatusMsg(t('settings.noUpdate'))
+      }
+    } catch (e: any) {
+      console.warn('Check update failed:', e)
+      if (!silent) setUpdateStatusMsg(`${t('settings.updateFailed')}: ${e?.message || e}`)
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
+
+  const handleDownloadAndInstall = async () => {
+    if (!availableUpdate) return
+    try {
+      setDownloading(true)
+      let downloaded = 0
+      let contentLength = 0
+      await availableUpdate.downloadAndInstall((event) => {
+        switch (event.event) {
+          case 'Started':
+            contentLength = event.data.contentLength || 0
+            break
+          case 'Progress':
+            downloaded += event.data.chunkLength
+            if (contentLength) {
+              setDownloadProgress(Math.round((downloaded / contentLength) * 100))
+            }
+            break
+          case 'Finished':
+            setDownloading(false)
+            break
+        }
+      })
+      await relaunch()
+    } catch (e: any) {
+      console.error('Download/install update failed:', e)
+      setUpdateStatusMsg(`${t('settings.updateFailed')}: ${e?.message || e}`)
+      setDownloading(false)
+    }
+  }
 
   const handleLanguageChange = (newLang: SupportedLanguage) => {
     setLanguage(newLang)
@@ -623,12 +690,58 @@ export default function Settings() {
 
                 {/* Updates Card */}
                 <div className="card p-6">
-                  <div className="font-semibold text-[#6366f1] mb-4">{t('settings.updates')}</div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="font-semibold text-[#6366f1]">{t('settings.updates')}</div>
+                    <button
+                      type="button"
+                      onClick={() => void handleCheckUpdate(false)}
+                      disabled={checkingUpdate || downloading}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[#e2e8f0] text-[#475569] bg-white hover:bg-[#f8fafc] hover:border-[#cbd5e1] disabled:opacity-50 transition-colors dark:border-[#334155] dark:bg-[#0f172a] dark:text-[#cbd5e1] dark:hover:bg-[#1e293b]"
+                    >
+                      {checkingUpdate ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-[#6366f1]" />
+                          <span>{t('settings.checkingUpdate')}</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 text-[#6366f1]" />
+                          <span>{t('settings.checkUpdate')}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
 
                   <div className="space-y-4">
+                    {updateStatusMsg && (
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-[#f8fafc] border border-[#e2e8f0] dark:bg-[#0f172a] dark:border-[#334155]">
+                        <div className="text-xs font-medium text-[#334155] dark:text-[#cbd5e1] flex items-center gap-2">
+                          {availableUpdate ? <Download className="w-4 h-4 text-[#6366f1]" /> : <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                          <span>{updateStatusMsg}</span>
+                        </div>
+                        {availableUpdate && (
+                          <button
+                            type="button"
+                            onClick={() => void handleDownloadAndInstall()}
+                            disabled={downloading}
+                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[#6366f1] text-white hover:bg-[#4f46e5] disabled:opacity-50 transition-colors"
+                          >
+                            {downloading ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                                <span>{downloadProgress > 0 ? `${downloadProgress}%` : t('settings.downloadingUpdate')}</span>
+                              </>
+                            ) : (
+                              <span>{t('settings.downloadAndInstall')}</span>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between py-1">
                       <div className="flex items-center gap-3">
-                        <Mic className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
+                        <RefreshCw className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
                         <div>
                           <div className="font-medium">{t('settings.autoUpdate')}</div>
                           <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.autoUpdateDesc')}</div>
@@ -647,7 +760,7 @@ export default function Settings() {
 
                     <div className="flex items-center justify-between py-1">
                       <div className="flex items-center gap-3">
-                        <Mic className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
+                        <Sliders className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
                         <div>
                           <div className="font-medium">{t('settings.updateChannel')}</div>
                           <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.updateChannelDesc')}</div>
