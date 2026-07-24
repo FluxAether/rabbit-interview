@@ -744,7 +744,9 @@ pub async fn start_audio_capture(
         let _ = cmd_rx.recv();
         drop(microphone_stream);
         #[cfg(target_os = "windows")]
-        drop(system_stream);
+        // system_stream is macos/cpal loopback specific when active
+        #[cfg(target_os = "windows")]
+        let _ = ();
         #[cfg(target_os = "macos")]
         if let Some(process) = audiotee.take() {
             process.stop();

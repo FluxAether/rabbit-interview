@@ -1,3 +1,4 @@
+#[cfg(target_os = "macos")]
 use std::io::Read;
 
 pub(crate) const AUDIOTEE_SAMPLE_RATE: u32 = 16_000;

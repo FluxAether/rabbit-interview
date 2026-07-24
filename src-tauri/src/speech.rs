@@ -27,7 +27,9 @@ pub async fn stop_speaking() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn speak_text(text: String, language: String, rate: Option<u16>) -> Result<(), String> {
+pub async fn speak_text(text: String, _language: String, rate: Option<u16>) -> Result<(), String> {
+    #[allow(unused_variables)]
+    let language = _language;
     stop_current();
     let text = text.trim();
     if text.is_empty() {

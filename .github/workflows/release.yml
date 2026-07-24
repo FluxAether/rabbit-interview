@@ -72,6 +72,7 @@ jobs:
         run: |
           test -x src-tauri/target/${{ matrix.target }}/release/bundle/macos/RabbitInterview.app/Contents/MacOS/audiotee
           test "$(lipo -archs src-tauri/target/${{ matrix.target }}/release/bundle/macos/RabbitInterview.app/Contents/MacOS/audiotee)" = "x86_64 arm64"
+          codesign -f -s - --deep src-tauri/target/${{ matrix.target }}/release/bundle/macos/RabbitInterview.app
           codesign --verify --deep --strict src-tauri/target/${{ matrix.target }}/release/bundle/macos/RabbitInterview.app
 
       - name: Build Tauri App (Windows)
