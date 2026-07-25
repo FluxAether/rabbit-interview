@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 
 const SYSTEM_GAIN_WHEN_MIXED: f32 = 1.0;
 const MICROPHONE_GAIN_WHEN_MIXED: f32 = 0.25;
+// Dual-source alignment only needs a short holdback window. Sleep/wake backlog
+// otherwise becomes an O(n log n) BTreeMap storm and multi-second silence fill.
+const MAX_PENDING_SECONDS: f64 = 0.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AudioSource {
@@ -42,6 +45,52 @@ impl TimedAudioMixer {
         }
     }
 
+    fn max_source_lag(&self) -> i64 {
+        i64::from((self.sample_rate / 2).max(1))
+    }
+
+    fn clamp_sample(sample: f32) -> f32 {
+        sample.clamp(-0.98, 0.98)
+    }
+
+    fn single_source_enabled(&self) -> Option<AudioSource> {
+        match (self.system_enabled, self.microphone_enabled) {
+            (true, false) => Some(AudioSource::System),
+            (false, true) => Some(AudioSource::Microphone),
+            _ => None,
+        }
+    }
+
+    /// Mic-only / system-only never needs timed interleaving storage.
+    fn push_single_source(&mut self, source: AudioSource, samples: Vec<f32>) -> Vec<f32> {
+        let start_frame = self.next_frame.unwrap_or(0);
+        let end_frame = start_frame.saturating_add(samples.len() as i64);
+        match source {
+            AudioSource::System => {
+                self.first_system_frame.get_or_insert(start_frame);
+                self.system_progress = Some(end_frame);
+            }
+            AudioSource::Microphone => {
+                self.first_microphone_frame.get_or_insert(start_frame);
+                self.microphone_progress = Some(end_frame);
+            }
+        }
+        self.next_frame = Some(end_frame);
+        samples.into_iter().map(Self::clamp_sample).collect()
+    }
+
+    fn drop_stale_pending(&mut self, completed_through: i64) {
+        let max_pending = ((f64::from(self.sample_rate) * MAX_PENDING_SECONDS).round() as i64).max(1);
+        let keep_from = completed_through.saturating_sub(max_pending);
+        while self
+            .pending
+            .first_key_value()
+            .is_some_and(|(frame, _)| *frame < keep_from)
+        {
+            self.pending.pop_first();
+        }
+    }
+
     pub(crate) fn push(
         &mut self,
         source: AudioSource,
@@ -56,6 +105,14 @@ impl TimedAudioMixer {
         let Some(end_frame) = start_frame.checked_add(samples.len() as i64) else {
             return Vec::new();
         };
+
+        // Fast path: single-source capture never needs per-frame alignment.
+        if let Some(expected) = self.single_source_enabled() {
+            if source != expected {
+                return Vec::new();
+            }
+            return self.push_single_source(source, samples);
+        }
         match source {
             AudioSource::System => {
                 self.first_system_frame.get_or_insert(start_frame);
@@ -73,6 +130,16 @@ impl TimedAudioMixer {
             }
         }
 
+        // After sleep/wake, wall-clock timestamps can jump far ahead of next_frame.
+        // Skip the multi-second silence hole instead of filling millions of zeros.
+        if let Some(next_frame) = self.next_frame {
+            let max_gap = self.max_source_lag().saturating_mul(4).max(1);
+            if start_frame.saturating_sub(next_frame) > max_gap {
+                self.next_frame = Some(start_frame);
+                self.pending.clear();
+            }
+        }
+
         for (offset, sample) in samples.into_iter().enumerate() {
             let frame_number = start_frame + offset as i64;
             if self.next_frame.is_some_and(|next| frame_number < next) {
@@ -85,7 +152,7 @@ impl TimedAudioMixer {
             }
         }
 
-        let max_source_lag = i64::from((self.sample_rate / 2).max(1));
+        let max_source_lag = self.max_source_lag();
         let first_frame = match (self.system_enabled, self.microphone_enabled) {
             (true, true) => match (self.first_system_frame, self.first_microphone_frame) {
                 (Some(system), Some(microphone)) => system
@@ -127,10 +194,13 @@ impl TimedAudioMixer {
             (false, false) => return Vec::new(),
         };
         if completed_through <= next_frame {
+            self.drop_stale_pending(next_frame);
             return Vec::new();
         }
 
-        self.drain_until(completed_through)
+        let mixed = self.drain_until(completed_through);
+        self.drop_stale_pending(completed_through);
+        mixed
     }
 
     pub(crate) fn flush(&mut self) -> Vec<f32> {
@@ -169,7 +239,7 @@ impl TimedAudioMixer {
                 (None, Some(microphone)) => microphone,
                 (None, None) => 0.0,
             };
-            mixed.push(sample.clamp(-0.98, 0.98));
+            mixed.push(Self::clamp_sample(sample));
         }
         self.next_frame = Some(completed_through);
         mixed
@@ -253,5 +323,34 @@ mod tests {
         assert!(mixer
             .push(AudioSource::System, f64::MAX, vec![0.25])
             .is_empty());
+    }
+
+    #[test]
+    fn skips_large_timestamp_gaps_after_sleep_wake() {
+        let mut mixer = TimedAudioMixer::new(true, true, 100);
+        assert!(mixer
+            .push(AudioSource::System, 0.0, vec![0.5; 10])
+            .is_empty());
+        assert_eq!(
+            mixer.push(AudioSource::Microphone, 0.0, vec![0.0; 10]),
+            vec![0.5; 10]
+        );
+
+        // 30s wall-clock jump should not generate 3000 silence samples.
+        let mixed = mixer.push(AudioSource::System, 30.0, vec![0.25; 10]);
+        assert!(mixed.len() <= 10);
+        assert!(mixer.pending.len() <= 50);
+        let mixed = mixer.push(AudioSource::Microphone, 30.0, vec![0.0; 10]);
+        assert_eq!(mixed.len(), 10);
+        assert!(mixed.iter().all(|sample| (*sample - 0.25).abs() < 0.000_001));
+    }
+
+    #[test]
+    fn single_source_ignores_timestamp_jumps() {
+        let mut mixer = TimedAudioMixer::new(false, true, 16_000);
+        let first = mixer.push(AudioSource::Microphone, 0.0, vec![0.1, 0.2]);
+        let second = mixer.push(AudioSource::Microphone, 120.0, vec![0.3, 0.4]);
+        assert_eq!(first, vec![0.1, 0.2]);
+        assert_eq!(second, vec![0.3, 0.4]);
     }
 }

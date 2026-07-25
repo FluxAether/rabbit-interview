@@ -21,6 +21,11 @@ use tauri::{AppHandle, Emitter, Manager};
 
 const TARGET_SAMPLE_RATE: u32 = AUDIOTEE_SAMPLE_RATE;
 const MAX_RECORDING_SECONDS: usize = 120 * 60;
+// Sleep/wake can deliver multi-second audio backlog in one callback. Bound work per push.
+const MAX_SOURCE_CHUNK_SAMPLES: usize = TARGET_SAMPLE_RATE as usize; // 1s
+const MAX_RECORDING_WRITE_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 2; // 2s
+const RECORDING_FLUSH_EVERY_SAMPLES: u64 = TARGET_SAMPLE_RATE as u64 / 2; // ~500ms
+const AMPLITUDE_EMIT_MIN_INTERVAL_MS: u128 = 50;
 
 enum AudioCommand {
     Stop,
@@ -55,6 +60,7 @@ struct LiveRecording {
     path: PathBuf,
     writer: BufWriter<File>,
     sample_count: u64,
+    samples_since_flush: u64,
 }
 
 struct AudioCapture {
@@ -64,6 +70,7 @@ struct AudioCapture {
     failure_reason: Mutex<Option<String>>,
     live_recording: Mutex<Option<LiveRecording>>,
     last_recording: Mutex<Option<SavedRecording>>,
+    last_amplitude_emit: Mutex<Option<Instant>>,
 }
 
 impl Default for AudioCapture {
@@ -75,6 +82,7 @@ impl Default for AudioCapture {
             failure_reason: Mutex::new(None),
             live_recording: Mutex::new(None),
             last_recording: Mutex::new(None),
+            last_amplitude_emit: Mutex::new(None),
         }
     }
 }
@@ -290,6 +298,7 @@ fn begin_live_recording(app: &AppHandle) -> Result<(), String> {
         path,
         writer,
         sample_count: 0,
+        samples_since_flush: 0,
     });
     Ok(())
 }
@@ -307,23 +316,31 @@ fn append_live_recording(app: &AppHandle, samples: &[f32]) {
         return;
     }
     let remaining = (max_samples - live.sample_count) as usize;
-    let samples = if samples.len() > remaining {
-        &samples[..remaining]
+    // Bound worst-case write work after sleep/wake backlog.
+    let write_limit = remaining.min(MAX_RECORDING_WRITE_SAMPLES);
+    let samples = if samples.len() > write_limit {
+        &samples[..write_limit]
     } else {
         samples
     };
+
+    let mut pcm = Vec::with_capacity(samples.len() * 2);
     for sample in samples {
-        let pcm = sample_to_pcm16(*sample);
-        if let Err(error) = live.writer.write_all(&pcm.to_le_bytes()) {
-            let error_msg = format!("Disk write failed for live recording: {error}");
-            remember_audio_failure(&error_msg);
-            let _ = app.emit("audio-error", error_msg);
-            return;
-        }
-        live.sample_count += 1;
+        pcm.extend_from_slice(&sample_to_pcm16(*sample).to_le_bytes());
     }
-    // Keep crash recovery close to wall clock without fsync every packet.
-    let _ = live.writer.flush();
+    if let Err(error) = live.writer.write_all(&pcm) {
+        let error_msg = format!("Disk write failed for live recording: {error}");
+        remember_audio_failure(&error_msg);
+        let _ = app.emit("audio-error", error_msg);
+        return;
+    }
+    live.sample_count += samples.len() as u64;
+    live.samples_since_flush += samples.len() as u64;
+    // Keep crash recovery close to wall clock without flushing every packet.
+    if live.samples_since_flush >= RECORDING_FLUSH_EVERY_SAMPLES {
+        let _ = live.writer.flush();
+        live.samples_since_flush = 0;
+    }
 }
 
 fn finalize_live_recording(final_path: &Path) -> Result<Option<SavedRecording>, String> {
@@ -395,7 +412,20 @@ fn emit_audio_chunk(app: &AppHandle, data: Vec<f32>) {
     }
     let (processed, rms) = process_output_audio(data);
     append_live_recording(app, &processed);
-    let _ = app.emit("audio-amplitude", rms.min(1.0));
+
+    // Amplitude only drives a UI meter; throttle after sleep/wake catch-up bursts.
+    let now = Instant::now();
+    let mut last = AUDIO_STATE
+        .last_amplitude_emit
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let should_emit = last
+        .map(|previous| now.duration_since(previous).as_millis() >= AMPLITUDE_EMIT_MIN_INTERVAL_MS)
+        .unwrap_or(true);
+    if should_emit {
+        *last = Some(now);
+        let _ = app.emit("audio-amplitude", rms.min(1.0));
+    }
 }
 
 #[allow(dead_code)]
@@ -422,6 +452,12 @@ fn emit_audio_source_chunk(app: &AppHandle, source: &'static str, samples: &[f32
     if samples.is_empty() {
         return;
     }
+    // Cap IPC payload size after device backlog so the frontend/STT path stays bounded.
+    let samples = if samples.len() > MAX_SOURCE_CHUNK_SAMPLES {
+        &samples[samples.len() - MAX_SOURCE_CHUNK_SAMPLES..]
+    } else {
+        samples
+    };
     let _ = app.emit(
         "audio-source-chunk",
         AudioSourceChunkPayload {
@@ -438,6 +474,22 @@ fn push_mixed_audio(
     timestamp_seconds: f64,
     samples: Vec<f32>,
 ) {
+    if samples.is_empty() {
+        return;
+    }
+
+    // Keep mixer input bounded. Prefer the newest audio after a long sleep.
+    let (timestamp_seconds, samples) = if samples.len() > MAX_SOURCE_CHUNK_SAMPLES {
+        let dropped = samples.len() - MAX_SOURCE_CHUNK_SAMPLES;
+        let adjusted = timestamp_seconds + (dropped as f64 / f64::from(TARGET_SAMPLE_RATE));
+        (
+            adjusted,
+            samples[samples.len() - MAX_SOURCE_CHUNK_SAMPLES..].to_vec(),
+        )
+    } else {
+        (timestamp_seconds, samples)
+    };
+
     let output = mixer
         .lock()
         .unwrap()

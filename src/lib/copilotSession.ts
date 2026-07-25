@@ -566,6 +566,8 @@ class CopilotSessionHost {
         if (!this.snapshot.hasRecording) {
           this.transition({ type: 'recording', sessionId })
         }
+        // Amplitude is UI-only; skip no-op updates that still bump revision/publish.
+        if (Math.abs(this.snapshot.amplitude - event.payload) < 0.01) return
         this.transition({ type: 'amplitude', sessionId, amplitude: event.payload })
       }),
       listen<string>('audio-error', (event) => {
