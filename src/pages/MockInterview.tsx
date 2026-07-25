@@ -37,6 +37,7 @@ export default function MockInterview() {
   const [isListening, setIsListening] = useState(false)
   const deepgramRef = useRef<WebSocket | null>(null)
   const unlistenRef = useRef<UnlistenFn | null>(null)
+  const isListeningRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
   const sessionIdRef = useRef(crypto.randomUUID())
   const finalTranscriptRef = useRef('')
@@ -51,7 +52,7 @@ export default function MockInterview() {
   useEffect(() => () => {
     abortRef.current?.abort()
     acceptingAudioRef.current = false
-    void stopVoice()
+    void stopVoice({ saveRecording: false })
     void invoke('stop_speaking')
   }, [])
 
@@ -67,34 +68,49 @@ export default function MockInterview() {
 
   const startVoice = async () => {
     if (!(await tryRequestMicrophone())) throw new Error('Microphone permission is required for voice answers.')
-    const socket = await startDeepgramStream(({ text, boundary }) => {
-      if (!text.trim()) return
-      if (boundary === 'interim') {
-        patch({ interimTranscript: text })
-      } else {
-        finalTranscriptRef.current = [finalTranscriptRef.current, text].filter(Boolean).join(' ').trim()
-        setSession(current => ({ ...current, draftAnswer: finalTranscriptRef.current, interimTranscript: '' }))
-      }
-    }, error => patch({ error: String(error) }), 16_000)
+    await stopVoice({ saveRecording: false })
+    const socket = await startDeepgramStream(
+      ({ text, boundary }) => {
+        if (!text.trim()) return
+        if (boundary === 'interim') {
+          patch({ interimTranscript: text })
+        } else {
+          finalTranscriptRef.current = [finalTranscriptRef.current, text].filter(Boolean).join(' ').trim()
+          setSession(current => ({ ...current, draftAnswer: finalTranscriptRef.current, interimTranscript: '' }))
+        }
+      },
+      error => patch({ error: String(error) }),
+      16_000,
+      (next) => {
+        deepgramRef.current = next
+      },
+    )
     deepgramRef.current = socket
     unlistenRef.current = await listen<AudioChunk>('audio-source-chunk', event => {
       if (acceptingAudioRef.current && event.payload.source === 'microphone' && deepgramRef.current) sendAudioChunk(deepgramRef.current, new Float32Array(event.payload.samples))
     })
     await invoke('start_audio_capture', { useSystemAudio: false, useMicrophone: true, deviceName: session.config.microphoneDevice })
     acceptingAudioRef.current = false
+    isListeningRef.current = true
     setIsListening(true)
   }
 
-  const stopVoice = async (): Promise<SavedRecording | null> => {
-    if (!isListening) return null
+  const stopVoice = async (options: { saveRecording?: boolean } = {}): Promise<SavedRecording | null> => {
+    const saveRecording = options.saveRecording !== false
+    const hadActiveVoice = isListeningRef.current || deepgramRef.current != null || unlistenRef.current != null
+    if (!hadActiveVoice) return null
     acceptingAudioRef.current = false
     closeDeepgramStream(deepgramRef.current)
     deepgramRef.current = null
     unlistenRef.current?.()
     unlistenRef.current = null
     await invoke('stop_audio_capture').catch(() => {})
+    isListeningRef.current = false
     setIsListening(false)
-    return await invoke<SavedRecording | null>('save_audio_recording', { sessionId: sessionIdRef.current }).catch(() => null)
+    if (!saveRecording) return null
+    return await invoke<SavedRecording | null>('save_audio_recording', {
+      sessionId: sessionIdRef.current,
+    }).catch(() => null)
   }
 
   const speakQuestion = async (question: MockInterviewQuestion) => {
@@ -176,7 +192,7 @@ export default function MockInterview() {
 
   const reset = () => {
     abortRef.current?.abort()
-    void stopVoice()
+    void stopVoice({ saveRecording: false })
     void invoke('stop_speaking')
     sessionIdRef.current = crypto.randomUUID()
     finalTranscriptRef.current = ''
