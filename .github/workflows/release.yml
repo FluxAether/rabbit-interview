@@ -70,10 +70,11 @@ jobs:
       - name: Verify bundled AudioTee (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          test -x src-tauri/target/${{ matrix.target }}/release/bundle/macos/RabbitInterview.app/Contents/MacOS/audiotee
-          test "$(lipo -archs src-tauri/target/${{ matrix.target }}/release/bundle/macos/RabbitInterview.app/Contents/MacOS/audiotee)" = "x86_64 arm64"
-          codesign -f -s - --deep src-tauri/target/${{ matrix.target }}/release/bundle/macos/RabbitInterview.app
-          codesign --verify --deep --strict src-tauri/target/${{ matrix.target }}/release/bundle/macos/RabbitInterview.app
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Rabbit Interview.app"
+          test -x "$APP/Contents/MacOS/audiotee"
+          test "$(lipo -archs "$APP/Contents/MacOS/audiotee")" = "x86_64 arm64"
+          codesign -f -s - --deep "$APP"
+          codesign --verify --deep --strict "$APP"
 
       - name: Build Tauri App (Windows)
         if: matrix.os == 'windows-latest'
