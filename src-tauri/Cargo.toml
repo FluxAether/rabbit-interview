@@ -1,6 +1,6 @@
 [package]
 name = "rabbitinterview"
-version = "0.2.2"
+version = "0.2.3"
 description = "RabbitInterview — Desktop Interview Copilot"
 authors = ["RabbitInterview Team"]
 edition = "2021"
