@@ -48,10 +48,16 @@ The Stealth Copilot can capture **both your voice and the interviewer's voice** 
 
 See Packaging section below for more details.
 
+### Windows
+
+- Windows uses cpal's WASAPI host. Opening the default render endpoint as an input stream enables loopback capture of the system mix (shared mode).
+- Microphone capture remains optional via cpal input devices; both sources mix in the native layer.
+- Loopback follows the current default output device only for the active capture session. If the default device changes, restart capture. Exclusive-mode playback and DRM-protected content are not supported.
+
 ### Fallback / Other platforms
 
 - macOS 13.0–14.1 remains supported in microphone-only mode.
-- Other platforms currently report their native capability and fall back to microphone-only mode. A Windows WASAPI loopback implementation remains a separate compatibility spike.
+- Unsupported platforms fall back to microphone-only mode.
 
 See Settings > Audio Capture for more details.
 

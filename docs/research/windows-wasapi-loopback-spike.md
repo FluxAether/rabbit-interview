@@ -31,3 +31,8 @@
 | Windows 10 22H2 / Windows 11 | x86_64 release 构建、停止、重复启动和睡眠恢复 |
 
 完成矩阵后再选择 `windows` crate 直接绑定或经过审核的 WASAPI wrapper，并把 adapter 接入现有 `start_audio_capture` / `stop_audio_capture` seam。当前非 macOS 原生层如实返回系统音频不可用，前端自动降级到麦克风。
+
+## Implementation status
+
+Shipped with the existing `cpal` WASAPI host: open the default render endpoint as an input stream so cpal sets `AUDCLNT_STREAMFLAGS_LOOPBACK`, then mono/resample into `TimedAudioMixer`. No extra WASAPI crate was added. Real-device matrix above remains required before release claims.
+

@@ -527,6 +527,22 @@ fn preferred_input_config(device: &cpal::Device) -> Result<cpal::SupportedStream
         .ok_or_else(|| "No supported microphone input configuration".into())
 }
 
+#[cfg(target_os = "windows")]
+fn select_loopback_device() -> Result<cpal::Device, String> {
+    cpal::default_host()
+        .default_output_device()
+        .ok_or_else(|| "No default output audio device available for WASAPI loopback capture".into())
+}
+
+#[cfg(target_os = "windows")]
+fn preferred_loopback_config(device: &cpal::Device) -> Result<cpal::SupportedStreamConfig, String> {
+    // WASAPI loopback uses the render endpoint mix format; cpal enables LOOPBACK when an
+    // output device is opened as an input stream.
+    device
+        .default_output_config()
+        .map_err(|error| format!("No supported WASAPI loopback configuration: {error}"))
+}
+
 pub(crate) fn stop_audio_capture_sync() {
     if let Some(tx) = AUDIO_STATE.tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
         let _ = tx.send(AudioCommand::Stop);
@@ -556,12 +572,8 @@ fn system_audio_capability() -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 fn system_audio_capability() -> Result<(), String> {
-    let host = cpal::default_host();
-    if host.default_output_device().is_some() {
-        Ok(())
-    } else {
-        Err("No default output audio device available for WASAPI loopback capture".into())
-    }
+    let device = select_loopback_device()?;
+    preferred_loopback_config(&device).map(|_| ())
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -672,9 +684,103 @@ pub async fn start_audio_capture(
             None
         };
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        let mut system_device_name = None;
+        #[cfg(target_os = "windows")]
+        let system_stream = if useSystemAudio {
+            let device = match select_loopback_device() {
+                Ok(device) => device,
+                Err(error) => {
+                    remember_audio_failure(error.clone());
+                    let _ = startup_tx.send(Err(error));
+                    return;
+                }
+            };
+            let config = match preferred_loopback_config(&device) {
+                Ok(config) => config,
+                Err(error) => {
+                    remember_audio_failure(error.clone());
+                    let _ = startup_tx.send(Err(error));
+                    return;
+                }
+            };
+            let input_rate = config.sample_rate().0;
+            let channels = usize::from(config.channels());
+            let sample_format = config.sample_format();
+            let stream_config = config.config();
+            let system_app = thread_app.clone();
+            let error_app = thread_app.clone();
+            let system_mixer = Arc::clone(&mixer);
+            let system_frame = Arc::new(AtomicU64::new(0));
+            let frame_counter = Arc::clone(&system_frame);
+            let system_origin = Arc::new(AtomicU64::new(u64::MAX));
+            let origin_frame = Arc::clone(&system_origin);
+            let capture_started_at = started_at;
+            let mut resampler = MonoResampler::new(channels, input_rate);
+            let stream = match device.build_input_stream_raw(
+                &stream_config,
+                sample_format,
+                move |data, _| match convert_input_data(data) {
+                    Ok(samples) => {
+                        let mono = resampler.process(&samples);
+                        let elapsed_frame = (capture_started_at.elapsed().as_secs_f64()
+                            * f64::from(TARGET_SAMPLE_RATE))
+                        .round() as u64;
+                        let origin = capture_origin_frame(&origin_frame, elapsed_frame);
+                        let start_frame =
+                            origin + frame_counter.fetch_add(mono.len() as u64, Ordering::SeqCst);
+                        emit_audio_source_chunk(&system_app, "system", &mono);
+                        push_mixed_audio(
+                            &system_app,
+                            &system_mixer,
+                            AudioSource::System,
+                            start_frame as f64 / f64::from(TARGET_SAMPLE_RATE),
+                            mono,
+                        );
+                    }
+                    Err(error) => {
+                        remember_audio_failure(error.clone());
+                        let _ = system_app.emit("audio-error", error);
+                    }
+                },
+                move |error| {
+                    let error = error.to_string();
+                    remember_audio_failure(error.clone());
+                    let _ = error_app.emit("audio-error", error);
+                },
+                None,
+            ) {
+                Ok(stream) => stream,
+                Err(error) => {
+                    remember_audio_failure(error.to_string());
+                    let _ = startup_tx.send(Err(format!(
+                        "Failed to open WASAPI loopback stream: {error}"
+                    )));
+                    return;
+                }
+            };
+            if let Err(error) = stream.play() {
+                remember_audio_failure(error.to_string());
+                let _ = startup_tx.send(Err(format!(
+                    "Failed to start WASAPI loopback stream: {error}"
+                )));
+                return;
+            }
+            system_device_name = Some(
+                device
+                    .name()
+                    .unwrap_or_else(|_| "Default system output".into()),
+            );
+            Some(stream)
+        } else {
+            None
+        };
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let _ = useSystemAudio;
 
+        #[cfg(not(target_os = "windows"))]
+        let system_device_name: Option<String> = None;
         let mut microphone_name = None;
         let microphone_stream = if useMicrophone {
             let device = match select_input_device(deviceName.as_deref()) {
@@ -785,7 +891,9 @@ pub async fn start_audio_capture(
         };
         let payload = AudioConfigPayload {
             sample_rate: TARGET_SAMPLE_RATE,
-            device: microphone_name.unwrap_or_else(|| "Default system output".into()),
+            device: microphone_name
+                .or(system_device_name)
+                .unwrap_or_else(|| "Default system output".into()),
             mode: mode.into(),
         };
         let _ = thread_app.emit("audio-config", payload.clone());
@@ -796,9 +904,7 @@ pub async fn start_audio_capture(
         let _ = cmd_rx.recv();
         drop(microphone_stream);
         #[cfg(target_os = "windows")]
-        // system_stream is macos/cpal loopback specific when active
-        #[cfg(target_os = "windows")]
-        let _ = ();
+        drop(system_stream);
         #[cfg(target_os = "macos")]
         if let Some(process) = audiotee.take() {
             process.stop();

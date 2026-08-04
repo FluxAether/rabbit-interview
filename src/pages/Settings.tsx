@@ -1105,8 +1105,14 @@ export default function Settings() {
                     <div className="text-emerald-700 dark:text-emerald-300">
                       The bundled, pinned AudioTee sidecar captures the default system output. Microphone capture remains a separate option.
                     </div>
+                    <div>
+                      <b>✅ Windows system audio: WASAPI loopback</b>
+                    </div>
+                    <div className="text-emerald-700 dark:text-emerald-300">
+                      Shared-mode loopback captures the default render endpoint mix. Microphone capture remains a separate option.
+                    </div>
                     <div className="pt-1 text-[10px] text-emerald-600 dark:text-emerald-400">
-                      Requires macOS 14.2+. macOS 13.0–14.1 and unsupported platforms use microphone-only mode.
+                      macOS requires 14.2+. Windows uses the default output device for the active session. Unsupported platforms use microphone-only mode.
                     </div>
                   </div>
                 </div>
