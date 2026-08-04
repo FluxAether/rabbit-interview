@@ -100,7 +100,7 @@ export const useAppStore = create<AppState>((set) => ({
       groq: 'llama-3.1-8b-instant',
       openai: 'gpt-5.6-luna',
       anthropic: 'claude-haiku-4-5',
-      gemini: 'gemini-3.5-flash',
+      gemini: 'gemini-3.6-flash',
     },
     language: 'zh-CN' as const,
     // STT (Speech-to-Text) provider for real-time transcription

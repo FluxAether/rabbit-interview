@@ -43,7 +43,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     groq: 'llama-3.1-8b-instant',
     openai: 'gpt-5.6-luna',
     anthropic: 'claude-haiku-4-5',
-    gemini: 'gemini-3.5-flash',
+    gemini: 'gemini-3.6-flash',
   },
   sttProvider: 'deepgram',
   sttModel: 'nova-3',
@@ -63,11 +63,17 @@ export async function loadAppSettings(): Promise<AppSettings> {
   if (aiModels.anthropic?.startsWith('claude-3')) aiModels.anthropic = 'claude-haiku-4-5';
   if (aiModels.openai?.startsWith('gpt-4')) aiModels.openai = 'gpt-5.6-luna';
   if (aiModels.groq === 'gemma2-9b-it') aiModels.groq = 'llama-3.1-8b-instant';
+  if (!aiModels.gemini || !['gemini-3.5-flash', 'gemini-3.6-flash'].includes(aiModels.gemini)) {
+    aiModels.gemini = 'gemini-3.6-flash';
+  }
 
   let aiModel = saved?.aiModel || DEFAULT_SETTINGS.aiModel;
   if (aiModel.startsWith('claude-3')) aiModel = 'claude-haiku-4-5';
   if (aiModel.startsWith('gpt-4')) aiModel = 'gpt-5.6-luna';
   if (aiModel === 'gemma2-9b-it') aiModel = 'llama-3.1-8b-instant';
+  if (aiModel.startsWith('gemini') && !['gemini-3.5-flash', 'gemini-3.6-flash'].includes(aiModel)) {
+    aiModel = 'gemini-3.6-flash';
+  }
   const sttModel = saved?.sttModel === 'nova-2' ? 'nova-3' : (saved?.sttModel || DEFAULT_SETTINGS.sttModel);
   return {
     ...DEFAULT_SETTINGS,

@@ -58,7 +58,7 @@ export default function Settings() {
   const [groqModel, setGroqModel] = useState('llama-3.1-8b-instant')
   const [openaiModel, setOpenaiModel] = useState('gpt-5.6-luna')
   const [anthropicModel, setAnthropicModel] = useState('claude-haiku-4-5')
-  const [geminiModel, setGeminiModel] = useState('gemini-3.5-flash')
+  const [geminiModel, setGeminiModel] = useState('gemini-3.6-flash')
 
   // Key input values & visibility toggles
   const [keyInputs, setKeyInputs] = useState<Record<ProviderKeyType, string>>({
@@ -230,7 +230,7 @@ export default function Settings() {
     if (aiModels.groq) setGroqModel(aiModels.groq)
     if (aiModels.openai) setOpenaiModel(aiModels.openai)
     if (aiModels.anthropic) setAnthropicModel(aiModels.anthropic)
-    setGeminiModel('gemini-3.5-flash')
+    setGeminiModel(aiModels.gemini || 'gemini-3.6-flash')
 
     if (currentAiModel.includes('gemini')) {
       setActiveProvider('gemini')
@@ -315,7 +315,7 @@ export default function Settings() {
 
   const activateProvider = (provider: 'groq' | 'openai' | 'anthropic' | 'gemini', model: string) => {
     setActiveProvider(provider)
-    const finalModel = provider === 'gemini' ? 'gemini-3.5-flash' : model
+    const finalModel = model
     setAiModel(finalModel)
 
     useAppStore.setState((s) => ({
@@ -327,10 +327,7 @@ export default function Settings() {
     if (provider === 'groq') setGroqModel(model)
     else if (provider === 'openai') setOpenaiModel(model)
     else if (provider === 'anthropic') setAnthropicModel(model)
-    else {
-      model = 'gemini-3.5-flash'
-      setGeminiModel(model)
-    }
+    else setGeminiModel(model)
 
     useAppStore.setState((s) => {
       const currentModels = (s.settings?.aiModels as Record<string, string>) || {}
@@ -988,7 +985,7 @@ export default function Settings() {
                         </span>
                       ) : (
                         <button
-                          onClick={() => activateProvider('gemini', 'gemini-3.5-flash')}
+                          onClick={() => activateProvider('gemini', geminiModel)}
                           className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors dark:border-[#818cf8] dark:text-[#a5b4fc] dark:hover:bg-[#312e81]"
                         >
                           Use Gemini
@@ -999,9 +996,14 @@ export default function Settings() {
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
                         <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs font-medium">Model</span>
-                        <div className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm text-[#0f172a] font-medium dark:border-[#334155] dark:bg-[#0f172a] dark:text-[#f8fafc]">
-                          gemini-3.5-flash <span className="text-[10px] ml-1 text-emerald-600">(latest)</span>
-                        </div>
+                        <select
+                          value={geminiModel}
+                          onChange={(e) => updateProviderModel('gemini', e.target.value)}
+                          className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
+                        >
+                          <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                          <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                        </select>
                       </div>
 
                       {renderKeyInputRow('gemini', 'GEMINI_API_KEY (Google AI Studio)')}

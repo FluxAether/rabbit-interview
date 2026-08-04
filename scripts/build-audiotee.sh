@@ -27,7 +27,25 @@ build_target() {
 
   scratch="$ROOT_DIR/src-tauri/target/audiotee-$tauri_target"
   swift build -c release --package-path "$SOURCE_DIR" --scratch-path "$scratch" --triple "$swift_triple"
-  built="$scratch/$swift_output/release/audiotee"
+  # SwiftPM layout differs by toolchain:
+  # - older: <scratch>/<triple-prefix>/release/audiotee
+  # - Xcode 26 / Swift 6.4+: <scratch>/out/Products/Release/audiotee
+  #   (and <scratch>/release is often a symlink to that Products dir)
+  built=""
+  for candidate in \
+    "$scratch/$swift_output/release/audiotee" \
+    "$scratch/release/audiotee" \
+    "$scratch/out/Products/Release/audiotee"
+  do
+    if [ -f "$candidate" ]; then
+      built="$candidate"
+      break
+    fi
+  done
+  if [ -z "$built" ]; then
+    echo "AudioTee binary not found under $scratch" >&2
+    exit 1
+  fi
   actual=$(shasum -a 256 "$built" | awk '{print $1}')
   cp "$built" "$BINARY_DIR/audiotee-$tauri_target"
   chmod 755 "$BINARY_DIR/audiotee-$tauri_target"

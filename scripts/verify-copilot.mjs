@@ -527,7 +527,7 @@ check(
 )
 
 const geminiResult = await createProviderHarness(
-  'gemini-3.5-flash',
+  'gemini-3.6-flash',
   'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}\n\ndata: {"candidates":[{"finishReason":"STOP"}]}\n\n',
 )('question', '', { onDelta: () => {} })
 check(

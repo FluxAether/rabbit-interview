@@ -137,10 +137,10 @@ export default function CopilotPanel({
 
   const fontSizeClass =
     fontSize === "sm"
-      ? "text-xs"
+      ? "text-sm"
       : fontSize === "lg"
-        ? "text-base"
-        : "text-sm"
+        ? "text-lg"
+        : "text-base"
 
   const toggleTakeawayCollapse = (id: number) => {
     setCollapsedTakeaways((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -294,24 +294,32 @@ export default function CopilotPanel({
                       <div
                         className={`flex flex-col gap-2 rounded-2xl p-3.5 ${fontSizeClass} leading-relaxed transition-all shadow-sm ${
                           mine
-                            ? "rounded-br-none bg-[#4f46e5] text-white font-medium"
+                            ? floating
+                              ? "rounded-br-none border border-[#6366f1]/50 bg-[#4338ca] font-medium text-white"
+                              : "rounded-br-none bg-[#4f46e5] font-medium text-white"
                             : assistant
-                              ? "rounded-bl-none border border-[#c7d2fe] bg-[#eef2ff] text-[#1e1b4b] dark:border-[#4338ca] dark:bg-[#1e1b4b] dark:text-[#e0e7ff] font-medium"
-                              : "rounded-bl-none border border-[#e2e8f0] bg-white text-[#1e293b] dark:border-[#334155] dark:bg-[#1e293b] dark:text-[#f8fafc]"
-                        } ${
-                          floating
-                            ? mine
-                              ? "bg-[#4338ca] text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.6)] border border-[#6366f1]/50"
-                              : assistant
-                                ? "bg-[#1e1b4b]/95 border-2 border-[#6366f1] text-white dark:text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.8)] shadow-md"
-                                : "bg-white/95 border border-slate-300 dark:bg-[#1e293b]/95 text-slate-900 dark:text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.4)]"
-                            : ""
+                              ? floating
+                                ? "rounded-bl-none border-2 border-[#818cf8] bg-[#312e81] font-semibold text-white shadow-md"
+                                : "rounded-bl-none border border-[#c7d2fe] bg-[#eef2ff] font-semibold text-[#0f172a] dark:border-[#6366f1] dark:bg-[#312e81] dark:text-[#f8fafc]"
+                              : floating
+                                ? "rounded-bl-none border border-slate-300 bg-white font-medium text-slate-900 dark:border-[#475569] dark:bg-[#1e293b] dark:text-white"
+                                : "rounded-bl-none border border-[#e2e8f0] bg-white text-[#1e293b] dark:border-[#334155] dark:bg-[#1e293b] dark:text-[#f8fafc]"
                         }`}
                       >
                         {/* Highlighted Takeaways for AI Assistant */}
                         {assistant && keyTakeaways.length > 0 && (
-                          <div className="mb-1 rounded-xl bg-white/90 p-2.5 text-xs text-[#312e81] border border-[#a5b4fc]/60 shadow-xs dark:bg-[#0f172a]/90 dark:text-[#a5b4fc]">
-                            <div className="flex items-center justify-between font-bold text-[#4338ca] dark:text-[#818cf8]">
+                          <div
+                            className={`mb-1 rounded-xl border p-2.5 text-xs shadow-xs ${
+                              floating
+                                ? "border-[#a5b4fc]/50 bg-white text-[#1e1b4b]"
+                                : "border-[#a5b4fc]/60 bg-white text-[#1e1b4b] dark:border-[#6366f1]/50 dark:bg-[#0f172a] dark:text-[#e0e7ff]"
+                            }`}
+                          >
+                            <div
+                              className={`flex items-center justify-between font-bold ${
+                                floating ? "text-[#4338ca]" : "text-[#4338ca] dark:text-[#c7d2fe]"
+                              }`}
+                            >
                               <div className="flex items-center gap-1.5">
                                 <Sparkles className="h-3.5 w-3.5 text-[#6366f1]" />
                                 <span>核心提示词 (Key Points)</span>
@@ -319,7 +327,9 @@ export default function CopilotPanel({
                               <button
                                 type="button"
                                 onClick={() => toggleTakeawayCollapse(message.id)}
-                                className="rounded p-0.5 text-[#6366f1] hover:bg-[#e0e7ff] dark:hover:bg-[#312e81]"
+                                className={`rounded p-0.5 text-[#6366f1] ${
+                                  floating ? "hover:bg-[#e0e7ff]" : "hover:bg-[#e0e7ff] dark:hover:bg-[#312e81]"
+                                }`}
                                 title={isTakeawayCollapsed ? "展开提示词" : "折叠提示词"}
                               >
                                 {isTakeawayCollapsed ? (
@@ -334,7 +344,7 @@ export default function CopilotPanel({
                                 {keyTakeaways.map((point, idx) => (
                                   <li key={idx} className="flex items-start gap-1.5">
                                     <span className="font-bold text-[#6366f1]">•</span>
-                                    <span className="font-medium">{point}</span>
+                                    <span className="font-semibold leading-relaxed">{point}</span>
                                   </li>
                                 ))}
                               </ul>
@@ -342,16 +352,42 @@ export default function CopilotPanel({
                           </div>
                         )}
 
-                        <div className="min-w-0 flex-1 whitespace-pre-wrap">{message.text}</div>
+                        <div
+                          className={`min-w-0 flex-1 whitespace-pre-wrap leading-relaxed ${
+                            assistant
+                              ? floating
+                                ? "text-white"
+                                : "text-[#0f172a] dark:text-[#f8fafc]"
+                              : ""
+                          }`}
+                        >
+                          {message.text}
+                        </div>
 
                         {/* Copy Helper for Assistant */}
                         {assistant && (
-                          <div className="mt-1 flex items-center justify-between border-t border-[#c7d2fe]/50 pt-2 text-xs dark:border-[#4338ca]/60">
-                            <span className="text-[10px] text-[#6366f1] dark:text-[#818cf8]">推荐提示</span>
+                          <div
+                            className={`mt-1 flex items-center justify-between border-t pt-2 text-xs ${
+                              floating
+                                ? "border-white/20"
+                                : "border-[#c7d2fe]/50 dark:border-[#6366f1]/40"
+                            }`}
+                          >
+                            <span
+                              className={`text-[10px] ${
+                                floating ? "text-[#c7d2fe]" : "text-[#4f46e5] dark:text-[#c7d2fe]"
+                              }`}
+                            >
+                              推荐提示
+                            </span>
                             <button
                               type="button"
                               onClick={() => handleCopy(message.id, message.text)}
-                              className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-xs font-medium text-[#4f46e5] shadow-xs hover:bg-[#e0e7ff] dark:bg-[#312e81] dark:text-[#a5b4fc]"
+                              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium shadow-xs ${
+                                floating
+                                  ? "bg-white text-[#4338ca] hover:bg-[#e0e7ff]"
+                                  : "bg-white text-[#4f46e5] hover:bg-[#e0e7ff] dark:bg-[#1e1b4b] dark:text-[#c7d2fe]"
+                              }`}
                               aria-label={t("copilot.copySuggestion")}
                             >
                               {copiedId === message.id ? (

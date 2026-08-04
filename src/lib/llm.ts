@@ -40,15 +40,20 @@ async function getKeys(forceReload = false) {
  *   "groq-llama-3.1", "groq-llama-3.3-70b"
  *   "gpt-4o", "gpt-4o-mini", "openai-gpt-4o"
  *   "claude-3.5", "claude-3.5-sonnet"
- *   "gemini-3.5-flash" (only supported Gemini model)
+ *   "gemini-3.5-flash", "gemini-3.6-flash"
  */
+const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
+const SUPPORTED_GEMINI_MODELS = new Set(['gemini-3.5-flash', 'gemini-3.6-flash']);
+
 function resolveProviderAndModel(aiModel: string): { provider: LlmProvider; model: string } {
   const configured = aiModel || 'llama-3.1-8b-instant';
   const m = configured.toLowerCase();
 
   if (m.startsWith('gemini')) {
-    // Only gemini-3.5-flash is supported for Gemini (latest)
-    return { provider: 'gemini', model: 'gemini-3.5-flash' };
+    return {
+      provider: 'gemini',
+      model: SUPPORTED_GEMINI_MODELS.has(m) ? m : DEFAULT_GEMINI_MODEL,
+    };
   }
   if (m.includes('claude')) {
     return { provider: 'anthropic', model: configured };
@@ -115,11 +120,10 @@ async function callOpenAI(prompt: string, model: string, apiKey: string): Promis
   return data.choices?.[0]?.message?.content || '';
 }
 
-async function callGemini(prompt: string, _model: string, apiKey: string): Promise<string> {
-  // Gemini 3.5 Flash is the only supported model (latest as of 2026).
-  const modelId = 'gemini-3.5-flash';
-
-  // Use v1 endpoint with the exact model name requested by user.
+async function callGemini(prompt: string, model: string, apiKey: string): Promise<string> {
+  const modelId = SUPPORTED_GEMINI_MODELS.has(model.toLowerCase())
+    ? model.toLowerCase()
+    : DEFAULT_GEMINI_MODEL;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`;
 
   const res = await fetch(url, {
@@ -198,7 +202,7 @@ export async function generateSuggestions(question: string, transcriptSoFar?: st
         provider = cand;
         // Use a reasonable default model per provider when auto-falling back
         model = cand === 'gemini'
-          ? 'gemini-3.5-flash'
+          ? DEFAULT_GEMINI_MODEL
           : cand === 'openai'
             ? 'gpt-5.6-luna'
             : cand === 'anthropic'
@@ -279,7 +283,7 @@ async function resolveConfiguredProvider(allowProviderFallback = true): Promise<
       provider = candidate;
       apiKey = candidateKey;
       model = candidate === 'gemini'
-        ? 'gemini-3.5-flash'
+        ? DEFAULT_GEMINI_MODEL
         : candidate === 'openai'
           ? 'gpt-5.6-luna'
           : candidate === 'anthropic'
