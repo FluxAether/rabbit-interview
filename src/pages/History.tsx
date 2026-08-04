@@ -110,13 +110,18 @@ export default function History() {
     try {
       wavesurfer = WaveSurfer.create({
         container: waveformRef.current,
+        backend: 'WebAudio',
         waveColor: '#6366f1',
         progressColor: '#4f46e5',
         height: 60,
         barWidth: 2,
         barGap: 1,
       })
-      wavesurfer.on('ready', () => setAudioReady(true))
+      // MediaElement volume is capped at 1; WebAudio gain can boost quiet interview recordings.
+      wavesurfer.on('ready', () => {
+        wavesurfer?.setVolume(3)
+        setAudioReady(true)
+      })
       wavesurfer.on('finish', () => setIsPlaying(false))
       void wavesurfer.load(convertFileSrc(selected.recordingPath)).catch((error) => {
         setAudioReady(false)

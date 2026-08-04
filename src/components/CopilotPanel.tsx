@@ -5,6 +5,7 @@ import { useTranslation } from "../i18n"
 import { sendCopilotCommand } from "../lib/copilotSession"
 import { setCopilotWindowOpacity, type CopilotWindowStatus } from "../lib/copilotWindow"
 import { protectionMessageKey } from "../lib/copilotWindowState"
+import { loadAppSettings, saveAppSettings, type CopilotFontSize } from "../lib/settingsStore"
 import { useAppStore } from "../stores/useAppStore"
 
 interface CopilotPanelProps {
@@ -37,7 +38,8 @@ export default function CopilotPanel({
   const [followUp, setFollowUp] = useState("")
   const [now, setNow] = useState(() => Date.now())
   const [copiedId, setCopiedId] = useState<number | null>(null)
-  const [fontSize, setFontSize] = useState<"sm" | "base" | "lg">("base")
+  const [fontSize, setFontSize] = useState<CopilotFontSize>("base")
+  const [fontSizeReady, setFontSizeReady] = useState(false)
   const [opacity, setOpacity] = useState<number>(100)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [collapsedTakeaways, setCollapsedTakeaways] = useState<Record<number, boolean>>({})
@@ -129,11 +131,38 @@ export default function CopilotPanel({
   }, [copilot.messages, isAtBottom])
 
   useEffect(() => {
+    let cancelled = false
+    void loadAppSettings()
+      .then((settings) => {
+        if (cancelled) return
+        if (settings.copilotFontSize === "sm" || settings.copilotFontSize === "base" || settings.copilotFontSize === "lg") {
+          setFontSize(settings.copilotFontSize)
+        }
+      })
+      .catch((error) => {
+        console.warn("Unable to load Copilot font size", error)
+      })
+      .finally(() => {
+        if (!cancelled) setFontSizeReady(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     if (!running && !busy) return
     setNow(Date.now())
     const timer = globalThis.setInterval(() => setNow(Date.now()), 1_000)
     return () => globalThis.clearInterval(timer)
   }, [running, busy, copilot.startedAt])
+
+  const fontSteps: CopilotFontSize[] = ["sm", "base", "lg"]
+  const fontSizeLabels: Record<CopilotFontSize, string> = {
+    sm: "小",
+    base: "中",
+    lg: "大",
+  }
 
   const fontSizeClass =
     fontSize === "sm"
@@ -141,6 +170,30 @@ export default function CopilotPanel({
       : fontSize === "lg"
         ? "text-lg"
         : "text-base"
+
+  const takeawaySizeClass =
+    fontSize === "sm"
+      ? "text-[11px]"
+      : fontSize === "lg"
+        ? "text-sm"
+        : "text-xs"
+
+  const changeFontSize = (next: CopilotFontSize) => {
+    setFontSize(next)
+    void saveAppSettings({ copilotFontSize: next }).catch((error) => {
+      console.warn("Unable to save Copilot font size", error)
+    })
+  }
+
+  const decreaseFontSize = () => {
+    const index = fontSteps.indexOf(fontSize)
+    if (index > 0) changeFontSize(fontSteps[index - 1])
+  }
+
+  const increaseFontSize = () => {
+    const index = fontSteps.indexOf(fontSize)
+    if (index >= 0 && index < fontSteps.length - 1) changeFontSize(fontSteps[index + 1])
+  }
 
   const toggleTakeawayCollapse = (id: number) => {
     setCollapsedTakeaways((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -178,18 +231,29 @@ export default function CopilotPanel({
           <div className={`flex items-center rounded-lg border border-[#e2e8f0] p-0.5 text-xs dark:border-[#334155] ${floating ? "bg-white/70 dark:bg-[#0f172a]/70" : "bg-white dark:bg-[#0f172a]"}`}>
             <button
               type="button"
-              onClick={() => setFontSize((s) => (s === "lg" ? "base" : "sm"))}
-              className={`rounded p-1 hover:bg-[#f1f5f9] dark:hover:bg-[#1e293b] ${fontSize === "sm" ? "text-[#6366f1] font-bold" : "text-[#64748b] dark:text-[#94a3b8]"}`}
-              title="缩小字体"
+              onClick={decreaseFontSize}
+              disabled={!fontSizeReady || fontSize === "sm"}
+              className={`rounded p-1 hover:bg-[#f1f5f9] disabled:opacity-40 dark:hover:bg-[#1e293b] ${fontSize === "sm" ? "text-[#6366f1] font-bold" : "text-[#64748b] dark:text-[#94a3b8]"}`}
+              title="缩小字体 (小/中/大)"
+              aria-label="缩小字体"
               data-no-drag
             >
               <ZoomOut className="h-3.5 w-3.5" />
             </button>
+            <span
+              className="min-w-5 px-0.5 text-center text-[10px] font-semibold tabular-nums text-[#475569] dark:text-[#cbd5e1]"
+              title={`当前字体：${fontSizeLabels[fontSize]}`}
+              data-no-drag
+            >
+              {fontSizeLabels[fontSize]}
+            </span>
             <button
               type="button"
-              onClick={() => setFontSize((s) => (s === "sm" ? "base" : "lg"))}
-              className={`rounded p-1 hover:bg-[#f1f5f9] dark:hover:bg-[#1e293b] ${fontSize === "lg" ? "text-[#6366f1] font-bold" : "text-[#64748b] dark:text-[#94a3b8]"}`}
-              title="放大字体"
+              onClick={increaseFontSize}
+              disabled={!fontSizeReady || fontSize === "lg"}
+              className={`rounded p-1 hover:bg-[#f1f5f9] disabled:opacity-40 dark:hover:bg-[#1e293b] ${fontSize === "lg" ? "text-[#6366f1] font-bold" : "text-[#64748b] dark:text-[#94a3b8]"}`}
+              title="放大字体 (小/中/大)"
+              aria-label="放大字体"
               data-no-drag
             >
               <ZoomIn className="h-3.5 w-3.5" />
@@ -309,7 +373,7 @@ export default function CopilotPanel({
                         {/* Highlighted Takeaways for AI Assistant */}
                         {assistant && keyTakeaways.length > 0 && (
                           <div
-                            className={`mb-1 rounded-xl border p-2.5 text-xs shadow-xs ${
+                            className={`mb-1 rounded-xl border p-2.5 shadow-xs ${takeawaySizeClass} ${
                               floating
                                 ? "border-[#a5b4fc]/50 bg-white text-[#1e1b4b]"
                                 : "border-[#a5b4fc]/60 bg-white text-[#1e1b4b] dark:border-[#6366f1]/50 dark:bg-[#0f172a] dark:text-[#e0e7ff]"

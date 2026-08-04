@@ -3,6 +3,7 @@ import { Store } from '@tauri-apps/plugin-store';
 let store: Store | null = null;
 
 export type SttLanguage = 'zh-CN' | 'zh-TW' | 'en-US' | 'multi';
+export type CopilotFontSize = 'sm' | 'base' | 'lg';
 
 async function getStore(): Promise<Store> {
   if (!store) {
@@ -29,6 +30,8 @@ export interface AppSettings {
   useSystemAudio?: boolean;
   useMicWithSystem?: boolean;
   micDevice?: string;
+  // Stealth Copilot floating panel message font size
+  copilotFontSize?: CopilotFontSize;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -50,6 +53,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sttLanguage: 'zh-CN',
   useSystemAudio: true,
   useMicWithSystem: true,
+  copilotFontSize: 'base',
 };
 
 export async function loadAppSettings(): Promise<AppSettings> {
@@ -75,12 +79,17 @@ export async function loadAppSettings(): Promise<AppSettings> {
     aiModel = 'gemini-3.6-flash';
   }
   const sttModel = saved?.sttModel === 'nova-2' ? 'nova-3' : (saved?.sttModel || DEFAULT_SETTINGS.sttModel);
+  const copilotFontSize: CopilotFontSize =
+    saved?.copilotFontSize === 'sm' || saved?.copilotFontSize === 'base' || saved?.copilotFontSize === 'lg'
+      ? saved.copilotFontSize
+      : DEFAULT_SETTINGS.copilotFontSize!;
   return {
     ...DEFAULT_SETTINGS,
     ...saved,
     aiModel,
     aiModels,
     sttModel,
+    copilotFontSize,
   } as AppSettings;
 }
 
