@@ -1,41 +1,48 @@
-import { Store } from '@tauri-apps/plugin-store';
-
-let store: Store | null = null;
-
-async function getStore(): Promise<Store> {
-  if (!store) {
-    store = await Store.load('keys.json'); // Stored in the app data directory; the file is not encrypted.
-  }
-  return store;
-}
+import {
+  clearSecrets,
+  deleteSecret,
+  loadSecret,
+  migrateLegacyJsonStoresIfNeeded,
+  saveSecret,
+} from './db';
+import { decryptSecret, encryptSecret } from './secretCrypto';
 
 export type LlmProviderKey = 'GROQ_API_KEY' | 'OPENAI_API_KEY' | 'ANTHROPIC_API_KEY' | 'GEMINI_API_KEY';
 export type SttProviderKey = 'DEEPGRAM_API_KEY';
 export type ApiKeyName = LlmProviderKey | SttProviderKey;
 
+const ALL_KEYS: ApiKeyName[] = [
+  'GROQ_API_KEY',
+  'OPENAI_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'GEMINI_API_KEY',
+  'DEEPGRAM_API_KEY',
+];
+
+async function ensureMigrated(): Promise<void> {
+  await migrateLegacyJsonStoresIfNeeded(encryptSecret);
+}
+
 export async function setApiKey(key: ApiKeyName, value: string): Promise<void> {
-  const s = await getStore();
-  await s.set(key, value);
-  await s.save();
+  await ensureMigrated();
+  const trimmed = value.trim();
+  if (!trimmed) {
+    await deleteSecret(key);
+    return;
+  }
+  await saveSecret(key, encryptSecret(trimmed));
 }
 
 export async function getApiKey(key: ApiKeyName): Promise<string | null> {
-  const s = await getStore();
-  const val = await s.get<string>(key);
-  return val ?? null;
+  await ensureMigrated();
+  return decryptSecret(await loadSecret(key));
 }
 
 export async function clearApiKeys(): Promise<void> {
-  const s = await getStore();
-  await s.delete('GROQ_API_KEY');
-  await s.delete('OPENAI_API_KEY');
-  await s.delete('ANTHROPIC_API_KEY');
-  await s.delete('GEMINI_API_KEY');
-  await s.delete('DEEPGRAM_API_KEY');
-  await s.save();
+  await ensureMigrated();
+  await clearSecrets(ALL_KEYS);
 }
 
-// For convenience in llm.ts — extended with Gemini support
 export async function loadApiKeys(): Promise<{
   groq: string;
   openai: string;

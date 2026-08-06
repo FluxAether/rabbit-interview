@@ -1,16 +1,12 @@
-import { Store } from '@tauri-apps/plugin-store';
-
-let store: Store | null = null;
+import {
+  loadAppSettingsJson,
+  migrateLegacyJsonStoresIfNeeded,
+  saveAppSettingsJson,
+} from './db';
+import { encryptSecret } from './secretCrypto';
 
 export type SttLanguage = 'zh-CN' | 'zh-TW' | 'en-US' | 'multi';
 export type CopilotFontSize = 'sm' | 'base' | 'lg';
-
-async function getStore(): Promise<Store> {
-  if (!store) {
-    store = await Store.load('app-settings.json');
-  }
-  return store;
-}
 
 export interface AppSettings {
   theme: 'Light' | 'Dark' | 'System';
@@ -56,9 +52,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   copilotFontSize: 'base',
 };
 
-export async function loadAppSettings(): Promise<AppSettings> {
-  const s = await getStore();
-  const saved = await s.get<Partial<AppSettings>>('settings');
+function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
   const savedModels = saved?.aiModels || {};
   const aiModels = {
     ...DEFAULT_SETTINGS.aiModels,
@@ -93,20 +87,33 @@ export async function loadAppSettings(): Promise<AppSettings> {
   } as AppSettings;
 }
 
+async function ensureMigrated(): Promise<void> {
+  await migrateLegacyJsonStoresIfNeeded(encryptSecret);
+}
+
+export async function loadAppSettings(): Promise<AppSettings> {
+  await ensureMigrated();
+  const raw = await loadAppSettingsJson();
+  if (!raw) return { ...DEFAULT_SETTINGS, aiModels: { ...DEFAULT_SETTINGS.aiModels } };
+  try {
+    return normalizeSettings(JSON.parse(raw) as Partial<AppSettings>);
+  } catch {
+    return { ...DEFAULT_SETTINGS, aiModels: { ...DEFAULT_SETTINGS.aiModels } };
+  }
+}
+
 export async function saveAppSettings(settings: Partial<AppSettings>): Promise<void> {
-  const s = await getStore();
+  await ensureMigrated();
   const current = await loadAppSettings();
-  const merged = {
+  const merged = normalizeSettings({
     ...current,
     ...settings,
-    // preserve/merge aiModels
     aiModels: {
       ...current.aiModels,
       ...(settings.aiModels || {}),
     },
-  };
-  await s.set('settings', merged);
-  await s.save();
+  });
+  await saveAppSettingsJson(JSON.stringify(merged));
 }
 
 export async function getSetting<K extends keyof AppSettings>(key: K): Promise<AppSettings[K] | undefined> {

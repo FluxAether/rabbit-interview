@@ -1,4 +1,4 @@
-// Real LLM + STT integration hooks using secure tauri-plugin-store
+// Real LLM + STT integration hooks using SQLite-backed encrypted key storage
 import { loadApiKeys, getLlmApiKey } from './keyStore';
 import { useAppStore } from '../stores/useAppStore';
 

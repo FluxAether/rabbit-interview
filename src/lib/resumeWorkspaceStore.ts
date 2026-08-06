@@ -1,12 +1,16 @@
-import { Store } from '@tauri-apps/plugin-store'
+import {
+  clearResumeWorkspaceJson,
+  loadResumeWorkspaceJson,
+  migrateLegacyJsonStoresIfNeeded,
+  saveResumeWorkspaceJson,
+} from './db'
+import { encryptSecret } from './secretCrypto'
 import {
   createEmptyResumeWorkspace,
   matchResumeKeywords,
   type ResumeSuggestion,
   type ResumeWorkspace,
 } from './resumeOptimizer.ts'
-
-let store: Store | null = null
 
 export function createResumeWriteQueue(): (operation: () => Promise<void>) => Promise<void> {
   let queue: Promise<void> = Promise.resolve()
@@ -18,9 +22,8 @@ export function createResumeWriteQueue(): (operation: () => Promise<void>) => Pr
 
 const enqueueWrite = createResumeWriteQueue()
 
-async function getStore(): Promise<Store> {
-  if (!store) store = await Store.load('resume-workspace.json')
-  return store
+async function ensureMigrated(): Promise<void> {
+  await migrateLegacyJsonStoresIfNeeded(encryptSecret)
 }
 
 function isSuggestion(value: unknown): value is ResumeSuggestion {
@@ -83,22 +86,27 @@ export function hasResumeWorkspaceContent(workspace: ResumeWorkspace): boolean {
 }
 
 export async function loadResumeWorkspace(): Promise<ResumeWorkspace> {
-  return normalizeResumeWorkspace(await (await getStore()).get<unknown>('workspace'))
+  await ensureMigrated()
+  const raw = await loadResumeWorkspaceJson()
+  if (!raw) return createEmptyResumeWorkspace()
+  try {
+    return normalizeResumeWorkspace(JSON.parse(raw))
+  } catch {
+    return createEmptyResumeWorkspace()
+  }
 }
 
 export async function saveResumeWorkspace(workspace: ResumeWorkspace): Promise<void> {
   return enqueueWrite(async () => {
-    const currentStore = await getStore()
-    await currentStore.set('workspace', toPersistedResumeWorkspace(workspace))
-    await currentStore.save()
+    await ensureMigrated()
+    await saveResumeWorkspaceJson(JSON.stringify(toPersistedResumeWorkspace(workspace)))
   })
 }
 
 export async function clearResumeWorkspace(): Promise<void> {
   return enqueueWrite(async () => {
-    const currentStore = await getStore()
-    await currentStore.delete('workspace')
-    await currentStore.save()
+    await ensureMigrated()
+    await clearResumeWorkspaceJson()
   })
 }
 
