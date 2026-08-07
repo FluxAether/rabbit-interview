@@ -153,7 +153,8 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'history.replayModal.duration': 'Duration',
     'history.transcriptPlaceholder': 'Full transcript would play here synchronized with audio.',
     'history.recordingUnavailable': 'No saved recording is available for this interview.',
-    'history.exportDemo': 'Exported to PDF (demo)',
+    'history.exportSuccess': 'PDF exported successfully.',
+    'history.exportFailed': 'Could not export this history page to PDF.',
 
     // Resume Optimizer
     'resume.title': 'Resume Smart Optimize',
@@ -481,7 +482,8 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'history.replayModal.duration': '时长',
     'history.transcriptPlaceholder': '完整转录文本将与音频同步播放。',
     'history.recordingUnavailable': '该面试没有可用的已保存录音。',
-    'history.exportDemo': '已导出为 PDF（演示）',
+    'history.exportSuccess': 'PDF 导出成功。',
+    'history.exportFailed': '当前页历史记录导出 PDF 失败。',
 
     // Resume Optimizer
     'resume.title': '简历智能优化',
@@ -782,6 +784,8 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'history.overall': '總分',
     'history.notScored': '未評分',
     'history.recordingUnavailable': '該面試沒有可用的已儲存錄音。',
+    'history.exportSuccess': 'PDF 匯出成功。',
+    'history.exportFailed': '目前頁面的歷史記錄匯出 PDF 失敗。',
 
     'resume.title': '履歷智能優化',
     'resume.badge': 'AI 驅動',

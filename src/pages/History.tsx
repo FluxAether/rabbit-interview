@@ -4,6 +4,7 @@ import { Clipboard } from 'lucide-react'
 import type { InterviewRecord } from '../stores/useAppStore'
 import WaveSurfer from 'wavesurfer.js'
 import { loadHistoryCounts, loadHistoryPage } from '../lib/db'
+import { exportHistoryRecordsPdf } from '../lib/historyExport'
 import { useTranslation } from '../i18n'
 
 type HistoryChatRole = 'interviewer' | 'assistant' | 'me'
@@ -68,6 +69,9 @@ export default function History() {
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [counts, setCounts] = useState<Record<HistoryTab, number>>({ copilot: 0, mock: 0 })
+  const [isExporting, setIsExporting] = useState(false)
+  const [showExportToast, setShowExportToast] = useState(false)
+  const exportToastTimeoutRef = useRef<number | null>(null)
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -93,6 +97,10 @@ export default function History() {
 
   useEffect(() => {
     void loadHistoryCounts().then(setCounts).catch(console.error)
+  }, [])
+
+  useEffect(() => () => {
+    if (exportToastTimeoutRef.current) window.clearTimeout(exportToastTimeoutRef.current)
   }, [])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -186,6 +194,28 @@ export default function History() {
     setAudioReady(false)
   }
 
+  const exportCurrentPage = () => {
+    if (records.length === 0 || isExporting) return
+    setIsExporting(true)
+    try {
+      exportHistoryRecordsPdf(records, {
+        mode: activeTab,
+        page,
+        search: searchQuery,
+      })
+      setShowExportToast(true)
+      if (exportToastTimeoutRef.current) window.clearTimeout(exportToastTimeoutRef.current)
+      exportToastTimeoutRef.current = window.setTimeout(() => {
+        setShowExportToast(false)
+      }, 2000)
+    } catch (error) {
+      console.error('Unable to export interview history', error)
+      alert(t('history.exportFailed'))
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   const selectedMessages = selected ? parseTranscript(selected.transcript || '', selected.mode) : []
   const roleLabels: Record<HistoryChatRole, string> = {
     interviewer: t('copilot.role.interviewer'),
@@ -200,12 +230,26 @@ export default function History() {
           <h1 className="text-2xl font-semibold text-[#0f172a] dark:text-[#f8fafc]">{t('history.title')}</h1>
           <div className="text-sm text-[#475569] dark:text-[#94a3b8]">{t('history.subtitle')}</div>
         </div>
-        <button
-          className="px-4 py-1.5 text-sm border border-[#e2e8f0] dark:border-[#334155] rounded-xl text-[#0f172a] dark:text-[#f8fafc] hover:bg-white dark:hover:bg-[#1e293b]"
-          onClick={() => alert(t('history.exportDemo'))}
-        >
-          {t('common.export')}
-        </button>
+        <div className="flex items-center gap-3">
+          <div
+            className={`transition-opacity duration-300 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800 ${
+              showExportToast ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
+          >
+            <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-bold">
+              ✓
+            </div>
+            <span>{t('history.exportSuccess')}</span>
+          </div>
+          <button
+            type="button"
+            className="px-4 py-1.5 text-sm border border-[#e2e8f0] dark:border-[#334155] rounded-xl text-[#0f172a] dark:text-[#f8fafc] hover:bg-white dark:hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={exportCurrentPage}
+            disabled={records.length === 0 || isExporting}
+          >
+            {isExporting ? `${t('common.export')}…` : t('common.export')}
+          </button>
+        </div>
       </div>
 
       <input
