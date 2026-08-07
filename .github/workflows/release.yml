@@ -17,14 +17,17 @@ jobs:
             target: universal-apple-darwin
             rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
             bundle: app,dmg
+            platform_os: darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             rust_targets: x86_64-pc-windows-msvc
             bundle: msi,nsis
+            platform_os: windows
           # Optional Linux
           # - os: ubuntu-latest
           #   target: x86_64-unknown-linux-gnu
           #   bundle: deb,appimage
+          #   platform_os: linux
 
     runs-on: ${{ matrix.os }}
 
@@ -83,6 +86,18 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundle }}
 
+      - name: Build updater fragment
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          node scripts/build-updater-manifest.mjs fragment \
+            --os "${{ matrix.platform_os }}" \
+            --target "${{ matrix.target }}" \
+            --version "$VERSION" \
+            --tag "$GITHUB_REF_NAME" \
+            --notes "$GITHUB_REF_NAME" \
+            --out "updater-fragment-${{ matrix.platform_os }}.json"
+
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
@@ -90,14 +105,63 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            src-tauri/target/${{ matrix.target }}/release/latest.json
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz.sig
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi.sig
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe.sig
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
             src-tauri/target/audiotee-checksums.txt
+            updater-fragment-*.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-updater-manifest:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download release fragments and merge latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="$GITHUB_REF_NAME"
+          mkdir -p /tmp/updater-parts
+          # Download only fragment assets for this tag
+          mapfile -t FRAGS < <(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            --jq '.assets[] | select(.name | startswith("updater-fragment-")) | .name')
+          if [ "${#FRAGS[@]}" -eq 0 ]; then
+            echo "No updater-fragment-*.json assets found on ${TAG}" >&2
+            exit 1
+          fi
+          PARTS=()
+          for name in "${FRAGS[@]}"; do
+            out="/tmp/updater-parts/$name"
+            gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$name" -D /tmp/updater-parts
+            PARTS+=("$out")
+          done
+          PUB_DATE="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.published_at')"
+          IFS=','
+          node scripts/build-updater-manifest.mjs merge \
+            --version "$VERSION" \
+            --notes "$TAG" \
+            --pub-date "$PUB_DATE" \
+            --parts "${PARTS[*]}" \
+            --out /tmp/latest.json
+          unset IFS
+          cat /tmp/latest.json
+          gh release upload "$TAG" /tmp/latest.json -R "$GITHUB_REPOSITORY" --clobber

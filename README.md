@@ -92,13 +92,16 @@ Entitlements are in `src-tauri/entitlements.plist`; `Info.plist` declares microp
 ### General
 - Update `tauri.conf.json` identifier, version, and updater pubkey before release.
 - Use GitHub Releases + Tauri updater for auto-updates.
+- The app fetches `plugins.updater.endpoints` → `.../releases/latest/download/latest.json`.
+- That endpoint must be **publicly downloadable** (no GitHub auth). Private repos return 404 to the desktop app.
 - Test on clean machines.
 
 ### Automated Releases (Recommended)
 
 1. Tag a version: `git tag v1.0.0 && git push origin v1.0.0`
-2. GitHub Actions will build for macOS + Windows and create a release with all assets.
+2. GitHub Actions will build for macOS + Windows, upload signed updater artifacts (`.sig`), merge platform fragments into `latest.json`, and attach it to the release.
 3. Workflow file: `.github/workflows/release.yml`
+4. If the repo is private, either make releases public or host `latest.json` + installers on a public HTTPS endpoint and update `plugins.updater.endpoints`.
 
 **Required GitHub Secrets** (for signed builds):
 - `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD` (macOS)
