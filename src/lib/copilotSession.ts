@@ -21,6 +21,7 @@ import {
 import { useAppStore, type Suggestion } from '../stores/useAppStore'
 import { mergeContinuationText, textSimilarity } from './copilotText'
 import { createCopilotInterviewRecord, type SavedRecording } from './copilotArchive'
+import { scoreCopilotSession, type CopilotSessionScore } from './copilotScoring'
 import {
   getInterviewerCommitDelay,
   shouldInterruptForInterviewerContinuation,
@@ -181,30 +182,48 @@ class CopilotSessionHost {
 
     this.transition({ type: 'archive-saving' })
     const duration = recording?.duration_seconds ?? 0
+
+    let score: CopilotSessionScore | null = null
+    let scoreError: string | null = null
+    try {
+      score = await scoreCopilotSession(snapshot.messages)
+    } catch (error) {
+      scoreError = error instanceof Error ? error.message : String(error)
+      console.error('[Copilot] Failed to score session', error)
+    }
+
     const record = createCopilotInterviewRecord(
       snapshot.messages,
       duration,
       recording?.path ?? null,
+      new Date(),
+      score,
     )
 
     try {
       const id = await saveInterview(record)
       useAppStore.getState().addHistory({ ...record, id })
-      if (recordingError) {
+      if (recordingError || scoreError) {
+        const parts = []
+        if (recordingError) parts.push(`recording could not be saved: ${recordingError}`)
+        if (scoreError) parts.push(`score could not be generated: ${scoreError}`)
         this.transition({
           type: 'archive-error',
-          notice: `Session saved, but the recording could not be saved: ${recordingError}`,
+          notice: `Session saved, but ${parts.join('; ')}`,
         })
       } else {
         this.transition({
           type: 'archive-saved',
-          notice: recording ? 'copilot.archive.saved' : 'copilot.archive.sessionSaved',
+          notice: recording
+            ? (score ? 'copilot.archive.savedScored' : 'copilot.archive.saved')
+            : (score ? 'copilot.archive.sessionSavedScored' : 'copilot.archive.sessionSaved'),
         })
       }
       console.info('[Copilot] Session archived', {
         interviewId: id,
         recordingPath: recording?.path ?? null,
         duration,
+        score: score?.overallScore ?? null,
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

@@ -1,5 +1,6 @@
 import type { InterviewRecord } from '../stores/useAppStore'
 import type { CopilotMessage } from './copilotSessionState'
+import type { CopilotSessionScore } from './copilotScoring'
 
 const ROLE_LABELS: Record<CopilotMessage['role'], string> = {
   interviewer: 'Interviewer',
@@ -33,17 +34,23 @@ export function createCopilotInterviewRecord(
   duration: number,
   recordingPath: string | null,
   now = new Date(),
+  score: CopilotSessionScore | null = null,
 ): InterviewRecord {
   return {
     date: now.toISOString().slice(0, 16).replace('T', ' '),
     role: generateCopilotSessionTitle(messages),
     company: 'Stealth Copilot',
-    score: null,
+    score: score?.overallScore ?? null,
     transcript: messages
       .map((message) => `${ROLE_LABELS[message.role]}: ${message.text}`)
       .join('\n'),
     duration,
     mode: 'copilot',
     recordingPath,
+    detailsJson: score
+      ? JSON.stringify({
+          score,
+        })
+      : null,
   }
 }

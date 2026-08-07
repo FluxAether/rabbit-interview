@@ -107,6 +107,7 @@ check(
   'interview history migrates and stores the recording path',
 )
 check(archive.includes('createCopilotInterviewRecord'), 'automatic archives use one transcript record builder')
+check(source('src/lib/copilotScoring.ts').includes('buildCopilotQaPairs') && session.includes('scoreCopilotSession'), 'ending a session scores interviewer questions against microphone answers')
 check(!page.includes('saveSession = async') && page.includes('copilot.archive.autoSaveHint'), 'the page no longer requires a manual session-save action')
 check(
   historyPage.includes('convertFileSrc(selected.recordingPath)')
@@ -302,8 +303,51 @@ check(
     && archivedRecord.duration === 42
     && archivedRecord.recordingPath === '/tmp/interview.wav'
     && archivedRecord.role === 'Tell me about yourself.'
-    && archivedRecord.company === 'Stealth Copilot',
+    && archivedRecord.company === 'Stealth Copilot'
+    && archivedRecord.score === null,
   'automatic archive records contain the complete transcript, duration, and recording path',
+)
+const scoredRecord = createCopilotInterviewRecord(
+  [
+    { id: 1, role: 'interviewer', source: 'system-stt', text: 'Tell me about yourself.', createdAt: 1_000 },
+    { id: 2, role: 'me', source: 'microphone-stt', text: 'I ship desktop interview tools.', createdAt: 2_000 },
+  ],
+  42,
+  '/tmp/interview.wav',
+  new Date('2026-07-20T15:55:00.000Z'),
+  {
+    overallScore: 86,
+    strengths: ['clear'],
+    improvements: ['add metrics'],
+    summary: 'Solid answers with room for metrics.',
+    answeredQuestionCount: 1,
+  },
+)
+check(
+  scoredRecord.score === 86
+    && scoredRecord.detailsJson?.includes('"overallScore":86'),
+  'scored archive records persist overall score details',
+)
+
+const { buildCopilotQaPairs } = loadTypeScriptModule(
+  'src/lib/copilotScoring.ts',
+  ['buildCopilotQaPairs'],
+)
+const pairs = buildCopilotQaPairs([
+  { id: 1, role: 'interviewer', source: 'system-stt', text: 'Tell me about yourself.', createdAt: 1 },
+  { id: 2, role: 'assistant', source: 'llm', text: 'Ignore this AI suggestion.', createdAt: 2 },
+  { id: 3, role: 'me', source: 'microphone-stt', text: 'I build desktop tools.', createdAt: 3 },
+  { id: 4, role: 'me', source: 'follow-up', text: 'make it shorter', createdAt: 4 },
+  { id: 5, role: 'interviewer', source: 'system-stt', text: 'Why this role?', createdAt: 5 },
+  { id: 6, role: 'me', source: 'microphone-stt', text: 'I enjoy product interviews.', createdAt: 6 },
+])
+check(
+  pairs.length === 2
+    && pairs[0].question === 'Tell me about yourself.'
+    && pairs[0].answer === 'I build desktop tools.'
+    && pairs[1].question === 'Why this role?'
+    && pairs[1].answer === 'I enjoy product interviews.',
+  'scoring pairs use interviewer questions and microphone answers only',
 )
 check(
   generateCopilotSessionTitle([
