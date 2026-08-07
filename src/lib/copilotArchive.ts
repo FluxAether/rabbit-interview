@@ -13,6 +13,21 @@ export interface SavedRecording {
   sample_rate: number
 }
 
+export function generateCopilotSessionTitle(
+  messages: CopilotMessage[],
+  maxLen = 48,
+): string {
+  const preferred = messages.find((message) => message.role === 'interviewer' && message.text.trim())
+    ?? messages.find((message) => message.role === 'me' && message.text.trim())
+    ?? messages.find((message) => message.text.trim())
+
+  if (!preferred) return 'Live Interview'
+
+  const normalized = preferred.text.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= maxLen) return normalized
+  return `${normalized.slice(0, maxLen - 1).trimEnd()}…`
+}
+
 export function createCopilotInterviewRecord(
   messages: CopilotMessage[],
   duration: number,
@@ -21,8 +36,8 @@ export function createCopilotInterviewRecord(
 ): InterviewRecord {
   return {
     date: now.toISOString().slice(0, 16).replace('T', ' '),
-    role: 'Live Interview',
-    company: 'Real-time',
+    role: generateCopilotSessionTitle(messages),
+    company: 'Stealth Copilot',
     score: null,
     transcript: messages
       .map((message) => `${ROLE_LABELS[message.role]}: ${message.text}`)

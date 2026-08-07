@@ -284,9 +284,9 @@ if (sessionState) {
   )
 }
 
-const { createCopilotInterviewRecord } = loadTypeScriptModule(
+const { createCopilotInterviewRecord, generateCopilotSessionTitle } = loadTypeScriptModule(
   'src/lib/copilotArchive.ts',
-  ['createCopilotInterviewRecord'],
+  ['createCopilotInterviewRecord', 'generateCopilotSessionTitle'],
 )
 const archivedRecord = createCopilotInterviewRecord(
   [
@@ -300,8 +300,26 @@ const archivedRecord = createCopilotInterviewRecord(
 check(
   archivedRecord.transcript === 'Interviewer: Tell me about yourself.\nAI: I build reliable desktop systems.'
     && archivedRecord.duration === 42
-    && archivedRecord.recordingPath === '/tmp/interview.wav',
+    && archivedRecord.recordingPath === '/tmp/interview.wav'
+    && archivedRecord.role === 'Tell me about yourself.'
+    && archivedRecord.company === 'Stealth Copilot',
   'automatic archive records contain the complete transcript, duration, and recording path',
+)
+check(
+  generateCopilotSessionTitle([
+    { id: 1, role: 'me', source: 'microphone-stt', text: '  我先介绍项目背景，  然后讲结果。  ', createdAt: 1_000 },
+  ]) === '我先介绍项目背景， 然后讲结果。',
+  'session titles fall back to the first user message when no interviewer question exists',
+)
+check(
+  generateCopilotSessionTitle([
+    { id: 1, role: 'interviewer', source: 'system-stt', text: '请详细说明你在高峰流量下如何定位并修复支付超时问题，并给出具体指标，同时说明你如何和业务方对齐优先级。', createdAt: 1_000 },
+  ]) === '请详细说明你在高峰流量下如何定位并修复支付超时问题，并给出具体指标，同时说明你如何和业务方对齐…',
+  'long session titles are truncated for history display',
+)
+check(
+  generateCopilotSessionTitle([]) === 'Live Interview',
+  'empty sessions keep a default title',
 )
 
 check(!sessionState || sessionState.includes("revision: snapshot.revision + 1"), 'snapshots carry a monotonic revision')
