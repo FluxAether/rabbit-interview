@@ -95,6 +95,68 @@ export async function loadHistory(): Promise<any[]> {
   );
 }
 
+export type HistoryMode = "copilot" | "mock";
+
+export interface HistoryPageOptions {
+  page: number;
+  pageSize: number;
+  mode: HistoryMode;
+  search?: string;
+}
+
+export interface HistoryPageResult {
+  records: any[];
+  total: number;
+}
+
+function historyWhereClause(mode: HistoryMode, search: string): { clause: string; values: unknown[] } {
+  const modeClause = mode === "mock" ? "mode LIKE 'mock%'" : "LOWER(mode) = 'copilot'";
+  const normalizedSearch = search.trim().toLowerCase();
+  if (!normalizedSearch) return { clause: modeClause, values: [] };
+
+  const pattern = `%${normalizedSearch}%`;
+  return {
+    clause: `${modeClause} AND (LOWER(COALESCE(role, '')) LIKE ? OR LOWER(COALESCE(company, '')) LIKE ?)`,
+    values: [pattern, pattern],
+  };
+}
+
+export async function loadHistoryPage(options: HistoryPageOptions): Promise<HistoryPageResult> {
+  const database = await getDb();
+  const page = Math.max(1, Math.floor(options.page));
+  const pageSize = Math.max(1, Math.floor(options.pageSize));
+  const offset = (page - 1) * pageSize;
+  const { clause, values } = historyWhereClause(options.mode, options.search ?? "");
+
+  const [records, countRows] = await Promise.all([
+    database.select(
+      `SELECT id, date, role, company, score, transcript, duration, mode, recording_path AS recordingPath, details_json AS detailsJson FROM interviews WHERE ${clause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      [...values, pageSize, offset],
+    ),
+    database.select<{ total: number }>(
+      `SELECT COUNT(*) AS total FROM interviews WHERE ${clause}`,
+      values,
+    ),
+  ]);
+
+  return {
+    records,
+    total: Number(countRows[0]?.total ?? 0),
+  };
+}
+
+export async function loadHistoryCounts(): Promise<Record<HistoryMode, number>> {
+  const database = await getDb();
+  const rows = await database.select<{ mode: HistoryMode; total: number }>(
+    "SELECT CASE WHEN LOWER(mode) = 'copilot' THEN 'copilot' ELSE 'mock' END AS mode, COUNT(*) AS total FROM interviews WHERE LOWER(mode) = 'copilot' OR mode LIKE 'mock%' GROUP BY CASE WHEN LOWER(mode) = 'copilot' THEN 'copilot' ELSE 'mock' END",
+  );
+  const counts: Record<HistoryMode, number> = { copilot: 0, mock: 0 };
+  rows.forEach((row) => {
+    counts[row.mode] = Number(row.total ?? 0);
+  });
+  return counts;
+}
+
 export async function saveSetting(key: string, value: string): Promise<void> {
   const database = await getDb();
   await database.execute(

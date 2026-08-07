@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { Clipboard } from 'lucide-react'
-import { useAppStore, InterviewRecord } from '../stores/useAppStore'
+import type { InterviewRecord } from '../stores/useAppStore'
 import WaveSurfer from 'wavesurfer.js'
-import { loadHistory as loadHistoryDb } from '../lib/db'
+import { loadHistoryCounts, loadHistoryPage } from '../lib/db'
 import { useTranslation } from '../i18n'
 
 type HistoryChatRole = 'interviewer' | 'assistant' | 'me'
@@ -13,14 +13,6 @@ interface HistoryChatMessage {
   id: string
   role: HistoryChatRole
   text: string
-}
-
-function isMockInterviewMode(mode?: string | null): boolean {
-  return String(mode || '').startsWith('mock')
-}
-
-function isCopilotMode(mode?: string | null): boolean {
-  return String(mode || '').toLowerCase() === 'copilot'
 }
 
 function parseTranscript(transcript: string, mode: string): HistoryChatMessage[] {
@@ -64,34 +56,49 @@ function parseTranscript(transcript: string, mode: string): HistoryChatMessage[]
     : [{ id: 'transcript', role: 'interviewer', text: transcript }]
 }
 
+const PAGE_SIZE = 10
+
 export default function History() {
-  const { history, loadHistory } = useAppStore()
   const t = useTranslation()
   const [search, setSearch] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<HistoryTab>('copilot')
   const [selected, setSelected] = useState<InterviewRecord | null>(null)
+  const [records, setRecords] = useState<InterviewRecord[]>([])
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [counts, setCounts] = useState<Record<HistoryTab, number>>({ copilot: 0, mock: 0 })
 
   useEffect(() => {
-    // Load from SQLite via plugin
-    loadHistoryDb().then((records: any[]) => {
-      if (records && records.length) {
-        loadHistory(records.map(r => ({
-          ...r,
-          id: r.id,
-        })))
-      }
-    }).catch(console.error)
+    const timer = window.setTimeout(() => {
+      setSearchQuery(search)
+      setPage(1)
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [search])
+
+  useEffect(() => {
+    let cancelled = false
+    void loadHistoryPage({ page, pageSize: PAGE_SIZE, mode: activeTab, search: searchQuery })
+      .then((result) => {
+        if (cancelled) return
+        setRecords(result.records)
+        setTotal(result.total)
+      })
+      .catch(console.error)
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, page, searchQuery])
+
+  useEffect(() => {
+    void loadHistoryCounts().then(setCounts).catch(console.error)
   }, [])
 
-  const tabbed = history.filter((item) =>
-    activeTab === 'mock' ? isMockInterviewMode(item.mode) : isCopilotMode(item.mode)
-  )
-  const filtered = tabbed.filter((item) =>
-    `${item.role}${item.company}`.toLowerCase().includes(search.toLowerCase())
-  )
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const tabs: Array<{ id: HistoryTab; label: string; count: number }> = [
-    { id: 'copilot', label: t('history.tab.copilot'), count: history.filter((item) => isCopilotMode(item.mode)).length },
-    { id: 'mock', label: t('history.tab.mock'), count: history.filter((item) => isMockInterviewMode(item.mode)).length },
+    { id: 'copilot', label: t('history.tab.copilot'), count: counts.copilot },
+    { id: 'mock', label: t('history.tab.mock'), count: counts.mock },
   ]
 
   const waveformRef = useRef<HTMLDivElement>(null)
@@ -215,7 +222,10 @@ export default function History() {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setActiveTab(tab.id)
+                setPage(1)
+              }}
               className={`flex-1 rounded-xl px-3 py-2 text-sm transition-all ${
                 active
                   ? 'bg-[#e0e7ff] dark:bg-[#312e81] font-semibold text-[#4338ca] dark:text-[#a5b4fc]'
@@ -232,8 +242,8 @@ export default function History() {
       </div>
 
       <div className="space-y-2">
-        {filtered.map((item, index) => (
-          <div key={index} className="card flex items-center justify-between px-5 py-3.5 text-sm">
+        {records.map((item) => (
+          <div key={item.id ?? `${item.date}-${item.role}`} className="card flex items-center justify-between px-5 py-3.5 text-sm">
             <div className="flex items-center gap-4">
               <div>
                 <div className="text-xs text-[#94a3b8]">{item.date}</div>
@@ -271,12 +281,34 @@ export default function History() {
             </div>
           </div>
         ))}
-        {filtered.length === 0 && (
+        {records.length === 0 && (
           <div className="text-sm text-[#64748b] dark:text-[#94a3b8] p-4">
             {t(activeTab === 'mock' ? 'history.empty.mock' : 'history.empty.copilot')}
           </div>
         )}
       </div>
+
+      {total > PAGE_SIZE && (
+        <div className="mt-4 flex items-center justify-center gap-3 text-sm text-[#64748b] dark:text-[#94a3b8]">
+          <button
+            type="button"
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+            disabled={page <= 1}
+            className="rounded-xl border border-[#e2e8f0] px-3 py-1.5 text-[#0f172a] disabled:cursor-not-allowed disabled:opacity-40 dark:border-[#334155] dark:text-[#f8fafc]"
+          >
+            ←
+          </button>
+          <span>{page} / {totalPages}</span>
+          <button
+            type="button"
+            onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+            disabled={page >= totalPages}
+            className="rounded-xl border border-[#e2e8f0] px-3 py-1.5 text-[#0f172a] disabled:cursor-not-allowed disabled:opacity-40 dark:border-[#334155] dark:text-[#f8fafc]"
+          >
+            →
+          </button>
+        </div>
+      )}
 
       {/* Replay Modal */}
       {selected && (
