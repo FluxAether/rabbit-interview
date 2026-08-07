@@ -99,14 +99,30 @@ export default function History() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [audioReady, setAudioReady] = useState(false)
 
-  useEffect(() => {
-    wavesurferRef.current?.destroy()
+  const stopReplayAudio = () => {
+    const wavesurfer = wavesurferRef.current
+    if (!wavesurfer) return
+    try {
+      wavesurfer.pause()
+    } catch {
+      // Ignore already-stopped players while tearing down.
+    }
+    try {
+      wavesurfer.destroy()
+    } catch {
+      // Ignore double-destroy during modal close / reselect races.
+    }
     wavesurferRef.current = null
+  }
+
+  useEffect(() => {
+    stopReplayAudio()
     setAudioReady(false)
     setIsPlaying(false)
     if (!selected?.recordingPath || !waveformRef.current) return
 
     let wavesurfer: ReturnType<typeof WaveSurfer.create> | null = null
+    let cancelled = false
     try {
       wavesurfer = WaveSurfer.create({
         container: waveformRef.current,
@@ -119,11 +135,13 @@ export default function History() {
       })
       // MediaElement volume is capped at 1; WebAudio gain can boost quiet interview recordings.
       wavesurfer.on('ready', () => {
+        if (cancelled) return
         wavesurfer?.setVolume(3)
         setAudioReady(true)
       })
       wavesurfer.on('finish', () => setIsPlaying(false))
       void wavesurfer.load(convertFileSrc(selected.recordingPath)).catch((error) => {
+        if (cancelled) return
         setAudioReady(false)
         console.warn('Unable to load saved interview recording', error)
       })
@@ -133,7 +151,17 @@ export default function History() {
     }
 
     return () => {
-      wavesurfer?.destroy()
+      cancelled = true
+      try {
+        wavesurfer?.pause()
+      } catch {
+        // Ignore teardown races.
+      }
+      try {
+        wavesurfer?.destroy()
+      } catch {
+        // Ignore double-destroy.
+      }
       if (wavesurferRef.current === wavesurfer) wavesurferRef.current = null
     }
   }, [selected?.recordingPath])
@@ -145,6 +173,7 @@ export default function History() {
   }
 
   const closeReplay = () => {
+    stopReplayAudio()
     setSelected(null)
     setIsPlaying(false)
     setAudioReady(false)
