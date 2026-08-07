@@ -8,8 +8,6 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     // App / Shell
     'app.name': 'Rabbit Interview',
     'app.tagline': 'Desktop Interview Copilot',
-    'app.userName': 'Alex Morgan',
-    'app.userPlan': 'Premium Plan',
 
     // Navigation
     'nav.dashboard': 'Dashboard',
@@ -45,7 +43,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'common.filters': 'Filters',
 
     // Dashboard
-    'dashboard.welcome': 'Welcome back, Alex',
+    'dashboard.welcome': 'Welcome back',
     'dashboard.subtitle': "Let's prepare for your next opportunity.",
     'dashboard.stat.interviews': 'Interviews Assisted',
     'dashboard.stat.score': 'Average Score',
@@ -54,6 +52,8 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'dashboard.recentActivity': 'Recent Activity',
     'dashboard.viewAllHistory': 'View all history →',
     'dashboard.noActivity': 'Your recent interviews and activities will appear here.',
+    'dashboard.loading': 'Loading your interview history…',
+    'dashboard.loadError': 'Interview history could not be loaded. Dashboard statistics are unavailable.',
     'dashboard.launch.title': 'Launch Stealth Copilot',
     'dashboard.launch.subtitle': 'Your AI career partner for real-time guidance, feedback, and interview mastery.',
     'dashboard.launch.badge': 'REAL-TIME ASSISTANCE',
@@ -336,8 +336,6 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     // App / Shell
     'app.name': 'Rabbit Interview',
     'app.tagline': 'AI 面试助手',
-    'app.userName': 'Alex Morgan',
-    'app.userPlan': '高级会员',
 
     // Navigation
     'nav.dashboard': '仪表盘',
@@ -373,7 +371,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'common.filters': '筛选器',
 
     // Dashboard
-    'dashboard.welcome': '欢迎回来，Alex',
+    'dashboard.welcome': '欢迎回来',
     'dashboard.subtitle': '让我们为下一次机会做好准备。',
     'dashboard.stat.interviews': '辅助面试次数',
     'dashboard.stat.score': '平均得分',
@@ -382,6 +380,8 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'dashboard.recentActivity': '最近活动',
     'dashboard.viewAllHistory': '查看全部历史 →',
     'dashboard.noActivity': '你最近的面试和活动将显示在这里。',
+    'dashboard.loading': '正在加载真实面试历史…',
+    'dashboard.loadError': '无法读取面试历史，仪表盘统计暂不可用。',
     'dashboard.launch.title': '启动隐形助手',
     'dashboard.launch.subtitle': '你的 AI 职业伙伴，提供实时指导、反馈和面试精进。',
     'dashboard.launch.badge': '实时辅助',
@@ -664,8 +664,6 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     // For now, alias most to zh-CN for completeness. Can be refined later.
     'app.name': 'Rabbit Interview',
     'app.tagline': 'AI 面試助手',
-    'app.userName': 'Alex Morgan',
-    'app.userPlan': '高級會員',
 
     'nav.dashboard': '儀表板',
     'nav.copilot': '隱形助手',
@@ -698,7 +696,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'common.allScores': '全部分數',
     'common.filters': '篩選',
 
-    'dashboard.welcome': '歡迎回來，Alex',
+    'dashboard.welcome': '歡迎回來',
     'dashboard.subtitle': '讓我們為下一次機會做好準備。',
     'dashboard.stat.interviews': '輔助面試次數',
     'dashboard.stat.score': '平均得分',
@@ -707,6 +705,8 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'dashboard.recentActivity': '最近活動',
     'dashboard.viewAllHistory': '檢視全部歷史 →',
     'dashboard.noActivity': '你最近的面試和活動將顯示在這裡。',
+    'dashboard.loading': '正在載入真實面試歷史…',
+    'dashboard.loadError': '無法讀取面試歷史，儀表板統計暫不可用。',
     'dashboard.launch.title': '啟動隱形助手',
     'dashboard.launch.subtitle': '你的 AI 職業夥伴，提供即時指導、回饋與面試精進。',
     'dashboard.launch.badge': '即時輔助',

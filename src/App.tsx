@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
-import { Clock, FileText, LayoutDashboard, Mic, PanelLeftClose, PanelLeftOpen, Rocket, Settings as SettingsIcon, Sparkles } from 'lucide-react'
+import { Clock, FileText, LayoutDashboard, Mic, PanelLeftClose, PanelLeftOpen, Rocket, Settings as SettingsIcon } from 'lucide-react'
 import CopilotPanel from './components/CopilotPanel'
 import Dashboard from './pages/Dashboard'
 import History from './pages/History'
@@ -121,24 +121,16 @@ function Sidebar({
         })}
       </nav>
 
-      {/* Footer Profile / Pro Plan */}
+      {/* Footer */}
       <div className="mt-auto w-full border-t border-[#e2e8f0] pt-3 dark:border-[#334155]">
         {!collapsed ? (
-          <div className="flex items-center justify-between px-2 text-xs">
-            <div className="min-w-0">
-              <div className="truncate font-medium text-[#0f172a] dark:text-[#f8fafc]">{t('app.userName')}</div>
-              <div className="flex items-center gap-1 text-[10px] text-[#64748b] dark:text-[#94a3b8]">
-                <Sparkles className="h-3 w-3 text-[#6366f1]" />
-                <span className="truncate">{t('app.userPlan')}</span>
-              </div>
-            </div>
-            <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" title="AI 服务在线" />
+          <div className="px-2 text-xs">
+            <div className="truncate font-medium text-[#0f172a] dark:text-[#f8fafc]">{t('app.name')}</div>
+            <div className="truncate text-[10px] text-[#64748b] dark:text-[#94a3b8]">{t('app.tagline')}</div>
           </div>
         ) : (
-          <div className="flex justify-center" title={`${t('app.userName')} (${t('app.userPlan')})`}>
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#6366f1]/10 text-xs font-semibold text-[#6366f1]">
-              AM
-            </div>
+          <div className="flex justify-center" title={t('app.name')}>
+            <img src="/logo.png" alt="" className="h-8 w-8 rounded-lg object-contain" />
           </div>
         )}
       </div>
@@ -150,6 +142,7 @@ export default function App() {
   const floating = window.location.hash === '#copilot-floating'
   const settings = useAppStore((state) => state.settings)
   const loadHistory = useAppStore((state) => state.loadHistory)
+  const setHistoryLoadError = useAppStore((state) => state.setHistoryLoadError)
   const hydrateResumeWorkspace = useAppStore((state) => state.hydrateResumeWorkspace)
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -215,6 +208,7 @@ export default function App() {
         .catch((error) => console.warn('Legacy store migration failed', error))
         .finally(() => {
           loadInterviewHistory().then(loadHistory).catch((error) => {
+            setHistoryLoadError()
             console.warn('Failed to load interview history', error)
           })
           loadResumeWorkspace().then(hydrateResumeWorkspace).catch((error) => {
@@ -230,7 +224,7 @@ export default function App() {
       cancelled = true
       disposers.forEach((cleanup) => cleanup())
     }
-  }, [floating, hydrateResumeWorkspace, loadHistory])
+  }, [floating, hydrateResumeWorkspace, loadHistory, setHistoryLoadError])
 
   useEffect(() => {
     if (floating) return

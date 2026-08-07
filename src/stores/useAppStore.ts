@@ -40,8 +40,10 @@ export interface AppState {
   
   // History
   history: InterviewRecord[]
+  historyStatus: 'loading' | 'ready' | 'error'
   addHistory: (record: InterviewRecord) => void
   loadHistory: (records: InterviewRecord[]) => void
+  setHistoryLoadError: () => void
   
   // Resume
   resumeOriginal: string
@@ -110,8 +112,10 @@ export const useAppStore = create<AppState>((set) => ({
   setCopilotSnapshot: (snapshot) => set({ copilot: snapshot }),
 
   history: [],
-  addHistory: (record) => set((state) => ({ history: [record, ...state.history] })),
-  loadHistory: (records) => set({ history: records }),
+  historyStatus: 'loading',
+  addHistory: (record) => set((state) => ({ history: [record, ...state.history], historyStatus: 'ready' })),
+  loadHistory: (records) => set({ history: records, historyStatus: 'ready' }),
+  setHistoryLoadError: () => set({ historyStatus: 'error' }),
 
   resumeOriginal: '',
   resumeOptimized: '',
