@@ -260,15 +260,6 @@ pub async fn set_copilot_window_opacity(app: AppHandle, opacity: f64) -> Result<
         .map_err(|error| format!("Timed out while updating window opacity: {error}"))?
 }
 
-#[tauri::command]
-pub async fn close_copilot_window(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(COPILOT_WINDOW_LABEL) {
-        window.close().map_err(|error| error.to_string())?;
-    }
-    *PROTECTION_STATE.lock().unwrap_or_else(|e| e.into_inner()) = ProtectionState::default();
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::{validate_opacity, CopilotWindowStatus};

@@ -10,7 +10,6 @@ export type CopilotFontSize = 'sm' | 'base' | 'lg';
 
 export interface AppSettings {
   theme: 'Light' | 'Dark' | 'System';
-  launchAtStartup: boolean;
   autoUpdate: boolean;
   updateChannel: 'Stable' | 'Beta';
   language: string;
@@ -32,7 +31,6 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'Light',
-  launchAtStartup: true,
   autoUpdate: true,
   updateChannel: 'Stable',
   language: 'zh-CN',
@@ -114,9 +112,4 @@ export async function saveAppSettings(settings: Partial<AppSettings>): Promise<v
     },
   });
   await saveAppSettingsJson(JSON.stringify(merged));
-}
-
-export async function getSetting<K extends keyof AppSettings>(key: K): Promise<AppSettings[K] | undefined> {
-  const settings = await loadAppSettings();
-  return settings[key];
 }

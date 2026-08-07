@@ -26,6 +26,9 @@ const MAX_SOURCE_CHUNK_SAMPLES: usize = TARGET_SAMPLE_RATE as usize; // 1s
 const MAX_RECORDING_WRITE_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 2; // 2s
 const RECORDING_FLUSH_EVERY_SAMPLES: u64 = TARGET_SAMPLE_RATE as u64 / 2; // ~500ms
 const AMPLITUDE_EMIT_MIN_INTERVAL_MS: u128 = 50;
+// After wake, device/pipe backlog can arrive faster than realtime. Allow a short
+// burst, then drop excess so mixer/IPC/STT cannot spin at full speed.
+const CATCHUP_BURST_SAMPLES: u64 = TARGET_SAMPLE_RATE as u64; // 1s
 
 enum AudioCommand {
     Stop,
@@ -111,6 +114,56 @@ fn capture_origin_frame(origin: &AtomicU64, elapsed_frame: u64) -> u64 {
         Ok(_) => elapsed_frame,
         Err(existing) => existing,
     }
+}
+
+/// Drops sleep/wake catch-up audio so processing stays near realtime.
+///
+/// `produced` counts samples already admitted. Budget grows with wall-clock
+/// elapsed time from capture start, plus a one-second burst allowance.
+fn admit_realtime_samples(
+    samples: Vec<f32>,
+    produced: &AtomicU64,
+    capture_started_at: Instant,
+    sample_rate: u32,
+    burst_samples: u64,
+) -> Vec<f32> {
+    if samples.is_empty() {
+        return samples;
+    }
+
+    let elapsed_frames = (capture_started_at.elapsed().as_secs_f64() * f64::from(sample_rate))
+        .ceil()
+        .max(0.0) as u64;
+    let budget = elapsed_frames.saturating_add(burst_samples);
+    let already = produced.load(Ordering::Relaxed);
+    if already >= budget {
+        return Vec::new();
+    }
+
+    let allowed = (budget - already) as usize;
+    if samples.len() <= allowed {
+        produced.fetch_add(samples.len() as u64, Ordering::Relaxed);
+        return samples;
+    }
+
+    // Prefer the newest audio when a single callback dumps a long backlog.
+    let kept = samples[samples.len() - allowed..].to_vec();
+    produced.fetch_add(kept.len() as u64, Ordering::Relaxed);
+    kept
+}
+
+fn admit_capture_samples(
+    samples: Vec<f32>,
+    produced: &AtomicU64,
+    capture_started_at: Instant,
+) -> Vec<f32> {
+    admit_realtime_samples(
+        samples,
+        produced,
+        capture_started_at,
+        TARGET_SAMPLE_RATE,
+        CATCHUP_BURST_SAMPLES,
+    )
 }
 
 fn convert_samples<T>(data: &[T]) -> Vec<f32>
@@ -650,8 +703,14 @@ pub async fn start_audio_capture(
             let system_origin = Arc::new(AtomicU64::new(u64::MAX));
             let origin_frame = Arc::clone(&system_origin);
             let capture_started_at = started_at;
+            let system_produced = Arc::new(AtomicU64::new(0));
+            let produced = Arc::clone(&system_produced);
             match AudioTeeProcess::spawn(
                 move |samples| {
+                    let samples = admit_capture_samples(samples, &produced, capture_started_at);
+                    if samples.is_empty() {
+                        return;
+                    }
                     let elapsed_frame = (capture_started_at.elapsed().as_secs_f64()
                         * f64::from(TARGET_SAMPLE_RATE))
                     .round() as u64;
@@ -717,12 +776,18 @@ pub async fn start_audio_capture(
             let origin_frame = Arc::clone(&system_origin);
             let capture_started_at = started_at;
             let mut resampler = MonoResampler::new(channels, input_rate);
+            let system_produced = Arc::new(AtomicU64::new(0));
+            let produced = Arc::clone(&system_produced);
             let stream = match device.build_input_stream_raw(
                 &stream_config,
                 sample_format,
                 move |data, _| match convert_input_data(data) {
                     Ok(samples) => {
                         let mono = resampler.process(&samples);
+                        let mono = admit_capture_samples(mono, &produced, capture_started_at);
+                        if mono.is_empty() {
+                            return;
+                        }
                         let elapsed_frame = (capture_started_at.elapsed().as_secs_f64()
                             * f64::from(TARGET_SAMPLE_RATE))
                         .round() as u64;
@@ -823,12 +888,18 @@ pub async fn start_audio_capture(
             let origin_frame = Arc::clone(&microphone_origin);
             let capture_started_at = started_at;
             let mut resampler = MonoResampler::new(channels, input_rate);
+            let microphone_produced = Arc::new(AtomicU64::new(0));
+            let produced = Arc::clone(&microphone_produced);
             let stream = match device.build_input_stream_raw(
                 &stream_config,
                 sample_format,
                 move |data, _| match convert_input_data(data) {
                     Ok(samples) => {
                         let mono = resampler.process(&samples);
+                        let mono = admit_capture_samples(mono, &produced, capture_started_at);
+                        if mono.is_empty() {
+                            return;
+                        }
                         let elapsed_frame = (capture_started_at.elapsed().as_secs_f64()
                             * f64::from(TARGET_SAMPLE_RATE))
                         .round() as u64;
@@ -1007,9 +1078,10 @@ pub async fn list_audio_devices() -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        capture_origin_frame, convert_samples, process_output_audio, stop_audio_capture_and_wait,
-        write_pcm16_wav, AtomicU64, MonoResampler,
+        admit_realtime_samples, capture_origin_frame, convert_samples, process_output_audio,
+        stop_audio_capture_and_wait, write_pcm16_wav, AtomicU64, MonoResampler,
     };
+    use std::time::Instant;
 
     #[test]
     fn converts_integer_microphone_samples_to_normalized_f32() {
@@ -1049,6 +1121,23 @@ mod tests {
         let origin = AtomicU64::new(u64::MAX);
         assert_eq!(capture_origin_frame(&origin, 320), 320);
         assert_eq!(capture_origin_frame(&origin, 640), 320);
+    }
+
+    #[test]
+    fn admit_realtime_samples_drops_sleep_wake_backlog_bursts() {
+        let started_at = Instant::now();
+        let produced = AtomicU64::new(0);
+        let first = admit_realtime_samples(vec![0.1; 20_000], &produced, started_at, 16_000, 1_000);
+        // Budget is burst + tiny wall-clock elapsed; keep the newest samples only.
+        assert!(first.len() <= 1_050);
+        assert!(first.len() >= 1_000);
+        assert_eq!(
+            produced.load(std::sync::atomic::Ordering::Relaxed),
+            first.len() as u64
+        );
+        // Already at/over the near-zero elapsed budget, so further backlog is dropped.
+        let second = admit_realtime_samples(vec![0.2; 8_000], &produced, started_at, 16_000, 1_000);
+        assert!(second.len() < 100);
     }
 
     #[test]

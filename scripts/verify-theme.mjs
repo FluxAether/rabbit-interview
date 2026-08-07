@@ -13,7 +13,7 @@ assert.ok(
   'System theme follows operating-system changes and cleans up its listener',
 )
 assert.ok(css.includes('color-scheme: dark') && css.includes('background-color: var(--bg-app)'), 'root and native controls use theme tokens')
-assert.match(read('src/main.tsx'), /<Toaster[^>]+theme=\{toasterTheme\}/, 'notifications follow the selected theme')
+assert.ok(!read('src/main.tsx').includes('sonner') && !read('package.json').includes('sonner'), 'unused sonner toaster is removed')
 assert.ok(settings.includes('pendingSaveRef') && settings.includes('if (pending) void persistToDisk(pending)'), 'pending settings are flushed')
 assert.ok(
   app.includes("listen<AppSettings['theme']>('app-theme-changed'")

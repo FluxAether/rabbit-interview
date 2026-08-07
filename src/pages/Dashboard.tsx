@@ -1,6 +1,5 @@
 import { ArrowDown, ArrowUp, Users, TrendingUp, ClipboardCheck, Rocket } from 'lucide-react'
 import { useMemo } from 'react'
-import { invoke } from '@tauri-apps/api/core'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
 import { computeDashboardStats } from '../lib/dashboardStats'
@@ -42,12 +41,8 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
   const t = useTranslation()
   const stats = useMemo(() => computeDashboardStats(history), [history])
 
-  const launch = async () => {
-    try {
-      await invoke('launch_copilot_window')
-    } catch {
-      onLaunchCopilot()
-    }
+  const launch = () => {
+    onLaunchCopilot()
   }
 
   return (

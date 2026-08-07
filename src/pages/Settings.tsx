@@ -41,7 +41,6 @@ export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabType>('general')
 
   const [theme, setTheme] = useState<'Light' | 'Dark' | 'System'>('Light')
-  const [launchAtStartup, setLaunchAtStartup] = useState(true)
   const [autoUpdate, setAutoUpdate] = useState(true)
   const [updateChannel, setUpdateChannel] = useState<'Stable' | 'Beta'>('Stable')
   const [checkingUpdate, setCheckingUpdate] = useState(false)
@@ -117,7 +116,6 @@ export default function Settings() {
 
   const buildPayload = () => ({
     theme,
-    launchAtStartup,
     autoUpdate,
     updateChannel,
     language,
@@ -166,7 +164,7 @@ export default function Settings() {
       }
     }
   }, [
-    theme, launchAtStartup, autoUpdate, updateChannel,
+    theme, autoUpdate, updateChannel,
     language, aiModel, stealth,
     groqModel, openaiModel, anthropicModel, geminiModel,
     sttProvider, sttModel, sttLanguage,
@@ -215,7 +213,6 @@ export default function Settings() {
     if (!settings) return
 
     if (settings.theme) setTheme(settings.theme as any)
-    if (typeof settings.launchAtStartup === 'boolean') setLaunchAtStartup(settings.launchAtStartup)
     if (typeof settings.autoUpdate === 'boolean') setAutoUpdate(settings.autoUpdate)
     if (settings.updateChannel) setUpdateChannel(settings.updateChannel as any)
     if (settings.stealthEnabled !== undefined) setStealth(!!settings.stealthEnabled)
@@ -553,6 +550,41 @@ export default function Settings() {
     )
   }
 
+
+  const handleClearLocalData = async () => {
+    const ok = window.confirm(t('settings.privacy.clearConfirm') || 'Clear all local interview history, settings, and API keys?')
+    if (!ok) return
+    try {
+      const { clearAllLocalData } = await import('../lib/db')
+      const { clearApiKeys } = await import('../lib/keyStore')
+      const { clearKeyCache } = await import('../lib/llm')
+      const { clearResumeWorkspace } = await import('../lib/resumeWorkspaceStore')
+      await clearAllLocalData()
+      await clearApiKeys()
+      clearKeyCache()
+      await clearResumeWorkspace()
+      useAppStore.getState().loadHistory([])
+      useAppStore.getState().clearResumeWorkspace()
+      useAppStore.getState().setSettings({
+        theme: 'Light',
+        autoUpdate: true,
+        updateChannel: 'Stable',
+        stealthEnabled: true,
+        aiModel: 'groq-llama-3.1',
+        language: DEFAULT_LANGUAGE,
+        sttProvider: 'deepgram',
+        sttModel: 'nova-3',
+        sttLanguage: 'zh-CN',
+      })
+      setKeyStatus({ groq: false, openai: false, anthropic: false, gemini: false, deepgram: false })
+      setKeyInputs({ groq: '', openai: '', anthropic: '', gemini: '', deepgram: '' })
+      triggerSavedToast()
+    } catch (e) {
+      console.warn('Clear local data failed:', e)
+      alert(String(e))
+    }
+  }
+
   return (
     <div className="p-8 overflow-auto h-full">
       <div className="w-full max-w-6xl">
@@ -664,24 +696,6 @@ export default function Settings() {
                       </select>
                     </div>
 
-                    <div className="flex items-center justify-between py-1">
-                      <div className="flex items-center gap-3">
-                        <Mic className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
-                        <div>
-                          <div className="font-medium">{t('settings.launchAtStartup')}</div>
-                          <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.launchAtStartupDesc')}</div>
-                        </div>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={launchAtStartup}
-                          onChange={(e) => setLaunchAtStartup(e.target.checked)}
-                          className="sr-only peer"
-                        />
-                        <div className="w-9 h-5 bg-[#e2e8f0] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#6366f1] dark:bg-[#334155]"></div>
-                      </label>
-                    </div>
                   </div>
                 </div>
 
@@ -1141,7 +1155,8 @@ export default function Settings() {
                   <div className="font-semibold text-[#6366f1] mb-3">{t('settings.privacy.title')}</div>
                   <p className="text-sm">{t('settings.privacy.desc')}</p>
                   <button
-                    onClick={() => alert('All local data cleared (demo)')}
+                    type="button"
+                    onClick={() => void handleClearLocalData()}
                     className="mt-4 text-red-600 hover:text-red-700 text-sm font-medium transition-colors"
                   >
                     {t('settings.privacy.clear')}

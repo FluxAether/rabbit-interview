@@ -10,7 +10,7 @@ import Settings from './pages/Settings'
 import StealthCopilot from './pages/StealthCopilot'
 import { useTranslation } from './i18n'
 import { DEFAULT_LANGUAGE } from './i18n/types'
-import { loadHistory as loadInterviewHistory } from './lib/db'
+import { loadHistory as loadInterviewHistory, migrateLegacyJsonStoresIfNeeded } from './lib/db'
 import {
   mountCopilotSessionClient,
   mountCopilotSessionHost,
@@ -25,6 +25,7 @@ import {
   type CopilotWindowStatus,
 } from './lib/copilotWindow'
 import { loadAppSettings, type AppSettings } from './lib/settingsStore'
+import { encryptSecret } from './lib/secretCrypto'
 import { loadResumeWorkspace, persistResumeWorkspace } from './lib/resumeWorkspaceStore'
 import { selectResumeWorkspace, useAppStore } from './stores/useAppStore'
 
@@ -210,13 +211,20 @@ export default function App() {
       mountCopilotSessionHost().then((cleanup) => {
         register(cleanup)
       })
-      loadInterviewHistory().then(loadHistory).catch((error) => {
-        console.warn('Failed to load interview history', error)
-      })
-      loadResumeWorkspace().then(hydrateResumeWorkspace).catch((error) => {
-        console.warn('Failed to load resume workspace', error)
-        hydrateResumeWorkspace(createEmptyResumeWorkspace())
-      })
+      migrateLegacyJsonStoresIfNeeded(encryptSecret)
+        .catch((error) => console.warn('Legacy store migration failed', error))
+        .finally(() => {
+          loadInterviewHistory().then(loadHistory).catch((error) => {
+            console.warn('Failed to load interview history', error)
+          })
+          loadResumeWorkspace().then(hydrateResumeWorkspace).catch((error) => {
+            console.warn('Failed to load resume workspace', error)
+            hydrateResumeWorkspace(createEmptyResumeWorkspace())
+          })
+          loadAppSettings().then((saved) => {
+            useAppStore.getState().setSettings({ ...saved, language: saved.language || DEFAULT_LANGUAGE })
+          }).catch(() => {})
+        })
     }
     return () => {
       cancelled = true

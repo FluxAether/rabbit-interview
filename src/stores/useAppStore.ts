@@ -31,7 +31,6 @@ export interface Suggestion {
 
 export interface AppState {
   // Global
-  currentPage: string
   settings: Record<string, any>
   setLanguage: (lang: SupportedLanguage) => void
   setSettings: (newSettings: Partial<Record<string, any>>) => void
@@ -88,10 +87,8 @@ export function selectResumeWorkspace(state: AppState): ResumeWorkspace {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  currentPage: 'dashboard',
   settings: {
     theme: 'Light',
-    launchAtStartup: true,
     autoUpdate: true,
     updateChannel: 'Stable',
     stealthEnabled: true,

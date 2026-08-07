@@ -1,26 +1,19 @@
 mod audio;
-mod commands;
 mod copilot_window;
-mod db;
 mod speech;
 
 use audio::{
     export_audio_recording, get_audio_capabilities, list_audio_devices, save_audio_recording,
     start_audio_capture, stop_audio_capture,
 };
-use commands::{get_history, get_settings, save_interview_record, save_settings};
 use copilot_window::{
-    close_copilot_window, get_copilot_window_status, hide_copilot_window,
+    get_copilot_window_status, hide_copilot_window,
     set_copilot_window_opacity, show_copilot_window, toggle_copilot_window,
 };
 use speech::{speak_text, stop_speaking};
 use tauri::Emitter;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
  pub fn run() {
@@ -50,31 +43,21 @@ fn greet(name: &str) -> String {
         )
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
-            greet,
             start_audio_capture,
             stop_audio_capture,
             save_audio_recording,
             export_audio_recording,
             get_audio_capabilities,
             list_audio_devices,
-            get_settings,
-            save_settings,
             show_copilot_window,
             hide_copilot_window,
             toggle_copilot_window,
             get_copilot_window_status,
             set_copilot_window_opacity,
-            close_copilot_window,
-            get_history,
-            save_interview_record,
             speak_text,
             stop_speaking,
         ])
         .setup(|app| {
-            if let Err(e) = db::init_db(app) {
-                eprintln!("DB init error: {}", e);
-            }
-
             // Register the actual hotkey combinations.
             // The .with_handler on the plugin builder above will receive them and emit events.
             let capture_shortcut =

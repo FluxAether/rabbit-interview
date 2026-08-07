@@ -11,7 +11,7 @@ import {
 } from './llm'
 import { loadAppSettings } from './settingsStore'
 import { openMicrophoneSettings, tryRequestMicrophone } from './permissions'
-import { saveInterview, upsertCopilotMessage } from './db'
+import { saveInterview } from './db'
 import {
   createInitialSnapshot,
   reduceCopilotSnapshot,
@@ -125,7 +125,6 @@ class CopilotSessionHost {
   private interviewerQuestionTimer: ReturnType<typeof globalThis.setTimeout> | null = null
   private stopPromise: Promise<void> | null = null
   private persistenceSessionId: string | null = null
-  private persistenceQueue: Promise<void> = Promise.resolve()
   private previousTurn = ''
   private lastRequestType: SuggestionRequestType = 'interviewer-question'
   private recentAssistantText = ''
@@ -155,56 +154,7 @@ class CopilotSessionHost {
     const next = reduceCopilotSnapshot(previous, action)
     if (next === previous) return
     this.snapshot = next
-    this.queueMessagePersistence(previous, next)
     void this.publish()
-  }
-
-  private queueMessagePersistence(
-    previousSnapshot: CopilotSnapshot,
-    nextSnapshot: CopilotSnapshot,
-  ): void {
-    const persistenceSessionId = this.persistenceSessionId
-    const sessionId = nextSnapshot.sessionId ?? previousSnapshot.sessionId
-    const activeAnswerCompleted = previousSnapshot.activeAnswerId !== null
-      && nextSnapshot.activeAnswerId === null
-    if (
-      !persistenceSessionId
-      || sessionId === null
-      || (previousSnapshot.messages === nextSnapshot.messages && !activeAnswerCompleted)
-    ) return
-
-    const previousById = new Map(previousSnapshot.messages.map((message) => [message.id, message]))
-    const changedMessages = nextSnapshot.messages.flatMap((message, messageOrder) => {
-      if (nextSnapshot.activeAnswerId === message.id) return []
-      const previous = previousById.get(message.id)
-      const justCompleted = previousSnapshot.activeAnswerId === message.id
-        && nextSnapshot.activeAnswerId !== message.id
-      return !previous
-        || previous.role !== message.role
-        || previous.source !== message.source
-        || previous.text !== message.text
-        || justCompleted
-        ? [{ message, messageOrder }]
-        : []
-    })
-    if (changedMessages.length === 0) return
-
-    this.persistenceQueue = this.persistenceQueue
-      .then(async () => {
-        for (const { message, messageOrder } of changedMessages) {
-          await upsertCopilotMessage(persistenceSessionId, message, messageOrder)
-        }
-      })
-      .catch((error) => {
-        console.error('[Copilot] Failed to persist chat messages', error)
-        if (this.isCurrent(sessionId)) {
-          this.transition({
-            type: 'recoverable-error',
-            sessionId,
-            error: `Failed to save chat messages: ${error instanceof Error ? error.message : String(error)}`,
-          })
-        }
-      })
   }
 
   private async archiveSession(
@@ -521,7 +471,6 @@ class CopilotSessionHost {
       this.closeDeepgrams()
       await invoke('stop_audio_capture').catch(() => {})
       await this.cleanupRuntime()
-      await this.persistenceQueue
       await this.archiveSession(archiveSnapshot, persistenceSessionId)
       this.transition({ type: 'stopped' })
       this.persistenceSessionId = null
@@ -815,7 +764,6 @@ class CopilotSessionHost {
     const persistenceSessionId = this.persistenceSessionId
     await invoke('stop_audio_capture').catch(() => {})
     await this.cleanupRuntime()
-    await this.persistenceQueue
     await this.archiveSession(archiveSnapshot, persistenceSessionId)
     this.persistenceSessionId = null
     this.transition({ type: 'error', sessionId, error })

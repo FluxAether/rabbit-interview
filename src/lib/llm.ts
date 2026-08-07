@@ -73,177 +73,6 @@ function resolveProviderAndModel(aiModel: string): { provider: LlmProvider; mode
   };
 }
 
-async function callGroq(prompt: string, model: string, apiKey: string): Promise<string> {
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: INTERVIEW_ANSWER_SYSTEM },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.6,
-      max_tokens: answerTokenBudget('groq', model),
-    }),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data?.error?.message || `Groq error ${res.status}`);
-  }
-  return data.choices?.[0]?.message?.content || '';
-}
-
-async function callOpenAI(prompt: string, model: string, apiKey: string): Promise<string> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: INTERVIEW_ANSWER_SYSTEM },
-        { role: 'user', content: prompt }
-      ],
-      max_completion_tokens: answerTokenBudget('openai', model),
-    }),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data?.error?.message || `OpenAI error ${res.status}`);
-  }
-  return data.choices?.[0]?.message?.content || '';
-}
-
-async function callGemini(prompt: string, model: string, apiKey: string): Promise<string> {
-  const modelId = SUPPORTED_GEMINI_MODELS.has(model.toLowerCase())
-    ? model.toLowerCase()
-    : DEFAULT_GEMINI_MODEL;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey,
-    },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: INTERVIEW_ANSWER_SYSTEM }]
-      },
-      contents: [{
-        parts: [{ text: prompt }]
-      }],
-      generationConfig: {
-        temperature: 0.6,
-        maxOutputTokens: answerTokenBudget('gemini', modelId),
-      }
-    }),
-  });
-
-  const data = await res.json();
-  if (!res.ok) {
-    const msg = data?.error?.message || `Gemini error ${res.status}`;
-    throw new Error(msg);
-  }
-
-  // Gemini response shape: candidates[0].content.parts[0].text
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return text;
-}
-
-async function callAnthropic(prompt: string, model: string, apiKey: string): Promise<string> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: answerTokenBudget('anthropic', model),
-      system: INTERVIEW_ANSWER_SYSTEM,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data?.error?.message || `Anthropic error ${res.status}`);
-  }
-  return (data?.content || [])
-    .filter((block: any) => block?.type === 'text')
-    .map((block: any) => block.text)
-    .join('\n');
-}
-
-export async function generateSuggestions(question: string, transcriptSoFar?: string): Promise<string[]> {
-  // Read current selected model from the global store (works from plain modules)
-  const { settings } = useAppStore.getState();
-  const aiModel: string = settings?.aiModel || 'groq-llama-3.1';
-
-  let { provider, model } = resolveProviderAndModel(aiModel);
-  let apiKey = await getLlmApiKey(provider);
-
-  // Robustness: if the selected provider has no key, auto-select the first provider that does have a key.
-  // This makes "configure Gemini + Deepgram, start using" work even if you didn't explicitly switch the active AI model.
-  if (!apiKey) {
-    const candidates: ('gemini' | 'groq' | 'openai' | 'anthropic')[] = ['gemini', 'groq', 'openai', 'anthropic'];
-    for (const cand of candidates) {
-      if (cand === provider) continue;
-      const k = await getLlmApiKey(cand);
-      if (k) {
-        provider = cand;
-        // Use a reasonable default model per provider when auto-falling back
-        model = cand === 'gemini'
-          ? DEFAULT_GEMINI_MODEL
-          : cand === 'openai'
-            ? 'gpt-5.6-luna'
-            : cand === 'anthropic'
-              ? 'claude-haiku-4-5'
-              : 'llama-3.1-8b-instant';
-        apiKey = k;
-        console.log('[LLM] Auto-selected provider with key:', provider);
-        break;
-      }
-    }
-  }
-
-  const userPrompt = `Answer the interviewer question directly in the same language, using the previous context when relevant.\nInterviewer question: ${question}\nPrevious context: ${transcriptSoFar || 'none'}`;
-
-  if (!apiKey) {
-    return ['No LLM API key is configured. Add a provider key in Settings and retry.'];
-  }
-
-  try {
-    let text = '';
-    if (provider === 'gemini') {
-      text = await callGemini(userPrompt, model, apiKey);
-    } else if (provider === 'openai') {
-      text = await callOpenAI(userPrompt, model, apiKey);
-    } else if (provider === 'anthropic') {
-      text = await callAnthropic(userPrompt, model, apiKey);
-    } else {
-      // groq (default)
-      text = await callGroq(userPrompt, model, apiKey);
-    }
-
-    return text
-      .split('\n')
-      .map((l: string) => l.trim())
-      .filter((l: string) => l.length > 3)
-      .slice(0, 6);
-  } catch (e: any) {
-    return [`Error calling ${provider}: ${e?.message || e}`];
-  }
-}
-
 export type LlmStreamStatus = 'complete' | 'max-tokens' | 'incomplete';
 
 export interface LlmStreamResult {
@@ -769,7 +598,6 @@ export function sendAudioChunk(ws: WebSocket | null, float32Chunk: Float32Array)
   ws.send(pcm16.buffer);
 }
 
-/** Gracefully close a Deepgram stream */
 export async function generateStructuredJson<T>(
   system: string,
   prompt: string,
@@ -818,6 +646,7 @@ export async function generateStructuredJson<T>(
   }
 }
 
+/** Gracefully close a Deepgram stream */
 export function closeDeepgramStream(ws: WebSocket | null) {
   if (!ws) return;
   const managed = ws as DeepgramStream;
@@ -828,9 +657,4 @@ export function closeDeepgramStream(ws: WebSocket | null) {
     // Send a final empty message is not required; just close
     ws.close();
   }
-}
-
-export async function generateNextQuestion(): Promise<string> {
-  await new Promise(r => setTimeout(r, 120));
-  return "Follow-up: How did you measure success in that situation?";
 }
