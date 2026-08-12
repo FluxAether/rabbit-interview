@@ -24,6 +24,13 @@ Build for production:
 npm run tauri build
 ```
 
+Build or preview the independent marketing site:
+```bash
+npm run dev:marketing
+npm run build:marketing
+npm run preview:marketing
+```
+
 ## Current Progress (aligned with project plan)
 - ✅ Phase 0: Project bootstrap + modern React + Tailwind + design system
 - ✅ Dashboard, Settings, History, Mock Interview, Resume Optimizer, Stealth preview
@@ -98,14 +105,17 @@ Entitlements are in `src-tauri/entitlements.plist`; `Info.plist` declares microp
 
 ### Automated Releases (Recommended)
 
-1. Tag a version: `git tag v1.0.0 && git push origin v1.0.0`
-2. GitHub Actions will build for macOS + Windows, upload signed updater artifacts (`.sig`), merge platform fragments into `latest.json`, and attach it to the release.
-3. Workflow file: `.github/workflows/release.yml`
-4. If the repo is private, either make releases public or host `latest.json` + installers on a public HTTPS endpoint and update `plugins.updater.endpoints`.
+1. Add `PUBLIC_DISTRIBUTION_TOKEN`, a fine-grained token with Contents read/write access only to `thomas92118/rabbit-interview-downloads`.
+2. Tag a version: `git tag v0.5.2 && git push origin v0.5.2`.
+3. GitHub Actions creates a public draft Release, builds macOS and Windows in parallel, then publishes installers, updater artifacts, `latest.json`, `SHA256SUMS.txt`, and the Pages site.
+4. `.github/workflows/marketing.yml` republishes `main/docs` only when all four fixed public download assets exist.
+
+Public distribution lives at `https://github.com/thomas92118/rabbit-interview-downloads`. The application source remains in this private repository.
 
 **Required GitHub Secrets** (for signed builds):
 - `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD` (macOS)
 - `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (updater + Windows)
+- `PUBLIC_DISTRIBUTION_TOKEN` (cross-repository Release and Pages publishing)
 
 See the workflow for details.
 
