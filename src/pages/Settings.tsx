@@ -1,5 +1,6 @@
 import { check, type Update } from "@tauri-apps/plugin-updater"
 import { relaunch } from "@tauri-apps/plugin-process"
+import { invoke } from '@tauri-apps/api/core'
 import { useState, useEffect, useRef } from 'react'
 import { emit } from '@tauri-apps/api/event'
 import {
@@ -17,13 +18,16 @@ import {
   RefreshCw,
   Download,
   CheckCircle2,
+  HardDrive,
+  History as HistoryIcon,
+  Trash2,
 } from 'lucide-react'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
 import { LANGUAGE_OPTIONS, SupportedLanguage, DEFAULT_LANGUAGE } from '../i18n/types'
 import { saveAppSettings, type AppSettings as PersistedSettings, type SttLanguage } from '../lib/settingsStore'
 
-type TabType = 'general' | 'ai' | 'stt' | 'shortcuts_privacy'
+type TabType = 'general' | 'ai' | 'stt' | 'shortcuts_privacy' | 'storage'
 
 type ProviderKeyType = 'groq' | 'openai' | 'anthropic' | 'gemini' | 'deepgram'
 
@@ -34,8 +38,30 @@ interface TestResult {
   latencyMs?: number
 }
 
+interface RecordingStorageUsage {
+  bytes: number
+  fileCount: number
+}
+
+interface HistoryStorageUsage {
+  bytes: number
+  recordCount: number
+}
+
+function formatStorageBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  return `${Number(value.toFixed(1))} ${units[unitIndex]}`
+}
+
 export default function Settings() {
-  const { settings, setLanguage: setStoreLanguage } = useAppStore()
+  const { settings, copilot, setLanguage: setStoreLanguage } = useAppStore()
   const t = useTranslation()
 
   const [activeTab, setActiveTab] = useState<TabType>('general')
@@ -98,6 +124,13 @@ export default function Settings() {
   const [sttModel, setSttModel] = useState('nova-3')
   const [sttLanguage, setSttLanguage] = useState<SttLanguage>('zh-CN')
 
+  const [recordingStorage, setRecordingStorage] = useState<RecordingStorageUsage>({ bytes: 0, fileCount: 0 })
+  const [historyStorage, setHistoryStorage] = useState<HistoryStorageUsage>({ bytes: 0, recordCount: 0 })
+  const [storageLoading, setStorageLoading] = useState(false)
+  const [storageAction, setStorageAction] = useState<'recordings' | 'history' | null>(null)
+  const [storageError, setStorageError] = useState('')
+  const [storageNotice, setStorageNotice] = useState('')
+
   // Auto-save toast status (temporary 2-second fade badge)
   const [showSavedToast, setShowSavedToast] = useState(false)
   const toastTimeoutRef = useRef<number | null>(null)
@@ -112,6 +145,77 @@ export default function Settings() {
     toastTimeoutRef.current = window.setTimeout(() => {
       setShowSavedToast(false)
     }, 2000)
+  }
+
+  const refreshStorageUsage = async (preserveError = false) => {
+    setStorageLoading(true)
+    if (!preserveError) setStorageError('')
+    try {
+      const { loadHistoryStorageUsage } = await import('../lib/db')
+      const [recordings, history] = await Promise.all([
+        invoke<RecordingStorageUsage>('get_recording_storage_usage'),
+        loadHistoryStorageUsage(),
+      ])
+      setRecordingStorage(recordings)
+      setHistoryStorage(history)
+    } catch (error) {
+      setStorageError(`${t('settings.storage.loadFailed')}: ${String(error)}`)
+    } finally {
+      setStorageLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === 'storage') {
+      setStorageNotice('')
+      void refreshStorageUsage()
+    }
+  }, [activeTab])
+
+  const handleClearRecordings = async () => {
+    if (copilot.phase === 'starting' || copilot.phase === 'listening' || copilot.phase === 'stopping') {
+      setStorageNotice('')
+      setStorageError(t('settings.storage.recordingActive'))
+      return
+    }
+    if (!window.confirm(t('settings.storage.clearRecordingsConfirm'))) return
+    setStorageAction('recordings')
+    setStorageError('')
+    setStorageNotice('')
+    try {
+      const { clearInterviewRecordingPaths } = await import('../lib/db')
+      await invoke<RecordingStorageUsage>('clear_audio_recordings')
+      await clearInterviewRecordingPaths()
+      const state = useAppStore.getState()
+      state.loadHistory(state.history.map((record) => ({ ...record, recordingPath: null })))
+      setStorageNotice(t('settings.storage.recordingsCleared'))
+    } catch (error) {
+      const message = String(error)
+      setStorageError(message.includes('recording-active')
+        ? t('settings.storage.recordingActive')
+        : `${t('settings.storage.clearRecordingsFailed')}: ${message}`)
+    } finally {
+      await refreshStorageUsage(true)
+      setStorageAction(null)
+    }
+  }
+
+  const handleClearHistory = async () => {
+    if (!window.confirm(t('settings.storage.clearHistoryConfirm'))) return
+    setStorageAction('history')
+    setStorageError('')
+    setStorageNotice('')
+    try {
+      const { clearInterviewHistory } = await import('../lib/db')
+      await clearInterviewHistory()
+      useAppStore.getState().loadHistory([])
+      setStorageNotice(t('settings.storage.historyCleared'))
+    } catch (error) {
+      setStorageError(`${t('settings.storage.clearHistoryFailed')}: ${String(error)}`)
+    } finally {
+      await refreshStorageUsage(true)
+      setStorageAction(null)
+    }
   }
 
   const buildPayload = () => ({
@@ -658,6 +762,18 @@ export default function Settings() {
               <Shield className="w-4 h-4" />
               <span>{t('settings.tab.shortcutsPrivacy')}</span>
             </button>
+
+            <button
+              onClick={() => setActiveTab('storage')}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${
+                activeTab === 'storage'
+                  ? 'bg-[#6366f1] text-white shadow-sm'
+                  : 'text-[#475569] hover:bg-[#f1f5f9] dark:text-[#94a3b8] dark:hover:bg-[#1e293b]'
+              }`}
+            >
+              <HardDrive className="w-4 h-4" />
+              <span>{t('settings.tab.storage')}</span>
+            </button>
           </nav>
 
           {/* Right Main Content Panel */}
@@ -1103,7 +1219,6 @@ export default function Settings() {
 
                   <button
                     onClick={async () => {
-                      const { invoke } = await import('@tauri-apps/api/core')
                       const devices = await invoke<string[]>('list_audio_devices')
                       alert(t('settings.audio.listDevices') + ':\n' + devices.join('\n'))
                     }}
@@ -1163,6 +1278,82 @@ export default function Settings() {
                   </button>
                 </div>
               </>
+            )}
+
+            {/* TAB 5: Storage */}
+            {activeTab === 'storage' && (
+              <div className="space-y-6">
+                <div className="card p-6">
+                  <div className="flex items-start justify-between gap-6">
+                    <div className="flex items-start gap-3">
+                      <HardDrive className="w-5 h-5 mt-0.5 text-[#6366f1]" />
+                      <div>
+                        <div className="font-semibold">{t('settings.storage.recordings')}</div>
+                        <div className="mt-1 text-sm text-[#64748b] dark:text-[#94a3b8]">
+                          {t('settings.storage.recordingsDesc')}
+                        </div>
+                        <div className="mt-3 text-lg font-semibold text-[#0f172a] dark:text-[#f8fafc]">
+                          {storageLoading ? '—' : formatStorageBytes(recordingStorage.bytes)}
+                        </div>
+                        <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">
+                          {storageLoading ? '—' : t('settings.storage.fileCount', { count: recordingStorage.fileCount })}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleClearRecordings()}
+                      disabled={storageLoading || storageAction !== null}
+                      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:hover:bg-red-950/50"
+                    >
+                      {storageAction === 'recordings' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      {t('settings.storage.clearRecordings')}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="card p-6">
+                  <div className="flex items-start justify-between gap-6">
+                    <div className="flex items-start gap-3">
+                      <HistoryIcon className="w-5 h-5 mt-0.5 text-[#6366f1]" />
+                      <div>
+                        <div className="font-semibold">{t('settings.storage.history')}</div>
+                        <div className="mt-1 text-sm text-[#64748b] dark:text-[#94a3b8]">
+                          {t('settings.storage.historyDesc')}
+                        </div>
+                        <div className="mt-3 text-lg font-semibold text-[#0f172a] dark:text-[#f8fafc]">
+                          {storageLoading ? '—' : formatStorageBytes(historyStorage.bytes)}
+                        </div>
+                        <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">
+                          {storageLoading ? '—' : t('settings.storage.recordCount', { count: historyStorage.recordCount })}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleClearHistory()}
+                      disabled={storageLoading || storageAction !== null || historyStorage.recordCount === 0}
+                      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:hover:bg-red-950/50"
+                    >
+                      {storageAction === 'history' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      {t('settings.storage.clearHistory')}
+                    </button>
+                  </div>
+                </div>
+
+                {storageError && (
+                  <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">
+                    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>{storageError}</span>
+                  </div>
+                )}
+                {storageNotice && !storageError && (
+                  <div role="status" className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>{storageNotice}</span>
+                  </div>
+                )}
+              </div>
             )}
 
             <div className="mt-8 text-xs text-[#64748b] dark:text-[#94a3b8] flex items-center gap-1.5">

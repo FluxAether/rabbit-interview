@@ -109,6 +109,11 @@ export interface HistoryPageResult {
   total: number;
 }
 
+export interface HistoryStorageUsage {
+  bytes: number;
+  recordCount: number;
+}
+
 function historyWhereClause(mode: HistoryMode, search: string): { clause: string; values: unknown[] } {
   const modeClause = mode === "mock" ? "mode LIKE 'mock%'" : "LOWER(mode) = 'copilot'";
   const normalizedSearch = search.trim().toLowerCase();
@@ -155,6 +160,39 @@ export async function loadHistoryCounts(): Promise<Record<HistoryMode, number>> 
     counts[row.mode] = Number(row.total ?? 0);
   });
   return counts;
+}
+
+export async function loadHistoryStorageUsage(): Promise<HistoryStorageUsage> {
+  const database = await getDb();
+  const rows = await database.select<HistoryStorageUsage>(
+    `SELECT COUNT(*) AS "recordCount", COALESCE(SUM(
+      length(CAST(id AS BLOB))
+      + length(CAST(date AS BLOB))
+      + COALESCE(length(CAST(role AS BLOB)), 0)
+      + COALESCE(length(CAST(company AS BLOB)), 0)
+      + COALESCE(length(CAST(score AS BLOB)), 0)
+      + COALESCE(length(CAST(transcript AS BLOB)), 0)
+      + COALESCE(length(CAST(duration AS BLOB)), 0)
+      + COALESCE(length(CAST(mode AS BLOB)), 0)
+      + COALESCE(length(CAST(recording_path AS BLOB)), 0)
+      + COALESCE(length(CAST(details_json AS BLOB)), 0)
+      + COALESCE(length(CAST(created_at AS BLOB)), 0)
+    ), 0) AS bytes FROM interviews`,
+  );
+  return {
+    bytes: Number(rows[0]?.bytes ?? 0),
+    recordCount: Number(rows[0]?.recordCount ?? 0),
+  };
+}
+
+export async function clearInterviewHistory(): Promise<void> {
+  const database = await getDb();
+  await database.execute("DELETE FROM interviews");
+}
+
+export async function clearInterviewRecordingPaths(): Promise<void> {
+  const database = await getDb();
+  await database.execute("UPDATE interviews SET recording_path = NULL WHERE recording_path IS NOT NULL");
 }
 
 export async function saveSetting(key: string, value: string): Promise<void> {

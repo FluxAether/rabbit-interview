@@ -3,8 +3,9 @@ mod copilot_window;
 mod speech;
 
 use audio::{
-    export_audio_recording, get_audio_capabilities, list_audio_devices, save_audio_recording,
-    start_audio_capture, stop_audio_capture,
+    clear_audio_recordings, export_audio_recording, get_audio_capabilities,
+    get_recording_storage_usage, list_audio_devices, save_audio_recording, start_audio_capture,
+    stop_audio_capture,
 };
 use copilot_window::{
     get_copilot_window_status, hide_copilot_window,
@@ -46,6 +47,8 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut}
             start_audio_capture,
             stop_audio_capture,
             save_audio_recording,
+            get_recording_storage_usage,
+            clear_audio_recordings,
             export_audio_recording,
             get_audio_capabilities,
             list_audio_devices,

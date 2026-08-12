@@ -97,6 +97,13 @@ pub struct SavedRecording {
     pub sample_rate: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingStorageUsage {
+    pub bytes: u64,
+    pub file_count: u64,
+}
+
 static AUDIO_STATE: once_cell::sync::Lazy<AudioCapture> =
     once_cell::sync::Lazy::new(AudioCapture::default);
 
@@ -322,6 +329,64 @@ fn recordings_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(recording_dir)
 }
 
+fn is_app_recording(entry: &fs::DirEntry) -> Result<bool, String> {
+    if !entry
+        .file_type()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Ok(false);
+    }
+    let file_name = entry.file_name();
+    let Some(file_name) = file_name.to_str() else {
+        return Ok(false);
+    };
+    Ok(file_name.starts_with("interview-") && file_name.ends_with(".wav"))
+}
+
+fn recording_storage_usage_in_dir(recording_dir: &Path) -> Result<RecordingStorageUsage, String> {
+    if !recording_dir.exists() {
+        return Ok(RecordingStorageUsage {
+            bytes: 0,
+            file_count: 0,
+        });
+    }
+
+    let mut usage = RecordingStorageUsage {
+        bytes: 0,
+        file_count: 0,
+    };
+    for entry in fs::read_dir(recording_dir).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !is_app_recording(&entry)? {
+            continue;
+        }
+        usage.bytes = usage
+            .bytes
+            .saturating_add(entry.metadata().map_err(|error| error.to_string())?.len());
+        usage.file_count = usage.file_count.saturating_add(1);
+    }
+    Ok(usage)
+}
+
+fn clear_audio_recordings_in_dir(
+    recording_dir: &Path,
+    recording_active: bool,
+) -> Result<RecordingStorageUsage, String> {
+    if recording_active {
+        return Err("recording-active".into());
+    }
+    if recording_dir.exists() {
+        for entry in fs::read_dir(recording_dir).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            if is_app_recording(&entry)? {
+                fs::remove_file(entry.path()).map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    recording_storage_usage_in_dir(recording_dir)
+}
+
 fn discard_live_recording() {
     let live = AUDIO_STATE.live_recording.lock().unwrap_or_else(|e| e.into_inner()).take();
     if let Some(live) = live {
@@ -332,6 +397,10 @@ fn discard_live_recording() {
 
 fn begin_live_recording(app: &AppHandle) -> Result<(), String> {
     discard_live_recording();
+    let mut live_recording = AUDIO_STATE
+        .live_recording
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
@@ -347,7 +416,7 @@ fn begin_live_recording(app: &AppHandle) -> Result<(), String> {
     let mut writer = BufWriter::new(file);
     write_wav_header(&mut writer, TARGET_SAMPLE_RATE, 0)?;
     writer.flush().map_err(|error| error.to_string())?;
-    *AUDIO_STATE.live_recording.lock().unwrap_or_else(|e| e.into_inner()) = Some(LiveRecording {
+    *live_recording = Some(LiveRecording {
         path,
         writer,
         sample_count: 0,
@@ -383,6 +452,7 @@ fn append_live_recording(app: &AppHandle, samples: &[f32]) {
     }
     if let Err(error) = live.writer.write_all(&pcm) {
         let error_msg = format!("Disk write failed for live recording: {error}");
+        drop(live_guard);
         remember_audio_failure(&error_msg);
         let _ = app.emit("audio-error", error_msg);
         return;
@@ -397,7 +467,11 @@ fn append_live_recording(app: &AppHandle, samples: &[f32]) {
 }
 
 fn finalize_live_recording(final_path: &Path) -> Result<Option<SavedRecording>, String> {
-    let Some(mut live) = AUDIO_STATE.live_recording.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+    let mut live_recording = AUDIO_STATE
+        .live_recording
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let Some(mut live) = live_recording.take() else {
         return Ok(None);
     };
     live.writer.flush().map_err(|error| error.to_string())?;
@@ -679,8 +753,11 @@ pub async fn start_audio_capture(
     stop_audio_capture_and_wait();
     discard_live_recording();
     *AUDIO_STATE.last_recording.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    begin_live_recording(&app)?;
     remember_audio_state("starting", None);
+    if let Err(error) = begin_live_recording(&app) {
+        remember_audio_failure(error.clone());
+        return Err(error);
+    }
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let (startup_tx, startup_rx) = mpsc::sync_channel::<Result<AudioConfigPayload, String>>(1);
     let thread_app = app.clone();
@@ -1034,11 +1111,53 @@ pub async fn save_audio_recording(
         format!("interview-{timestamp}-{safe_session_id}.wav")
     };
     let path = recording_dir.join(file_name);
+    let mut last_recording = AUDIO_STATE
+        .last_recording
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let saved = finalize_live_recording(&path)?;
     if let Some(saved) = &saved {
-        *AUDIO_STATE.last_recording.lock().unwrap_or_else(|e| e.into_inner()) = Some(saved.clone());
+        *last_recording = Some(saved.clone());
     }
     Ok(saved)
+}
+
+#[tauri::command]
+pub async fn get_recording_storage_usage(app: AppHandle) -> Result<RecordingStorageUsage, String> {
+    recording_storage_usage_in_dir(&recordings_dir(&app)?)
+}
+
+#[tauri::command]
+pub async fn clear_audio_recordings(app: AppHandle) -> Result<RecordingStorageUsage, String> {
+    let recording_dir = recordings_dir(&app)?;
+    let capture_thread_active = AUDIO_STATE
+        .tx
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .is_some();
+    let current_mode = AUDIO_STATE
+        .current_mode
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let recording_active = capture_thread_active
+        || !matches!(current_mode.as_str(), "" | "idle" | "error");
+    if recording_active {
+        return Err("recording-active".into());
+    }
+    let mut last_recording = AUDIO_STATE
+        .last_recording
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let mut live_recording = AUDIO_STATE
+        .live_recording
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(live) = live_recording.take() {
+        drop(live.writer);
+    }
+    let usage = clear_audio_recordings_in_dir(&recording_dir, false)?;
+    *last_recording = None;
+    Ok(usage)
 }
 
 #[tauri::command]
@@ -1078,7 +1197,8 @@ pub async fn list_audio_devices() -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        admit_realtime_samples, capture_origin_frame, convert_samples, process_output_audio,
+        admit_realtime_samples, capture_origin_frame, clear_audio_recordings_in_dir,
+        convert_samples, process_output_audio, recording_storage_usage_in_dir,
         stop_audio_capture_and_wait, write_pcm16_wav, AtomicU64, MonoResampler,
     };
     use std::time::Instant;
@@ -1197,5 +1317,65 @@ mod tests {
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 42);
         assert_eq!(u32::from_le_bytes(bytes[40..44].try_into().unwrap()), 6);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn recording_storage_only_counts_and_clears_app_wav_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "rabbit-recording-storage-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        std::fs::write(dir.join("interview-1.wav"), [1_u8, 2, 3]).unwrap();
+        std::fs::write(dir.join("interview-live-2.wav"), [1_u8; 5]).unwrap();
+        std::fs::write(dir.join("notes.txt"), [1_u8; 7]).unwrap();
+        std::fs::write(dir.join("other.wav"), [1_u8; 11]).unwrap();
+        std::fs::write(dir.join("nested/interview-3.wav"), [1_u8; 13]).unwrap();
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("notes.txt", dir.join("interview-link.wav")).unwrap();
+
+        assert_eq!(
+            recording_storage_usage_in_dir(&dir).unwrap(),
+            super::RecordingStorageUsage {
+                bytes: 8,
+                file_count: 2,
+            }
+        );
+        assert!(clear_audio_recordings_in_dir(&dir, true).is_err());
+        assert!(dir.join("interview-1.wav").exists());
+
+        assert_eq!(
+            clear_audio_recordings_in_dir(&dir, false).unwrap(),
+            super::RecordingStorageUsage {
+                bytes: 0,
+                file_count: 0,
+            }
+        );
+        assert!(!dir.join("interview-1.wav").exists());
+        assert!(dir.join("notes.txt").exists());
+        assert!(dir.join("other.wav").exists());
+        assert!(dir.join("nested/interview-3.wav").exists());
+        #[cfg(unix)]
+        assert!(std::fs::symlink_metadata(dir.join("interview-link.wav")).is_ok());
+        assert_eq!(
+            clear_audio_recordings_in_dir(&dir, false).unwrap(),
+            super::RecordingStorageUsage {
+                bytes: 0,
+                file_count: 0,
+            }
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            clear_audio_recordings_in_dir(&dir, false).unwrap(),
+            super::RecordingStorageUsage {
+                bytes: 0,
+                file_count: 0,
+            }
+        );
     }
 }
