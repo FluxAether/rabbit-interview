@@ -502,8 +502,9 @@ async function openDeepgramSocket(
   onTranscript: (event: DeepgramTranscriptEvent) => void,
   onError?: (err: any) => void,
   isReconnect = false,
+  apiKey?: string,
 ): Promise<WebSocket> {
-  const { deepgram: DEEPGRAM_API_KEY } = await getKeys(true); // force fresh read so newly entered keys are picked up immediately
+  const DEEPGRAM_API_KEY = apiKey ?? (await getKeys(true)).deepgram; // force fresh read so newly entered keys are picked up immediately
 
   // Read STT config from global store (consistent with LLM provider logic)
   const { settings } = useAppStore.getState();
@@ -584,6 +585,11 @@ export async function startDeepgramStream(
   };
   onSocketChange?.(ws);
   return ws;
+}
+
+export async function testDeepgramConnection(apiKey: string): Promise<void> {
+  const ws = await openDeepgramSocket(16_000, () => {}, undefined, false, apiKey);
+  closeDeepgramStream(ws);
 }
 
 /**

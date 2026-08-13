@@ -508,8 +508,11 @@ export default function Settings() {
 
     const start = performance.now()
     try {
-      let res: Response
-      if (provider === 'groq') {
+      let res: Response | undefined
+      if (provider === 'deepgram') {
+        const { testDeepgramConnection } = await import('../lib/llm')
+        await testDeepgramConnection(targetKey)
+      } else if (provider === 'groq') {
         res = await fetch('https://api.groq.com/openai/v1/models', {
           headers: { Authorization: `Bearer ${targetKey}` },
         })
@@ -532,18 +535,13 @@ export default function Settings() {
             messages: [{ role: 'user', content: 'hi' }],
           }),
         })
-      } else if (provider === 'gemini') {
-        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${targetKey}`)
       } else {
-        // Deepgram
-        res = await fetch('https://api.deepgram.com/v1/projects', {
-          headers: { Authorization: `Token ${targetKey}` },
-        })
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${targetKey}`)
       }
 
       const elapsed = Math.round(performance.now() - start)
 
-      if (res.ok) {
+      if (!res || res.ok) {
         setTestResults((prev) => ({
           ...prev,
           [provider]: {

@@ -40,6 +40,7 @@ console.log('=== Stealth Copilot refactor verification ===')
 
 const app = source('src/App.tsx')
 const page = source('src/pages/StealthCopilot.tsx')
+const settingsPage = source('src/pages/Settings.tsx')
 const historyPage = source('src/pages/History.tsx')
 const panel = source('src/components/CopilotPanel.tsx')
 const session = source('src/lib/copilotSession.ts')
@@ -60,6 +61,11 @@ check(session.length > 0, 'single Copilot session host exists')
 check(panel.length > 0 && app.includes('CopilotPanel') && page.includes('CopilotPanel'), 'main and floating views share CopilotPanel')
 check(page.includes('values.includes(preferredDevice) ? preferredDevice : values[0] ||'), 'unavailable saved microphone falls back to an available device')
 check(!app.includes('startDeepgramStream') && !page.includes('startDeepgramStream'), 'views do not own STT connections')
+check(
+  settingsPage.includes('testDeepgramConnection(targetKey)')
+    && !settingsPage.includes("fetch('https://api.deepgram.com/v1/projects'"),
+  'Deepgram connectivity uses the speech WebSocket instead of a CORS-blocked REST request',
+)
 check(!app.includes("listen<number[]>('audio-chunk'") && !page.includes("listen<number[]>('audio-chunk'"), 'views do not own audio listeners')
 check(
   session.includes('startDeepgramStream')
@@ -603,8 +609,9 @@ class FakeWebSocket {
   static OPEN = 1
   static CLOSED = 3
 
-  constructor(url) {
+  constructor(url, protocols) {
     this.url = url
+    this.protocols = protocols
     this.readyState = FakeWebSocket.CONNECTING
     this.bufferedAmount = 0
     this.sent = []
@@ -625,9 +632,9 @@ class FakeWebSocket {
   }
 }
 
-const { startDeepgramStream, sendAudioChunk } = loadTypeScriptModule(
+const { startDeepgramStream, testDeepgramConnection, sendAudioChunk } = loadTypeScriptModule(
   'src/lib/llm.ts',
-  ['startDeepgramStream', 'sendAudioChunk'],
+  ['startDeepgramStream', 'testDeepgramConnection', 'sendAudioChunk'],
   {
     loadApiKeys: async () => ({ deepgram: 'test-key' }),
     getLlmApiKey: async () => null,
@@ -635,6 +642,21 @@ const { startDeepgramStream, sendAudioChunk } = loadTypeScriptModule(
     WebSocket: FakeWebSocket,
   },
 )
+let connectivityReady = false
+const connectivityOpening = testDeepgramConnection('unsaved-test-key').then(() => {
+  connectivityReady = true
+})
+await new Promise((resolve) => setImmediate(resolve))
+check(
+  latestSocket?.protocols?.[0] === 'token'
+    && latestSocket.protocols[1] === 'unsaved-test-key'
+    && !connectivityReady,
+  'Deepgram connectivity checks the entered key through the speech WebSocket',
+)
+latestSocket?.open()
+await connectivityOpening
+check(latestSocket?.readyState === FakeWebSocket.CLOSED, 'Deepgram connectivity closes its test socket')
+
 let deepgramReady = false
 const deepgramEvents = []
 const deepgramOpening = startDeepgramStream((event) => deepgramEvents.push(event)).then((socket) => {
