@@ -132,7 +132,7 @@ if (cmd === 'fragment') {
   const version = arg('version')
   const notes = arg('notes', `v${version}`)
   const out = arg('out', 'latest.fragment.json')
-  const repo = arg('repo', 'thomas92118/rabbit-interview')
+  const repo = arg('repo', 'thomas92118/rabbit-interview-downloads')
   const tag = arg('tag', `v${version}`)
   if (!os || !target || !version) die('fragment requires --os --target --version')
   const baseUrl = `https://github.com/${repo}/releases/download/${tag}`

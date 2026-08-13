@@ -3,6 +3,7 @@ node_modules/
 
 # Build outputs
 dist/
+dist-marketing/
 dist-ssr/
 src-tauri/target/
 target/
