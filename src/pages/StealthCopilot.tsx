@@ -139,11 +139,17 @@ export default function StealthCopilot() {
 
             {/* Audio Settings Dropdown Popover Panel */}
             {audioSettingsOpen && (
-              <section
-                id="copilot-audio-settings"
-                className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 shadow-[0_8px_24px_rgba(0,0,0,0.08)] md:w-96"
-                aria-label={t("copilot.device")}
-              >
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  aria-hidden="true"
+                  onClick={() => setAudioSettingsOpen(false)}
+                />
+                <section
+                  id="copilot-audio-settings"
+                  className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 shadow-[0_8px_24px_rgba(0,0,0,0.08)] md:w-96"
+                  aria-label={t("copilot.device")}
+                >
                 <div className="grid gap-3 md:grid-cols-2 md:items-center">
                   <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-main)]">
                     <input
@@ -220,6 +226,7 @@ export default function StealthCopilot() {
                   </button>
                 </div>
               </section>
+              </>
             )}
           </div>
         </div>
