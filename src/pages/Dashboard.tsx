@@ -158,7 +158,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
             {history.slice(0, 3).map((item, idx) => (
               <div key={item.id ?? idx} className="flex items-center gap-4 px-4 py-3 text-sm hover:bg-[var(--bg-hover)]">
                 <div className="w-32 shrink-0 text-xs tabular-nums text-[var(--text-muted)]">{item.date}</div>
-                <div className="min-w-0 flex-1 truncate font-medium">{item.role} @ {item.company}</div>
+                <div className="min-w-0 flex-1 truncate font-medium">{item.role}</div>
                 <div className="w-10 text-right font-semibold tabular-nums">{item.score ?? '—'}</div>
               </div>
             ))}
