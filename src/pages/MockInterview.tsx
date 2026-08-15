@@ -19,9 +19,9 @@ interface AudioChunk { source: 'system' | 'microphone'; samples: number[] }
 interface SavedRecording { path: string; duration_seconds: number; sample_rate: number }
 
 const labels = {
-  'zh-CN': { title: 'AI 模拟面试', start: '开始面试', role: '目标职位', company: '公司（选填）', answer: '你的回答', submit: '提交回答', end: '提前结束', retry: '重试', new: '开始新面试' },
-  'zh-TW': { title: 'AI 模擬面試', start: '開始面試', role: '目標職位', company: '公司（選填）', answer: '你的回答', submit: '提交回答', end: '提前結束', retry: '重試', new: '開始新面試' },
-  'en-US': { title: 'AI Mock Interview', start: 'Start interview', role: 'Target role', company: 'Company (optional)', answer: 'Your answer', submit: 'Submit answer', end: 'End early', retry: 'Retry', new: 'New interview' },
+  'zh-CN': { title: 'AI 模拟面试', start: '开始面试', role: '目标职位', company: '公司（选填）', answer: '你的回答', submit: '提交回答', end: '提前结束', retry: '重试', new: '开始新面试', roleRequired: '请填写目标职位。', ending: '正在生成报告…', replay: '重播题目', generating: '正在生成问题…' },
+  'zh-TW': { title: 'AI 模擬面試', start: '開始面試', role: '目標職位', company: '公司（選填）', answer: '你的回答', submit: '提交回答', end: '提前結束', retry: '重試', new: '開始新面試', roleRequired: '請填寫目標職位。', ending: '正在產生報告…', replay: '重播題目', generating: '正在產生問題…' },
+  'en-US': { title: 'AI Mock Interview', start: 'Start interview', role: 'Target role', company: 'Company (optional)', answer: 'Your answer', submit: 'Submit answer', end: 'End early', retry: 'Retry', new: 'New interview', roleRequired: 'Please enter a target role.', ending: 'Generating report…', replay: 'Replay question', generating: 'Generating question…' },
 }
 
 export default function MockInterview() {
@@ -42,6 +42,9 @@ export default function MockInterview() {
   const sessionIdRef = useRef(crypto.randomUUID())
   const finalTranscriptRef = useRef('')
   const acceptingAudioRef = useRef(false)
+  const finishingRef = useRef(false)
+  const sessionRef = useRef(session)
+  sessionRef.current = session
 
   useEffect(() => {
     if (!session.startedAt || session.phase === 'completed' || session.phase === 'setup') return
@@ -75,8 +78,11 @@ export default function MockInterview() {
         if (boundary === 'interim') {
           patch({ interimTranscript: text })
         } else {
-          finalTranscriptRef.current = [finalTranscriptRef.current, text].filter(Boolean).join(' ').trim()
-          setSession(current => ({ ...current, draftAnswer: finalTranscriptRef.current, interimTranscript: '' }))
+          setSession(current => {
+            const next = [current.draftAnswer, text].filter(Boolean).join(' ').trim()
+            finalTranscriptRef.current = next
+            return { ...current, draftAnswer: next, interimTranscript: '' }
+          })
         }
       },
       error => patch({ error: String(error) }),
@@ -120,24 +126,29 @@ export default function MockInterview() {
     }
     acceptingAudioRef.current = false
     patch({ phase: 'speaking' })
-    await invoke('speak_text', { text: question.text, language: session.config.language, rate: 185 }).catch(error => patch({ error: String(error) }))
-    const delay = Math.min(12_000, Math.max(900, question.text.length * (session.config.language === 'en-US' ? 55 : 150)))
-    await new Promise(resolve => window.setTimeout(resolve, delay))
-    acceptingAudioRef.current = session.config.voiceInputEnabled
+    try {
+      await invoke('speak_text', { text: question.text, language: session.config.language, rate: 185 }).catch(error => patch({ error: String(error) }))
+      const delay = Math.min(12_000, Math.max(900, question.text.length * (session.config.language === 'en-US' ? 55 : 150)))
+      await new Promise(resolve => window.setTimeout(resolve, delay))
+    } finally {
+      acceptingAudioRef.current = session.config.voiceInputEnabled
+      if (sessionRef.current.phase === 'speaking') patch({ phase: 'answering' })
+    }
   }
 
   const startInterview = async () => {
-    if (!session.config.role.trim()) return patch({ error: 'Please enter a target role.' })
+    if (!session.config.role.trim()) return patch({ error: copy.roleRequired })
     abortRef.current?.abort()
     abortRef.current = new AbortController()
+    finishingRef.current = false
     patch({ phase: 'starting', error: null, turns: [], report: null, recordId: null, startedAt: Date.now() })
     try {
       if (session.config.voiceInputEnabled) await startVoice()
       const question = await generateFirstMockQuestion(session.config, abortRef.current.signal)
       setSession(current => ({ ...current, currentQuestion: question, turns: [{ question, answer: null, feedback: null }], phase: 'speaking' }))
       await speakQuestion(question)
-      patch({ phase: 'answering' })
     } catch (error) {
+      await stopVoice({ saveRecording: false })
       patch({ phase: 'error', error: error instanceof Error ? error.message : String(error) })
     }
   }
@@ -162,14 +173,16 @@ export default function MockInterview() {
       finalTranscriptRef.current = ''
       setSession(current => ({ ...current, turns: [...evaluated, { question: nextQuestion, answer: null, feedback: null }], currentQuestion: nextQuestion, draftAnswer: '', interimTranscript: '', phase: 'speaking' }))
       await speakQuestion(nextQuestion)
-      patch({ phase: 'answering' })
     } catch (error) {
       patch({ phase: 'error', error: error instanceof Error ? error.message : String(error) })
     }
   }
 
   const finishInterview = async (turns = session.turns, completedNormally = false) => {
-    if (session.recordId) return
+    if (session.recordId || finishingRef.current) return
+    finishingRef.current = true
+    abortRef.current?.abort()
+    void invoke('stop_speaking')
     patch({ phase: 'generating-report', error: null })
     try {
       const recording = await stopVoice()
@@ -186,11 +199,13 @@ export default function MockInterview() {
       addHistory({ ...record, id })
       setSession(current => ({ ...current, turns, report, recordId: id, recordingPath: recording?.path || null, phase: 'completed', currentQuestion: null }))
     } catch (error) {
+      finishingRef.current = false
       patch({ phase: 'error', turns, error: error instanceof Error ? error.message : String(error) })
     }
   }
 
   const reset = () => {
+    finishingRef.current = false
     abortRef.current?.abort()
     void stopVoice({ saveRecording: false })
     void invoke('stop_speaking')
@@ -283,7 +298,7 @@ export default function MockInterview() {
       <div className="flex items-start justify-between gap-4"><div><h1 className="text-xl font-semibold tracking-tight">面试报告</h1><p className="mt-1 text-sm text-[var(--text-muted)]">{session.config.role} · {session.config.company || '未指定'}</p></div><div className="tabular-nums text-3xl font-semibold text-[var(--action)]">{session.report.overallScore}</div></div>
       <p className="mt-5 border-l-2 border-[var(--action)] bg-[var(--bg-subtle)] p-4">{session.report.summary}</p>
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2"><section className="rounded-md border border-[var(--border-color)] p-4"><h2 className="font-medium">优势</h2>{session.report.strengths.map(v => <div key={v} className="mt-2 text-sm">• {v}</div>)}</section><section className="rounded-md border border-[var(--border-color)] p-4"><h2 className="font-medium">优先改进</h2>{session.report.priorityImprovements.map(v => <div key={v} className="mt-2 text-sm">• {v}</div>)}</section></div>
-      <div className="mt-5 space-y-3">{session.turns.map((turn, index) => <details key={turn.question.id} className="rounded-md border border-[var(--border-color)] p-4"><summary className="cursor-pointer font-medium">第 {index + 1} 题 · {turn.feedback?.overallScore ?? 0} 分</summary><p className="mt-3">{turn.question.text}</p><p className="mt-2 bg-[var(--bg-subtle)] p-3 text-sm">{turn.answer?.text}</p><p className="mt-2 text-sm text-[var(--text-muted)]">{turn.feedback?.summary}</p></details>)}</div>
+      <div className="mt-5 space-y-3">{session.turns.map((turn, index) => <details key={turn.question.id} className="rounded-md border border-[var(--border-color)] p-4"><summary className="cursor-pointer font-medium">第 {index + 1} 题 · {turn.feedback ? `${turn.feedback.overallScore} 分` : '未作答'}</summary><p className="mt-3">{turn.question.text}</p><p className="mt-2 bg-[var(--bg-subtle)] p-3 text-sm">{turn.answer?.text}</p><p className="mt-2 text-sm text-[var(--text-muted)]">{turn.feedback?.summary}</p></details>)}</div>
       <div className="mt-6 flex flex-col gap-3 lg:flex-row"><button onClick={exportReport} className="flex-1 rounded-md border border-[var(--border-color)] py-2 transition-colors hover:bg-[var(--bg-hover)]">导出 Markdown</button><button onClick={reset} className="flex-1 rounded-md bg-[var(--action)] py-2 text-[var(--action-text)] transition-opacity hover:opacity-90">{copy.new}</button></div>
       </section>
     </div>
@@ -295,7 +310,7 @@ export default function MockInterview() {
   return (
     <div className="w-full bg-[var(--bg-app)] px-5 py-6 text-[var(--text-main)] lg:px-8">
       <section className="mx-auto max-w-6xl rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5 lg:p-7">
-      <div className="flex items-center justify-between gap-4"><div><h1 className="text-xl font-semibold tracking-tight">{copy.title}</h1><div className="mt-1 text-sm text-[var(--text-muted)]">第 {session.turns.length}/{session.config.questionCount} 题 · <span className="tabular-nums">{Math.floor(session.elapsedSeconds / 60)}:{String(session.elapsedSeconds % 60).padStart(2, '0')}</span></div></div><button onClick={() => finishInterview(session.turns, false)} className="rounded-md border border-[var(--danger)] px-4 py-2 text-sm text-[var(--danger)] transition-colors hover:bg-[var(--bg-hover)]">{copy.end}</button></div>
+      <div className="flex items-center justify-between gap-4"><div><h1 className="text-xl font-semibold tracking-tight">{copy.title}</h1><div className="mt-1 text-sm text-[var(--text-muted)]">第 {session.turns.length}/{session.config.questionCount} 题 · <span className="tabular-nums">{Math.floor(session.elapsedSeconds / 60)}:{String(session.elapsedSeconds % 60).padStart(2, '0')}</span></div></div><button onClick={() => finishInterview(session.turns, false)} disabled={busy} className="rounded-md border border-[var(--danger)] px-4 py-2 text-sm text-[var(--danger)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40">{session.phase === 'generating-report' || session.phase === 'saving' ? copy.ending : copy.end}</button></div>
       <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
         <section className="rounded-md border border-[var(--border-color)] p-5">
           <div className="flex items-center justify-between">
@@ -306,9 +321,9 @@ export default function MockInterview() {
               </div>
             )}
           </div>
-          <div className="mt-3 text-xl leading-relaxed">{session.currentQuestion?.text || '正在生成问题…'}</div>
+          <div className="mt-3 text-xl leading-relaxed">{session.currentQuestion?.text || copy.generating}</div>
           {session.currentQuestion?.intent && <div className="mt-3 text-sm text-[var(--text-muted)]">考察重点：{session.currentQuestion.intent}</div>}
-          <button onClick={() => session.currentQuestion && speakQuestion(session.currentQuestion)} disabled={!session.config.speechEnabled || busy} className="mt-4 flex items-center gap-2 rounded-md border border-[var(--border-color)] px-3 py-2 text-sm transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40"><Volume2 className="h-4 w-4" /> 重播题目</button>
+          <button onClick={() => session.currentQuestion && speakQuestion(session.currentQuestion)} disabled={!session.config.speechEnabled || busy} className="mt-4 flex items-center gap-2 rounded-md border border-[var(--border-color)] px-3 py-2 text-sm transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40"><Volume2 className="h-4 w-4" /> {copy.replay}</button>
         </section>
 
         <section className="rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-5">
@@ -397,11 +412,11 @@ export default function MockInterview() {
           </div>
         )}
 
-        <textarea maxLength={4000} value={session.draftAnswer} onChange={e => patch({ draftAnswer: e.target.value })} disabled={busy} className="mt-3 h-36 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-3 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)] disabled:bg-[var(--bg-subtle)]" placeholder={session.config.voiceInputEnabled ? '直接说话，转写结果可编辑…' : '输入你的回答…'} />
+        <textarea maxLength={4000} value={session.draftAnswer} onChange={e => { finalTranscriptRef.current = e.target.value; patch({ draftAnswer: e.target.value }) }} disabled={busy} className="mt-3 h-36 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-3 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)] disabled:bg-[var(--bg-subtle)]" placeholder={session.config.voiceInputEnabled ? '直接说话，转写结果可编辑…' : '输入你的回答…'} />
         {session.interimTranscript && <div className="mt-2 text-sm text-[var(--text-muted)]">正在识别：{session.interimTranscript}</div>}
         <button onClick={submitAnswer} disabled={busy || !session.draftAnswer.trim()} className="mt-4 w-full rounded-md bg-[var(--action)] py-2.5 font-medium text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-40">{session.phase === 'evaluating' ? '正在分析…' : copy.submit}</button>
       </section>
-      {session.error && <div className="mt-4 rounded-md border border-[var(--danger)] bg-[var(--bg-subtle)] p-4 text-sm text-[var(--danger)]">{session.error}<button onClick={() => patch({ phase: session.currentQuestion ? 'answering' : 'setup', error: null })} className="ml-3 underline">{copy.retry}</button></div>}
+      {session.error && <div className="mt-4 rounded-md border border-[var(--danger)] bg-[var(--bg-subtle)] p-4 text-sm text-[var(--danger)]">{session.error}<button onClick={() => { if (!session.currentQuestion) void stopVoice({ saveRecording: false }); patch({ phase: session.currentQuestion ? 'answering' : 'setup', error: null }) }} className="ml-3 underline">{copy.retry}</button></div>}
       </section>
     </div>
   )

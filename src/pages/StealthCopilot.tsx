@@ -26,7 +26,17 @@ export default function StealthCopilot() {
   const [capabilities, setCapabilities] = useState<AudioCapabilities | null>(null)
   const [windowStatus, setWindowStatus] = useState<CopilotWindowStatus | null>(null)
   const [audioSettingsOpen, setAudioSettingsOpen] = useState(false)
+  const [audioReady, setAudioReady] = useState(false)
   const running = copilot.phase === "starting" || copilot.phase === "listening" || copilot.phase === "stopping"
+
+  useEffect(() => {
+    if (!audioSettingsOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAudioSettingsOpen(false)
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [audioSettingsOpen])
 
   const loadDevices = async (preferredDevice = selectedDevice) => {
     const values: string[] = await invoke<string[]>("list_audio_devices").catch(() => [])
@@ -49,7 +59,12 @@ export default function StealthCopilot() {
         setUseMicrophone(settings.useMicWithSystem ?? true)
         return loadDevices(settings.micDevice || "")
       }),
-    ]).catch((error) => console.warn("Unable to load Copilot capabilities", error))
+    ]).then(() => {
+      if (!cancelled) setAudioReady(true)
+    }).catch((error) => {
+      console.warn("Unable to load Copilot capabilities", error)
+      if (!cancelled) setAudioReady(true)
+    })
     return () => {
       cancelled = true
       unsubscribeWindowStatus?.()
@@ -106,9 +121,10 @@ export default function StealthCopilot() {
               onClick={() => setAudioSettingsOpen((open) => !open)}
               className="flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] hover:bg-[var(--bg-hover)]"
               aria-expanded={audioSettingsOpen}
+              aria-controls="copilot-audio-settings"
             >
               <SlidersHorizontal className="h-3.5 w-3.5 text-[var(--text-muted)]" />
-              <span>音频输入配置</span>
+              <span>{t("copilot.audioConfig")}</span>
               <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-150 ${audioSettingsOpen ? "rotate-180" : ""}`} />
             </button>
 
@@ -124,6 +140,7 @@ export default function StealthCopilot() {
             {/* Audio Settings Dropdown Popover Panel */}
             {audioSettingsOpen && (
               <section
+                id="copilot-audio-settings"
                 className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 shadow-[0_8px_24px_rgba(0,0,0,0.08)] md:w-96"
                 aria-label={t("copilot.device")}
               >
@@ -196,7 +213,8 @@ export default function StealthCopilot() {
                     onClick={() => void loadDevices()}
                     disabled={running}
                     className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
-                    title="刷新设备列表"
+                    title={t("copilot.refreshDevices")}
+                    aria-label={t("copilot.refreshDevices")}
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
                   </button>
@@ -210,17 +228,17 @@ export default function StealthCopilot() {
         <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2 px-1 py-1 text-xs text-[var(--text-muted)]">
           <div className="flex items-center gap-1.5 font-medium">
             <Volume2 className="h-3.5 w-3.5" />
-            <span>系统声音:</span>
-            <span className={useSystemAudio ? "font-semibold text-[var(--success)]" : "text-[var(--text-muted)]"}>
-              {useSystemAudio ? "已开启" : "已禁用"}
+            <span>{t("copilot.systemSound")}:</span>
+            <span className={useSystemAudio && capabilities?.system_audio_available ? "font-semibold text-[var(--success)]" : "text-[var(--text-muted)]"}>
+              {!audioReady ? t("copilot.statusUnknown") : useSystemAudio && capabilities?.system_audio_available ? t("copilot.enabled") : t("copilot.disabled")}
             </span>
           </div>
           <span className="text-[var(--border-color)]">•</span>
           <div className="flex items-center gap-1.5 font-medium">
             <Mic className="h-3.5 w-3.5" />
-            <span>麦克风:</span>
-            <span className={useMicrophone ? "font-semibold text-[var(--success)]" : "text-[var(--text-muted)]"}>
-              {useMicrophone ? "已开启" : "已禁用"}
+            <span>{t("copilot.microphone")}:</span>
+            <span className={useMicrophone && (capabilities?.microphone_available ?? true) ? "font-semibold text-[var(--success)]" : "text-[var(--text-muted)]"}>
+              {!audioReady ? t("copilot.statusUnknown") : useMicrophone && (capabilities?.microphone_available ?? true) ? t("copilot.enabled") : t("copilot.disabled")}
             </span>
           </div>
           {selectedDevice && (

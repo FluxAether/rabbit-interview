@@ -27,7 +27,7 @@ function averageScore(scores) {
 }
 
 function percentDelta(current, previous) {
-  if (previous === 0) return null
+  if (previous === 0) return current > 0 ? null : 0
   return Math.round(((current - previous) / previous) * 100)
 }
 
@@ -89,7 +89,7 @@ const empty = computeDashboardStats([], now)
 assert.equal(empty.interviewCount, 0)
 assert.equal(empty.averageScore, null)
 assert.equal(empty.scoredCount, 0)
-assert.equal(empty.interviewDeltaPct, null)
+assert.equal(empty.interviewDeltaPct, 0)
 
 // Source wiring checks
 assert.match(source, /export function computeDashboardStats/)

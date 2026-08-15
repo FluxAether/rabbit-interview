@@ -226,3 +226,8 @@ for (const key of [
 }
 
 console.log('Resume optimizer verification passed')
+
+const resumePage = fs.readFileSync('src/pages/ResumeOptimizer.tsx', 'utf8')
+assert.equal(resumePage.includes('suggestion.description || suggestion.title'), false, 'manual suggestions are not auto-appended')
+assert.match(resumePage, /if \(!suggestion.replacement\) return/, 'apply requires a replacement')
+assert.match(resumePage, /resume.startFactReview/, 'fact review starts review instead of auto-confirming')

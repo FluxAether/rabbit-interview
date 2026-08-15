@@ -24,6 +24,7 @@
     "verify:resume": "node scripts/verify-resume-optimizer.mjs",
     "verify:theme": "node scripts/verify-theme.mjs",
     "verify:db-storage": "node scripts/verify-db-storage.mjs",
+    "verify:ui-audit": "node scripts/verify-ui-audit-fixes.mjs",
     "migrate:json-to-db": "node scripts/migrate-json-to-db.mjs"
   },
   "dependencies": {

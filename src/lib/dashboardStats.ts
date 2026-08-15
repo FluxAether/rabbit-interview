@@ -31,7 +31,7 @@ function averageScore(scores: number[]): number | null {
 }
 
 function percentDelta(current: number, previous: number): number | null {
-  if (previous === 0) return current > 0 ? 100 : 0
+  if (previous === 0) return current > 0 ? null : 0
   return Math.round(((current - previous) / previous) * 100)
 }
 

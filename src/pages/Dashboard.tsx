@@ -20,7 +20,15 @@ function DeltaBadge({ value, unit }: { value: number | null; unit: string }) {
     return <div className="text-[10px] text-[var(--text-muted)]">—</div>
   }
 
-  const positive = value >= 0
+  if (value === 0) {
+    return (
+      <div className="text-xs font-medium text-[var(--text-muted)]">
+        {formatSigned(value, unit)}
+      </div>
+    )
+  }
+
+  const positive = value > 0
   const Icon = positive ? ArrowUp : ArrowDown
   return (
     <div
@@ -63,7 +71,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
             type="button"
             onClick={onNavigateToSettings}
             className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
-            aria-label="Settings"
+            aria-label={t("nav.settings")}
           >
             <SettingsIcon className="h-4 w-4" />
           </button>
@@ -77,10 +85,11 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
                   <Users className="h-4 w-4" /> {t('dashboard.stat.interviews')}
                 </div>
                 <div className="mt-3 text-3xl font-semibold leading-none tabular-nums">{stats?.interviewCount ?? unavailableMetric}</div>
+                <div className="mt-1 text-[10px] text-[var(--text-muted)]">{t('dashboard.stat.total')}</div>
               </div>
               <div className="text-right">
                 <DeltaBadge value={stats?.interviewDeltaPct ?? null} unit="%" />
-                <div className="mt-1 text-[10px] text-[var(--text-muted)]">{t('dashboard.vsLastMonth')}</div>
+                <div className="mt-1 text-[10px] text-[var(--text-muted)]">{t('dashboard.monthDelta')}</div>
               </div>
             </div>
           </div>
@@ -94,11 +103,11 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
                 <div className="mt-3 text-3xl font-semibold leading-none tabular-nums">
                   {stats ? (stats.averageScore ?? '—') : unavailableMetric}
                 </div>
-                {stats?.averageScore != null && <div className="mt-1 text-[10px] text-[var(--text-muted)]">/100</div>}
+                <div className="mt-1 text-[10px] text-[var(--text-muted)]">{stats?.averageScore != null ? '/100 · ' : ''}{t('dashboard.stat.total')}</div>
               </div>
               <div className="text-right">
                 <DeltaBadge value={stats?.scoreDeltaPts ?? null} unit=" pts" />
-                <div className="mt-1 text-[10px] text-[var(--text-muted)]">{t('dashboard.vsLastMonth')}</div>
+                <div className="mt-1 text-[10px] text-[var(--text-muted)]">{t('dashboard.monthDelta')}</div>
               </div>
             </div>
           </div>
@@ -110,10 +119,11 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
                   <ClipboardCheck className="h-4 w-4" /> {t('dashboard.stat.scored')}
                 </div>
                 <div className="mt-3 text-3xl font-semibold leading-none tabular-nums">{stats?.scoredCount ?? unavailableMetric}</div>
+                <div className="mt-1 text-[10px] text-[var(--text-muted)]">{t('dashboard.stat.total')}</div>
               </div>
               <div className="text-right">
                 <DeltaBadge value={stats?.scoredDeltaPct ?? null} unit="%" />
-                <div className="mt-1 text-[10px] text-[var(--text-muted)]">{t('dashboard.vsLastMonth')}</div>
+                <div className="mt-1 text-[10px] text-[var(--text-muted)]">{t('dashboard.monthDelta')}</div>
               </div>
             </div>
           </div>
@@ -151,7 +161,10 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
           </div>
         ) : historyStatus === 'error' ? (
           <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-8 text-center text-sm text-[var(--danger)]">
-            {t('dashboard.loadError')}
+            <p>{t('dashboard.loadError')}</p>
+            <button type="button" onClick={onViewHistory} className="mt-3 text-sm font-medium underline underline-offset-2">
+              {t('dashboard.viewAllHistory')}
+            </button>
           </div>
         ) : history.length > 0 ? (
           <div className="divide-y divide-[var(--border-color)] overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]">
@@ -165,7 +178,10 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
           </div>
         ) : (
           <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-8 text-center text-sm text-[var(--text-muted)]">
-            {t('dashboard.noActivity')}
+            <p>{t('dashboard.noActivity')}</p>
+            <button type="button" onClick={launch} className="mt-3 text-sm font-medium text-[var(--text-main)] underline underline-offset-2">
+              {t('common.launch')}
+            </button>
           </div>
           )}
         </section>

@@ -71,6 +71,7 @@ export default function History() {
   const [counts, setCounts] = useState<Record<HistoryTab, number>>({ copilot: 0, mock: 0 })
   const [isExporting, setIsExporting] = useState(false)
   const [showExportToast, setShowExportToast] = useState(false)
+  const [listStatus, setListStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const exportToastTimeoutRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -83,20 +84,25 @@ export default function History() {
 
   useEffect(() => {
     let cancelled = false
+    setListStatus('loading')
     void loadHistoryPage({ page, pageSize: PAGE_SIZE, mode: activeTab, search: searchQuery })
       .then((result) => {
         if (cancelled) return
         setRecords(result.records)
         setTotal(result.total)
+        setListStatus('ready')
       })
-      .catch(console.error)
+      .catch((error) => {
+        console.error(error)
+        if (!cancelled) setListStatus('error')
+      })
     return () => {
       cancelled = true
     }
   }, [activeTab, page, searchQuery])
 
   useEffect(() => {
-    void loadHistoryCounts().then(setCounts).catch(console.error)
+    void loadHistoryCounts().then(setCounts).catch((error) => { console.error(error); setListStatus((current) => current === 'ready' ? current : 'error') })
   }, [])
 
   useEffect(() => () => {
@@ -115,6 +121,7 @@ export default function History() {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [audioReady, setAudioReady] = useState(false)
+  const [audioError, setAudioError] = useState(false)
 
   const stopReplayAudio = () => {
     const wavesurfer = wavesurferRef.current
@@ -135,6 +142,7 @@ export default function History() {
   useEffect(() => {
     stopReplayAudio()
     setAudioReady(false)
+    setAudioError(false)
     setIsPlaying(false)
     if (!selected?.recordingPath || !waveformRef.current) return
 
@@ -161,6 +169,7 @@ export default function History() {
       void wavesurfer.load(convertFileSrc(selected.recordingPath)).catch((error) => {
         if (cancelled) return
         setAudioReady(false)
+        setAudioError(true)
         console.warn('Unable to load saved interview recording', error)
       })
       wavesurferRef.current = wavesurfer
@@ -265,6 +274,7 @@ export default function History() {
           </div>
           <div className="flex items-center gap-3">
             <div
+              role="status"
               className={`flex items-center gap-1.5 text-xs text-[var(--success)] transition-opacity duration-300 ${
                 showExportToast ? 'opacity-100' : 'opacity-0 pointer-events-none'
               }`}
@@ -278,17 +288,20 @@ export default function History() {
               onClick={exportCurrentPage}
               disabled={records.length === 0 || isExporting}
             >
-              {isExporting ? `${t('common.export')}…` : t('common.export')}
+              {isExporting ? `${t('history.exportPage')}…` : t('history.exportPage')}
             </button>
           </div>
         </div>
 
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="mb-4 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-sm outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--text-muted)]"
-          placeholder={t('history.search')}
-        />
+        <label className="mb-4 block">
+          <span className="sr-only">{t('history.search')}</span>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-sm outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--text-muted)]"
+            placeholder={t('history.search')}
+          />
+        </label>
 
         <div className="mb-4 flex gap-5 border-b border-[var(--border-color)]">
           {tabs.map((tab) => {
@@ -301,6 +314,8 @@ export default function History() {
                   setActiveTab(tab.id)
                   setPage(1)
                 }}
+                role="tab"
+                aria-selected={active}
                 className={`border-b-2 px-1 py-2 text-sm transition-colors ${
                   active
                     ? 'border-[var(--text-main)] font-medium text-[var(--text-main)]'
@@ -335,14 +350,41 @@ export default function History() {
                   onClick={() => setSelected(item)}
                   className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--bg-subtle)]"
                 >
-                  {t('common.viewDetails')}
+                  {t('common.viewDetails')} {item.role}
                 </button>
               </div>
             </div>
           ))}
-          {records.length === 0 && (
+          {listStatus === 'loading' && records.length === 0 && (
+            <div className="p-8 text-center text-sm text-[var(--text-muted)]">{t('history.loading')}</div>
+          )}
+          {listStatus === 'error' && (
+            <div className="p-8 text-center text-sm text-[var(--danger)]">
+              <p>{t('history.loadError')}</p>
+              <button
+                type="button"
+                className="mt-3 underline underline-offset-2"
+                onClick={() => {
+                  setPage(page)
+                  setListStatus('loading')
+                  void loadHistoryPage({ page, pageSize: PAGE_SIZE, mode: activeTab, search: searchQuery })
+                    .then((result) => {
+                      setRecords(result.records)
+                      setTotal(result.total)
+                      setListStatus('ready')
+                    })
+                    .catch(() => setListStatus('error'))
+                }}
+              >
+                {t('history.retry')}
+              </button>
+            </div>
+          )}
+          {listStatus === 'ready' && records.length === 0 && (
             <div className="p-8 text-center text-sm text-[var(--text-muted)]">
-              {t(activeTab === 'mock' ? 'history.empty.mock' : 'history.empty.copilot')}
+              {searchQuery.trim()
+                ? t('history.noResults')
+                : t(activeTab === 'mock' ? 'history.empty.mock' : 'history.empty.copilot')}
             </div>
           )}
         </div>
@@ -377,20 +419,20 @@ export default function History() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="history-replay-title"
-            className="w-full max-w-[620px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-6 text-[var(--text-main)] shadow-xl"
+            className="max-h-[90vh] w-full max-w-[620px] overflow-y-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-6 text-[var(--text-main)] shadow-xl"
             onClick={e => e.stopPropagation()}
           >
             <div id="history-replay-title" className="mb-1 text-lg font-semibold">
               {t('history.replayModal.title')} — {selected.role} @ {selected.company}
             </div>
             <div className="mb-3 text-sm text-[var(--text-muted)]">
-              {t('misc.score')}: <span className="font-semibold text-[var(--text-main)]">{selected.score ?? t('history.notScored')}</span> • {t('history.replayModal.duration')}: {Math.floor(selected.duration/60)}m
+              {t('misc.score')}: <span className="font-semibold text-[var(--text-main)]">{selected.score ?? t('history.notScored')}</span> • {t('history.replayModal.duration')}: {Math.floor(selected.duration/60)}:{String(selected.duration % 60).padStart(2, '0')}
             </div>
 
             <div className="mb-3 max-h-[320px] min-h-48 overflow-auto rounded-md bg-[var(--bg-subtle)] p-3 text-sm">
               {selectedMessages.length === 0 ? (
                 <div className="flex min-h-40 items-center justify-center px-6 text-center text-xs text-[var(--text-muted)]">
-                  {t('history.transcriptPlaceholder')}
+                  {t('history.noTranscript')}
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -431,7 +473,10 @@ export default function History() {
             </div>
 
             {selected.recordingPath ? (
-              <div ref={waveformRef} className="mb-3 min-h-[70px] w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-2" />
+              <div>
+                <div ref={waveformRef} className="mb-3 min-h-[70px] w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-2" />
+                {audioError && <div className="mb-3 text-xs text-[var(--danger)]">{t('history.recordingLoadError')}</div>}
+              </div>
             ) : (
               <div className="mb-3 rounded-md border border-[var(--warning)] px-4 py-3 text-sm text-[var(--warning)]">
                 {t('history.recordingUnavailable')}

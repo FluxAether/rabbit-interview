@@ -133,6 +133,8 @@ export default function Settings() {
 
   // Auto-save toast status (temporary 2-second fade badge)
   const [showSavedToast, setShowSavedToast] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [settingsHydrated, setSettingsHydrated] = useState(false)
   const toastTimeoutRef = useRef<number | null>(null)
 
   const saveTimeoutRef = useRef<number | null>(null)
@@ -159,7 +161,7 @@ export default function Settings() {
       setRecordingStorage(recordings)
       setHistoryStorage(history)
     } catch (error) {
-      setStorageError(`${t('settings.storage.loadFailed')}: ${String(error)}`)
+      setStorageError(t('settings.storage.loadFailed'))
     } finally {
       setStorageLoading(false)
     }
@@ -239,9 +241,11 @@ export default function Settings() {
   const persistToDisk = async (payload: Partial<PersistedSettings>) => {
     try {
       await saveAppSettings(payload as Partial<PersistedSettings>)
+      setSaveError('')
       triggerSavedToast()
     } catch (e) {
       console.warn('Auto-save to disk failed:', e)
+      setSaveError(t('settings.saveFailed'))
     }
   }
 
@@ -282,12 +286,10 @@ export default function Settings() {
     if (pending) void persistToDisk(pending)
   }, [])
 
-  // Auto check for updates if enabled
   useEffect(() => {
-    if (autoUpdate) {
-      void handleCheckUpdate(true)
-    }
-  }, [])
+    if (!settingsHydrated || !autoUpdate) return
+    void handleCheckUpdate(true)
+  }, [settingsHydrated, autoUpdate])
 
   // Load key configuration status
   useEffect(() => {
@@ -354,6 +356,7 @@ export default function Settings() {
     if (settings) {
       queueMicrotask(() => {
         isHydratedRef.current = true
+        setSettingsHydrated(true)
       })
     }
   }, [settings])
@@ -448,7 +451,6 @@ export default function Settings() {
 
   const saveProviderKey = async (provider: ProviderKeyType, value: string) => {
     const trimmed = value.trim()
-    if (!trimmed) return
     const keyMap = {
       groq: 'GROQ_API_KEY',
       openai: 'OPENAI_API_KEY',
@@ -456,14 +458,18 @@ export default function Settings() {
       gemini: 'GEMINI_API_KEY',
       deepgram: 'DEEPGRAM_API_KEY',
     } as const
-
-    const { setApiKey } = await import('../lib/keyStore')
-    const { clearKeyCache } = await import('../lib/llm')
-    await setApiKey(keyMap[provider], trimmed)
-    clearKeyCache()
-
-    setKeyStatus((prev) => ({ ...prev, [provider]: true }))
-    triggerSavedToast()
+    try {
+      const { setApiKey } = await import('../lib/keyStore')
+      const { clearKeyCache } = await import('../lib/llm')
+      await setApiKey(keyMap[provider], trimmed)
+      clearKeyCache()
+      setKeyStatus((prev) => ({ ...prev, [provider]: Boolean(trimmed) }))
+      setSaveError('')
+      triggerSavedToast()
+    } catch (e) {
+      console.warn('Save API key failed:', e)
+      setSaveError(t('settings.saveFailed'))
+    }
   }
 
   const updateSttConfig = (provider: 'deepgram', model: string) => {
@@ -515,10 +521,12 @@ export default function Settings() {
       } else if (provider === 'groq') {
         res = await fetch('https://api.groq.com/openai/v1/models', {
           headers: { Authorization: `Bearer ${targetKey}` },
+          signal: AbortSignal.timeout(12_000),
         })
       } else if (provider === 'openai') {
         res = await fetch('https://api.openai.com/v1/models', {
           headers: { Authorization: `Bearer ${targetKey}` },
+          signal: AbortSignal.timeout(12_000),
         })
       } else if (provider === 'anthropic') {
         res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -534,9 +542,12 @@ export default function Settings() {
             max_tokens: 1,
             messages: [{ role: 'user', content: 'hi' }],
           }),
+          signal: AbortSignal.timeout(12_000),
         })
       } else {
-        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${targetKey}`)
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${targetKey}`, {
+          signal: AbortSignal.timeout(12_000),
+        })
       }
 
       const elapsed = Math.round(performance.now() - start)
@@ -591,12 +602,13 @@ export default function Settings() {
     return (
       <div className="space-y-1.5">
         <div className="flex items-center gap-2">
-          <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Key</span>
+          <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.keyLabel')}</span>
           <div className="relative flex-1">
             <input
               type={isVisible ? 'text' : 'password'}
               className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] py-1 pl-3 pr-9 text-xs font-mono text-[var(--text-main)]"
-              placeholder={isConfigured ? '•••••••• (configured)' : placeholderName}
+              aria-label={t('settings.keyLabel')}
+              placeholder={isConfigured ? t('settings.keyConfigured') : placeholderName}
               value={keyInputs[provider]}
               onChange={(e) => {
                 const val = e.target.value
@@ -608,11 +620,24 @@ export default function Settings() {
               type="button"
               onClick={() => setShowKey((prev) => ({ ...prev, [provider]: !prev[provider] }))}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]"
-              title={isVisible ? 'Hide key' : 'Show key'}
+              title={isVisible ? t('settings.hideKey') : t('settings.showKey')}
+              aria-label={isVisible ? t('settings.hideKey') : t('settings.showKey')}
             >
               {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             </button>
           </div>
+          {isConfigured && (
+            <button
+              type="button"
+              onClick={() => {
+                setKeyInputs((prev) => ({ ...prev, [provider]: '' }))
+                void saveProviderKey(provider, '')
+              }}
+              className="rounded-md border border-[var(--border-color)] px-2 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
+            >
+              {t('settings.clearKey')}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void testConnection(provider)}
@@ -634,7 +659,7 @@ export default function Settings() {
         </div>
 
         {testResult.message && (
-          <div className="pl-14 flex items-center gap-1.5 text-xs">
+          <div role="status" className="pl-14 flex items-center gap-1.5 text-xs">
             {testResult.success ? (
               <span className="flex items-center gap-1 font-medium text-[var(--success)]">
                 <Check className="w-3.5 h-3.5" />
@@ -687,30 +712,38 @@ export default function Settings() {
     }
   }
 
+  const shortcutMod = navigator.platform.toLowerCase().includes('mac') ? '⌘' : 'Ctrl'
+
   return (
     <div className="h-full overflow-auto bg-[var(--bg-app)] p-6 text-[var(--text-main)] sm:p-8">
       <div className="mx-auto w-full max-w-6xl">
         <div className="mb-6 flex items-center justify-between gap-4">
           <div>
-            <h1 className="mb-1 text-2xl font-semibold tracking-tight">{t('settings.title')}</h1>
+            <h1 className="mb-1 text-2xl font-semibold tracking-tight">{t(`settings.heading.${activeTab}`)}</h1>
             <p className="text-sm text-[var(--text-muted)]">{t('settings.description')}</p>
           </div>
 
           {/* Auto-save toast badge (fades after 2s) */}
-          <div
-            className={`flex items-center gap-1.5 text-xs text-[var(--success)] transition-opacity duration-300 ${
-              showSavedToast ? 'opacity-100' : 'opacity-0 pointer-events-none'
-            }`}
-          >
-            <span aria-hidden="true">✓</span>
-            <span>{t('settings.saved')}</span>
+          <div className="flex items-center gap-3">
+            {saveError && (
+              <div role="alert" className="text-xs text-[var(--danger)]">{saveError}</div>
+            )}
+            <div
+              role="status"
+              className={`flex items-center gap-1.5 text-xs text-[var(--success)] transition-opacity duration-300 ${
+                showSavedToast ? 'opacity-100' : 'opacity-0 pointer-events-none'
+              }`}
+            >
+              <span aria-hidden="true">✓</span>
+              <span>{t('settings.saved')}</span>
+            </div>
           </div>
         </div>
 
         <div className="flex flex-col items-start gap-6 lg:flex-row lg:gap-8">
           <nav className="flex w-full gap-1 overflow-x-auto border-b border-[var(--border-color)] pb-2 lg:w-52 lg:shrink-0 lg:flex-col lg:border-b-0 lg:pb-0">
             <button
-              onClick={() => setActiveTab('general')}
+              onClick={() => setActiveTab('general')} aria-current={activeTab === 'general' ? 'page' : undefined}
               className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
                 activeTab === 'general'
                   ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
@@ -722,7 +755,7 @@ export default function Settings() {
             </button>
 
             <button
-              onClick={() => setActiveTab('ai')}
+              onClick={() => setActiveTab('ai')} aria-current={activeTab === 'ai' ? 'page' : undefined}
               className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
                 activeTab === 'ai'
                   ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
@@ -734,7 +767,7 @@ export default function Settings() {
             </button>
 
             <button
-              onClick={() => setActiveTab('stt')}
+              onClick={() => setActiveTab('stt')} aria-current={activeTab === 'stt' ? 'page' : undefined}
               className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
                 activeTab === 'stt'
                   ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
@@ -746,7 +779,7 @@ export default function Settings() {
             </button>
 
             <button
-              onClick={() => setActiveTab('shortcuts_privacy')}
+              onClick={() => setActiveTab('shortcuts_privacy')} aria-current={activeTab === 'shortcuts_privacy' ? 'page' : undefined}
               className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
                 activeTab === 'shortcuts_privacy'
                   ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
@@ -758,7 +791,7 @@ export default function Settings() {
             </button>
 
             <button
-              onClick={() => setActiveTab('storage')}
+              onClick={() => setActiveTab('storage')} aria-current={activeTab === 'storage' ? 'page' : undefined}
               className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
                 activeTab === 'storage'
                   ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
@@ -873,6 +906,7 @@ export default function Settings() {
                           checked={autoUpdate}
                           onChange={(e) => setAutoUpdate(e.target.checked)}
                           className="sr-only peer"
+                          aria-label={t('settings.autoUpdate')}
                         />
                         <div className="peer h-5 w-9 rounded-full bg-[var(--bg-subtle)] after:absolute after:left-[1px] after:top-[1px] after:h-4 after:w-4 after:rounded-full after:border after:border-[var(--border-color)] after:bg-[var(--bg-surface)] after:content-[''] after:transition-all peer-checked:bg-[var(--action)] peer-checked:after:translate-x-full peer-focus:outline-none"></div>
                       </label>
@@ -891,8 +925,8 @@ export default function Settings() {
                         onChange={(e) => setUpdateChannel(e.target.value as any)}
                         className="rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                       >
-                        <option value="Stable">Stable</option>
-                        <option value="Beta">Beta</option>
+                        <option value="Stable">{t('settings.channel.stable')}</option>
+                        <option value="Beta">{t('settings.channel.beta')}</option>
                       </select>
                     </div>
                   </div>
@@ -963,21 +997,21 @@ export default function Settings() {
                       </div>
                       {activeProvider === 'groq' ? (
                         <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
-                          Active
+                          {t('settings.active')}
                         </span>
                       ) : (
                         <button
                           onClick={() => activateProvider('groq', groqModel)}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
-                          Use Groq
+                          {t("settings.useProvider", { name: "Groq" })}
                         </button>
                       )}
                     </div>
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Model</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
                         <select
                           value={groqModel}
                           onChange={(e) => updateProviderModel('groq', e.target.value)}
@@ -1010,21 +1044,21 @@ export default function Settings() {
                       </div>
                       {activeProvider === 'openai' ? (
                         <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
-                          Active
+                          {t('settings.active')}
                         </span>
                       ) : (
                         <button
                           onClick={() => activateProvider('openai', openaiModel)}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
-                          Use OpenAI
+                          {t("settings.useProvider", { name: "OpenAI" })}
                         </button>
                       )}
                     </div>
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Model</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
                         <select
                           value={openaiModel}
                           onChange={(e) => updateProviderModel('openai', e.target.value)}
@@ -1057,21 +1091,21 @@ export default function Settings() {
                       </div>
                       {activeProvider === 'anthropic' ? (
                         <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
-                          Active
+                          {t('settings.active')}
                         </span>
                       ) : (
                         <button
                           onClick={() => activateProvider('anthropic', anthropicModel)}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
-                          Use Claude
+                          {t("settings.useProvider", { name: "Claude" })}
                         </button>
                       )}
                     </div>
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Model</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
                         <select
                           value={anthropicModel}
                           onChange={(e) => updateProviderModel('anthropic', e.target.value)}
@@ -1104,21 +1138,21 @@ export default function Settings() {
                       </div>
                       {activeProvider === 'gemini' ? (
                         <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
-                          Active
+                          {t('settings.active')}
                         </span>
                       ) : (
                         <button
                           onClick={() => activateProvider('gemini', geminiModel)}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
-                          Use Gemini
+                          {t("settings.useProvider", { name: "Gemini" })}
                         </button>
                       )}
                     </div>
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Model</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
                         <select
                           value={geminiModel}
                           onChange={(e) => updateProviderModel('gemini', e.target.value)}
@@ -1141,9 +1175,9 @@ export default function Settings() {
             {/* TAB 3: STT Speech-to-Text */}
             {activeTab === 'stt' && (
               <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
-                <div className="mb-1 font-semibold">Speech-to-Text</div>
+                <div className="mb-1 font-semibold">{t('settings.stt.title')}</div>
                 <div className="mb-4 text-xs text-[var(--text-muted)]">
-                  Real-time transcription for Stealth Copilot. Currently powered by Deepgram (high accuracy, low latency).
+                  {t('settings.stt.desc')}
                 </div>
 
                 <div className="space-y-4">
@@ -1152,17 +1186,17 @@ export default function Settings() {
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">Deepgram</span>
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300">
-                          Real-time WS
+                          {t('settings.stt.badge')}
                         </span>
                       </div>
                       <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
-                        Active
+                        {t('settings.active')}
                       </span>
                     </div>
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Model</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
                         <select
                           value={sttModel}
                           onChange={(e) => updateSttConfig('deepgram', e.target.value)}
@@ -1177,7 +1211,7 @@ export default function Settings() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Language</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.language')}</span>
                         <select
                           aria-label="Deepgram language"
                           value={sttLanguage}
@@ -1197,7 +1231,7 @@ export default function Settings() {
                 </div>
 
                 <div className="mt-4 text-[11px] text-[var(--text-muted)]">
-                  The selected STT model is used for live transcription. Deepgram keys are separate from LLM keys.
+                  {t('settings.stt.help')}
                 </div>
               </div>
             )}
@@ -1221,21 +1255,12 @@ export default function Settings() {
                   </button>
 
                   <div className="space-y-2 rounded-md border border-[var(--success)] p-3 text-xs">
-                    <div>
-                      <b>✅ macOS system audio: AudioTee</b>
-                    </div>
-                    <div className="text-[var(--success)]">
-                      The bundled, pinned AudioTee sidecar captures the default system output. Microphone capture remains a separate option.
-                    </div>
-                    <div>
-                      <b>✅ Windows system audio: WASAPI loopback</b>
-                    </div>
-                    <div className="text-[var(--success)]">
-                      Shared-mode loopback captures the default render endpoint mix. Microphone capture remains a separate option.
-                    </div>
-                    <div className="pt-1 text-[10px] text-[var(--success)]">
-                      macOS requires 14.2+. Windows uses the default output device for the active session. Unsupported platforms use microphone-only mode.
-                    </div>
+                    <div><b>{t('settings.audio.macosTitle')}</b></div>
+                    <div className="text-[var(--success)]">{t('settings.audio.macosDesc')}</div>
+                    <div><b>{t('settings.audio.windowsTitle')}</b></div>
+                    <div className="text-[var(--success)]">{t('settings.audio.windowsDesc')}</div>
+                    <div className="pt-1 text-[10px] text-[var(--success)]">{t('settings.audio.platformNote')}</div>
+                    <div className="pt-1 text-[10px] text-[var(--text-muted)]">{t('settings.audio.deviceHint')}</div>
                   </div>
                 </div>
 
@@ -1246,13 +1271,13 @@ export default function Settings() {
                     <div className="flex justify-between">
                       <span>{t('settings.shortcuts.toggle')}</span>
                       <span className="rounded bg-[var(--bg-subtle)] px-1.5 py-px font-mono text-xs">
-                        ⌘⇧I
+                        {`${shortcutMod}⇧I`}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span>{t('settings.shortcuts.capture')}</span>
                       <span className="rounded bg-[var(--bg-subtle)] px-1.5 py-px font-mono text-xs">
-                        ⌘⇧C
+                        {`${shortcutMod}⇧C`}
                       </span>
                     </div>
                   </div>

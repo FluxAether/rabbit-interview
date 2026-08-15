@@ -219,18 +219,12 @@ export default function ResumeOptimizer() {
   }
 
   const handleApplySuggestion = (suggestion: ResumeSuggestion) => {
+    if (!suggestion.replacement) return
     let newOptimized = resumeOptimized
-    if (suggestion.replacement) {
-      if (newOptimized.includes(suggestion.replacement.before)) {
-        newOptimized = newOptimized.replace(suggestion.replacement.before, suggestion.replacement.after)
-      } else {
-        newOptimized = newOptimized ? `${newOptimized}\n• ${suggestion.replacement.after}` : suggestion.replacement.after
-      }
+    if (newOptimized.includes(suggestion.replacement.before)) {
+      newOptimized = newOptimized.replace(suggestion.replacement.before, suggestion.replacement.after)
     } else {
-      const textToAppend = suggestion.description || suggestion.title
-      if (textToAppend && !newOptimized.includes(textToAppend)) {
-        newOptimized = newOptimized ? `${newOptimized}\n• ${textToAppend}` : textToAppend
-      }
+      newOptimized = newOptimized ? `${newOptimized}\n• ${suggestion.replacement.after}` : suggestion.replacement.after
     }
     const updatedSuggestions = resumeSuggestions.map((s) =>
       s.id === suggestion.id ? { ...s, applied: true } : s
@@ -240,6 +234,14 @@ export default function ResumeOptimizer() {
       suggestions: updatedSuggestions,
     })
   }
+
+  const handleManualSuggestion = () => {
+    setViewMode("split")
+    const editor = document.querySelector<HTMLTextAreaElement>('textarea[aria-label]')
+    editor?.focus()
+    editor?.scrollIntoView({ block: "center" })
+  }
+
 
   const computeLineDiff = (original: string, optimized: string) => {
     const origLines = original.split("\n")
@@ -301,7 +303,7 @@ export default function ResumeOptimizer() {
               {isExporting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} {t("resume.export")}
             </button>
             {!factsReviewed && resumeOptimized.trim() && (
-              <div className="absolute right-0 top-full z-10 mt-2 hidden w-64 rounded-md border border-[var(--warning)] bg-[var(--bg-surface)] p-3 text-xs text-[var(--warning)] group-hover:block">
+              <div className="absolute right-0 top-full z-10 mt-2 w-64 rounded-md border border-[var(--warning)] bg-[var(--bg-surface)] p-3 text-xs text-[var(--warning)]">
                 <div className="mb-1 flex items-center gap-1 font-semibold"><AlertCircle className="h-3.5 w-3.5" /> {t("resume.exportLocked")}</div>
                 {t("resume.factReviewRequired")}
               </div>
@@ -336,10 +338,10 @@ export default function ResumeOptimizer() {
           </div>
           <button
             type="button"
-            onClick={() => setReviewedOptimizedText(resumeOptimized)}
+            onClick={handleManualSuggestion}
             className="shrink-0 self-start rounded-md border border-[var(--warning)] px-3 py-1 text-xs font-medium transition-colors hover:bg-[var(--bg-hover)] lg:self-auto"
           >
-            {t("resume.oneClickConfirm")}
+            {t("resume.startFactReview")}
           </button>
         </div>
       )}
@@ -365,6 +367,7 @@ export default function ResumeOptimizer() {
             value={jobDescription}
             maxLength={5000}
             disabled={busy}
+            aria-label={t("resume.jd.title")}
             onChange={(event) => updateResumeWorkspace({ jobDescription: event.target.value })}
             className="h-36 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)] disabled:opacity-60"
             placeholder={t("resume.jd.placeholder")}
@@ -392,6 +395,7 @@ export default function ResumeOptimizer() {
           <button
             type="button"
             onClick={() => setViewMode("diff")}
+            disabled={!resumeOptimized.trim()}
             className={`border-b-2 px-3 py-1.5 text-xs font-medium transition-colors ${
               viewMode === "diff"
                 ? "border-[var(--action)] text-[var(--text-main)]"
@@ -496,6 +500,9 @@ export default function ResumeOptimizer() {
             {jobDescription.trim() && (
               <div className="mt-1 text-xs text-[var(--text-muted)]">
                 {t("resume.keywordMatch")}: {resumeMatchedKeywords.length} · {t("resume.keywordMissing")}: {resumeMissingKeywords.length}
+                {resumeMissingKeywords.length > 0 && (
+                  <div className="mt-1">{resumeMissingKeywords.slice(0, 8).join(" · ")}</div>
+                )}
               </div>
             )}
           </div>
@@ -515,15 +522,26 @@ export default function ResumeOptimizer() {
                     <span className={`text-xs ${suggestion.applied ? "text-[var(--success)]" : "text-[var(--warning)]"}`}>
                       {t(suggestion.applied ? "resume.includedInDraft" : "resume.manualRequired")}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => handleApplySuggestion(suggestion)}
-                      disabled={busy || suggestion.applied}
-                      className="flex items-center gap-1 rounded-md bg-[var(--action)] px-2.5 py-1 text-xs text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-40"
-                    >
-                      <Sparkles className="h-3 w-3" />
-                      {suggestion.applied ? t("resume.applied") : t("resume.applyOneClick")}
-                    </button>
+                    {suggestion.replacement ? (
+                      <button
+                        type="button"
+                        onClick={() => handleApplySuggestion(suggestion)}
+                        disabled={busy || suggestion.applied}
+                        className="flex items-center gap-1 rounded-md bg-[var(--action)] px-2.5 py-1 text-xs text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-40"
+                      >
+                        <Sparkles className="h-3 w-3" />
+                        {suggestion.applied ? t("resume.applied") : t("resume.applyOneClick")}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleManualSuggestion}
+                        disabled={busy || suggestion.applied}
+                        className="flex items-center gap-1 rounded-md border border-[var(--border-color)] px-2.5 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40"
+                      >
+                        {t("resume.manualFill")}
+                      </button>
+                    )}
                   </div>
                 </div>
                 <p className="mt-2 text-xs leading-relaxed text-[var(--text-muted)]">{suggestion.description ?? t(suggestion.descriptionKey ?? "", suggestion.descriptionParams)}</p>

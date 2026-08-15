@@ -97,9 +97,12 @@ export default function CopilotPanel({
   }
 
   const handleCopy = (id: number, text: string) => {
-    void navigator.clipboard.writeText(text)
-    setCopiedId(id)
-    setTimeout(() => setCopiedId(null), 2000)
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(id)
+      setTimeout(() => setCopiedId(null), 2000)
+    }).catch((error) => {
+      console.warn("Unable to copy suggestion", error)
+    })
   }
 
   const handleOpacityChange = (value: number) => {
@@ -159,9 +162,9 @@ export default function CopilotPanel({
 
   const fontSteps: CopilotFontSize[] = ["sm", "base", "lg"]
   const fontSizeLabels: Record<CopilotFontSize, string> = {
-    sm: "小",
-    base: "中",
-    lg: "大",
+    sm: t("copilot.font.sm"),
+    base: t("copilot.font.base"),
+    lg: t("copilot.font.lg"),
   }
 
   const fontSizeClass =
@@ -227,22 +230,22 @@ export default function CopilotPanel({
         </div>
 
         {/* Toolbar: Font Size, Opacity (floating mode) & Duration */}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
           <div className="flex items-center rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-0.5 text-xs">
             <button
               type="button"
               onClick={decreaseFontSize}
               disabled={!fontSizeReady || fontSize === "sm"}
-              className={`rounded p-1 hover:bg-[var(--bg-hover)] disabled:opacity-40 ${fontSize === "sm" ? "font-bold text-[var(--text-main)]" : "text-[var(--text-muted)]"}`}
-              title="缩小字体 (小/中/大)"
-              aria-label="缩小字体"
+              className={`rounded p-1.5 hover:bg-[var(--bg-hover)] disabled:opacity-40 ${fontSize === "sm" ? "font-bold text-[var(--text-main)]" : "text-[var(--text-muted)]"}`}
+              title={t("copilot.fontSmaller")}
+              aria-label={t("copilot.fontSmaller")}
               data-no-drag
             >
               <ZoomOut className="h-3.5 w-3.5" />
             </button>
             <span
               className="min-w-5 px-0.5 text-center text-[10px] font-semibold tabular-nums text-[var(--text-muted)]"
-              title={`当前字体：${fontSizeLabels[fontSize]}`}
+              title={t("copilot.fontCurrent", { size: fontSizeLabels[fontSize] })}
               data-no-drag
             >
               {fontSizeLabels[fontSize]}
@@ -251,9 +254,9 @@ export default function CopilotPanel({
               type="button"
               onClick={increaseFontSize}
               disabled={!fontSizeReady || fontSize === "lg"}
-              className={`rounded p-1 hover:bg-[var(--bg-hover)] disabled:opacity-40 ${fontSize === "lg" ? "font-bold text-[var(--text-main)]" : "text-[var(--text-muted)]"}`}
-              title="放大字体 (小/中/大)"
-              aria-label="放大字体"
+              className={`rounded p-1.5 hover:bg-[var(--bg-hover)] disabled:opacity-40 ${fontSize === "lg" ? "font-bold text-[var(--text-main)]" : "text-[var(--text-muted)]"}`}
+              title={t("copilot.fontLarger")}
+              aria-label={t("copilot.fontLarger")}
               data-no-drag
             >
               <ZoomIn className="h-3.5 w-3.5" />
@@ -263,7 +266,7 @@ export default function CopilotPanel({
           {floating && (
             <div
               className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-2 py-1 text-xs"
-              title="滑动调节透明度"
+              title={t("copilot.opacity")}
               data-no-drag
             >
               <EyeOff className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
@@ -275,7 +278,7 @@ export default function CopilotPanel({
                 value={opacity}
                 onChange={(event) => handleOpacityChange(Number(event.target.value))}
                 className="h-1.5 w-16 cursor-pointer appearance-none rounded-lg bg-[var(--bg-hover)] accent-[var(--action)]"
-                aria-label="调整浮窗透明度"
+                aria-label={t("copilot.opacity")}
                 data-no-drag
               />
               <span className="w-7 text-right font-mono text-[10px] font-medium text-[var(--text-muted)]">
@@ -297,7 +300,7 @@ export default function CopilotPanel({
             <button
               type="button"
               onClick={onHide}
-              className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
+              className="rounded-md p-2 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
               aria-label={t("copilot.hide")}
               data-tauri-drag-region="false"
               data-no-drag
@@ -322,7 +325,7 @@ export default function CopilotPanel({
           ref={messagesRef}
           onScroll={handleScroll}
           className={`h-full overflow-y-auto overscroll-contain rounded-lg p-3 ${floating ? "bg-[var(--bg-sidebar)]" : "bg-[var(--bg-surface)]"}`}
-          aria-live="polite"
+          role="log" aria-relevant="additions"
         >
           {copilot.messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center px-6 text-center text-xs text-[var(--text-muted)]">
@@ -373,13 +376,13 @@ export default function CopilotPanel({
                             >
                               <div className="flex items-center gap-1.5">
                                 <Sparkles className="h-3.5 w-3.5 text-[var(--text-muted)]" />
-                                <span>核心提示词 (Key Points)</span>
+                                {t("copilot.keyPoints")}
                               </div>
                               <button
                                 type="button"
                                 onClick={() => toggleTakeawayCollapse(message.id)}
                                 className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
-                                title={isTakeawayCollapsed ? "展开提示词" : "折叠提示词"}
+                                title={isTakeawayCollapsed ? t("copilot.expandPoints") : t("copilot.collapsePoints")}
                               >
                                 {isTakeawayCollapsed ? (
                                   <ChevronDown className="h-3.5 w-3.5" />
@@ -408,9 +411,7 @@ export default function CopilotPanel({
                         {/* Copy Helper for Assistant */}
                         {assistant && (
                           <div className="mt-1 flex items-center justify-between border-t border-[var(--border-color)] pt-2 text-xs">
-                            <span className="text-[10px] text-[var(--text-muted)]">
-                              推荐提示
-                            </span>
+                            <span className="text-[10px] text-[var(--text-muted)]">{t("copilot.suggestedHint")}</span>
                             <button
                               type="button"
                               onClick={() => handleCopy(message.id, message.text)}
@@ -420,12 +421,12 @@ export default function CopilotPanel({
                               {copiedId === message.id ? (
                                 <>
                                   <Check className="h-3 w-3 text-[var(--success)]" />
-                                  <span className="text-[var(--success)]">已复制</span>
+                                  <span className="text-[var(--success)]">{t("copilot.copied")}</span>
                                 </>
                               ) : (
                                 <>
                                   <Clipboard className="h-3 w-3" />
-                                  <span>复制建议</span>
+                                  <span>{t("copilot.copySuggestion")}</span>
                                 </>
                               )}
                             </button>
@@ -448,7 +449,7 @@ export default function CopilotPanel({
             className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] hover:bg-[var(--bg-hover)]"
           >
             <ArrowDown className="h-3.5 w-3.5" />
-            <span>↓ 有新消息</span>
+            <span>{t("copilot.newMessages")}</span>
           </button>
         )}
       </div>

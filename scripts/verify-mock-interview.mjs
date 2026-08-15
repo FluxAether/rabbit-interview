@@ -16,7 +16,11 @@ const checks = [
   [ai.includes('do not generate another question'), 'final turn cannot create an unanswered question'],
   [db.includes('details_json'), 'structured interview details persisted'],
   [speech.includes('/usr/bin/say') && !speech.includes('sh -c'), 'macOS speech uses direct command arguments'],
+  [page.includes("if (sessionRef.current.phase === 'speaking') patch({ phase: 'answering' })"), 'replay restores answering after speech'],
+  [page.includes('await stopVoice({ saveRecording: false })') && page.includes('copy.roleRequired'), 'start failure stops leftover capture and localizes validation'],
+  [page.includes('finishingRef.current'), 'end interview is single-flight'],
 ]
+
 
 let failed = 0
 for (const [ok, description] of checks) {

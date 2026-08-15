@@ -66,8 +66,8 @@ function Sidebar({
             type="button"
             onClick={onToggleCollapse}
             className="rounded-md p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
-            title="展开侧边栏"
-            aria-label="展开侧边栏"
+            title={t("nav.expandSidebar")}
+            aria-label={t("nav.expandSidebar")}
           >
             <PanelLeftOpen className="h-4 w-4" strokeWidth={1.8} />
           </button>
@@ -86,8 +86,8 @@ function Sidebar({
             type="button"
             onClick={onToggleCollapse}
             className="rounded-md p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
-            title="折叠侧边栏"
-            aria-label="折叠侧边栏"
+            title={t("nav.collapseSidebar")}
+            aria-label={t("nav.collapseSidebar")}
           >
             <PanelLeftClose className="h-4 w-4" strokeWidth={1.8} />
           </button>
@@ -132,8 +132,19 @@ export default function App() {
   const setHistoryLoadError = useAppStore((state) => state.setHistoryLoadError)
   const hydrateResumeWorkspace = useAppStore((state) => state.hydrateResumeWorkspace)
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 960px)').matches)
+  const [userCollapsed, setUserCollapsed] = useState(false)
   const [windowStatus, setWindowStatus] = useState<CopilotWindowStatus | null>(null)
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 960px)')
+    const sync = () => {
+      if (!userCollapsed) setSidebarCollapsed(media.matches)
+    }
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [userCollapsed])
+
   const floatingRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -302,7 +313,10 @@ export default function App() {
         currentPage={currentPage}
         onNavigate={setCurrentPage}
         collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+        onToggleCollapse={() => {
+          setUserCollapsed(true)
+          setSidebarCollapsed((c) => !c)
+        }}
       />
       <main id="main-content" className={`min-w-0 flex-1 bg-[var(--bg-app)] ${currentPage === 'copilot' ? 'overflow-hidden' : 'overflow-auto'}`}>
         {renderPage()}
