@@ -20,7 +20,6 @@
   --bg-input: #ffffff;
   --border-color: #e5e5e5;
   --border-strong: #d1d1d1;
-  --control-border: #767676;
   --text-main: #0d0d0d;
   --text-muted: #6b6b6b;
   --action: #171717;
@@ -51,7 +50,6 @@
   --bg-input: #2f2f2f;
   --border-color: #424242;
   --border-strong: #5a5a5a;
-  --control-border: #8e8e8e;
   --text-main: #ececec;
   --text-muted: #b4b4b4;
   --action: #ececec;
@@ -119,9 +117,8 @@ textarea {
 button:focus-visible,
 [role='button']:focus-visible,
 a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible,
 .focus-ring:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
@@ -132,11 +129,19 @@ button:not(:disabled),
   cursor: pointer;
 }
 
+:where(input:not([type='checkbox']):not([type='radio']):not([type='range']), textarea) {
+  appearance: none;
+}
+
 :where(input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea) {
   background-color: var(--bg-input);
-  border-color: var(--border-color);
-  box-shadow: inset 0 0 0 1px var(--control-border);
+  border: 1px solid var(--border-color);
   color: var(--text-main);
+}
+
+:where(input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea):focus-visible {
+  border-color: var(--focus-ring);
+  outline: none;
 }
 
 input::placeholder,

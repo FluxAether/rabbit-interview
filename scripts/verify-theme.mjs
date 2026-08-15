@@ -31,7 +31,6 @@ for (const token of [
   '--bg-subtle',
   '--bg-hover',
   '--border-color',
-  '--control-border',
   '--text-main',
   '--text-muted',
   '--action',
@@ -45,6 +44,14 @@ for (const token of [
 }
 assert.ok(css.includes('color-scheme: dark') && css.includes('background-color: var(--bg-app)'), 'root and native controls use theme tokens')
 assert.ok(css.includes(':focus-visible') && css.includes('prefers-reduced-motion: reduce'), 'theme includes keyboard focus and reduced-motion support')
+assert.ok(
+  css.includes("appearance: none")
+    && css.includes("border: 1px solid var(--border-color)")
+    && !css.includes('box-shadow: inset 0 0 0 1px')
+    && css.includes("input[type='checkbox']:focus-visible")
+    && !css.includes('input:focus-visible,\nselect:focus-visible,\ntextarea:focus-visible'),
+  'text inputs use a single CSS border instead of native chrome plus an outer focus outline',
+)
 assert.ok(!read('src/main.tsx').includes('sonner') && !read('package.json').includes('sonner'), 'unused sonner toaster is removed')
 assert.ok(settings.includes('pendingSaveRef') && settings.includes('if (pending) void persistToDisk(pending)'), 'pending settings are flushed')
 assert.ok(

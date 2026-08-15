@@ -233,12 +233,12 @@ export default function MockInterview() {
       <h1 className="text-xl font-semibold tracking-tight">{copy.title}</h1>
       <p className="mt-1 text-sm text-[var(--text-muted)]">根据职位、简历和 JD 动态出题，支持文本或麦克风回答。</p>
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <label className="text-sm">{copy.role}<input className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.role} onChange={e => updateConfig({ role: e.target.value })} placeholder="例如: Senior Product Manager / 资深前端工程师" /></label>
-        <label className="text-sm">{copy.company}<input className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.company} onChange={e => updateConfig({ company: e.target.value })} placeholder="例如: ByteDance / Tencent" /></label>
-        <label className="text-sm">面试类型<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.interviewType} onChange={e => updateConfig({ interviewType: e.target.value as any })}><option value="mixed">综合</option><option value="behavioral">行为</option><option value="technical">技术</option></select></label>
-        <label className="text-sm">难度<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.difficulty} onChange={e => updateConfig({ difficulty: e.target.value as any })}><option value="junior">初级</option><option value="mid">中级</option><option value="senior">高级</option></select></label>
-        <label className="text-sm">题目数量<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.questionCount} onChange={e => updateConfig({ questionCount: Number(e.target.value) })}><option value={5}>5</option><option value={8}>8</option><option value={10}>10</option></select></label>
-        <label className="text-sm">语言<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.language} onChange={e => updateConfig({ language: e.target.value as any })}><option value="zh-CN">简体中文</option><option value="zh-TW">繁體中文</option><option value="en-US">English</option></select></label>
+        <label className="text-sm">{copy.role}<input className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)]" value={session.config.role} onChange={e => updateConfig({ role: e.target.value })} placeholder="例如: Senior Product Manager / 资深前端工程师" /></label>
+        <label className="text-sm">{copy.company}<input className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)]" value={session.config.company} onChange={e => updateConfig({ company: e.target.value })} placeholder="例如: ByteDance / Tencent" /></label>
+        <label className="text-sm">面试类型<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)]" value={session.config.interviewType} onChange={e => updateConfig({ interviewType: e.target.value as any })}><option value="mixed">综合</option><option value="behavioral">行为</option><option value="technical">技术</option></select></label>
+        <label className="text-sm">难度<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)]" value={session.config.difficulty} onChange={e => updateConfig({ difficulty: e.target.value as any })}><option value="junior">初级</option><option value="mid">中级</option><option value="senior">高级</option></select></label>
+        <label className="text-sm">题目数量<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)]" value={session.config.questionCount} onChange={e => updateConfig({ questionCount: Number(e.target.value) })}><option value={5}>5</option><option value={8}>8</option><option value={10}>10</option></select></label>
+        <label className="text-sm">语言<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)]" value={session.config.language} onChange={e => updateConfig({ language: e.target.value as any })}><option value="zh-CN">简体中文</option><option value="zh-TW">繁體中文</option><option value="en-US">English</option></select></label>
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
         <label className="flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm"><input type="checkbox" checked={session.config.voiceInputEnabled} onChange={e => updateConfig({ voiceInputEnabled: e.target.checked })} />麦克风实时转写</label>
@@ -265,7 +265,7 @@ export default function MockInterview() {
               <span>{session.config.resumeContext.length} 字</span>
             </div>
             <textarea
-              className="h-32 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-xs leading-relaxed outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]"
+              className="h-32 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-xs leading-relaxed outline-none transition-colors focus:border-[var(--action)]"
               placeholder="粘贴简历内容或点击上方按钮同步..."
               value={session.config.resumeContext}
               onChange={e => updateConfig({ resumeContext: e.target.value })}
@@ -277,7 +277,7 @@ export default function MockInterview() {
               <span>{session.config.jobDescription.length} 字</span>
             </div>
             <textarea
-              className="h-32 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-xs leading-relaxed outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]"
+              className="h-32 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-xs leading-relaxed outline-none transition-colors focus:border-[var(--action)]"
               placeholder="粘贴目标 JD 或点击上方按钮同步..."
               value={session.config.jobDescription}
               onChange={e => updateConfig({ jobDescription: e.target.value })}
@@ -412,7 +412,7 @@ export default function MockInterview() {
           </div>
         )}
 
-        <textarea maxLength={4000} value={session.draftAnswer} onChange={e => { finalTranscriptRef.current = e.target.value; patch({ draftAnswer: e.target.value }) }} disabled={busy} className="mt-3 h-36 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-3 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)] disabled:bg-[var(--bg-subtle)]" placeholder={session.config.voiceInputEnabled ? '直接说话，转写结果可编辑…' : '输入你的回答…'} />
+        <textarea maxLength={4000} value={session.draftAnswer} onChange={e => { finalTranscriptRef.current = e.target.value; patch({ draftAnswer: e.target.value }) }} disabled={busy} className="mt-3 h-36 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-3 outline-none transition-colors focus:border-[var(--action)] disabled:bg-[var(--bg-subtle)]" placeholder={session.config.voiceInputEnabled ? '直接说话，转写结果可编辑…' : '输入你的回答…'} />
         {session.interimTranscript && <div className="mt-2 text-sm text-[var(--text-muted)]">正在识别：{session.interimTranscript}</div>}
         <button onClick={submitAnswer} disabled={busy || !session.draftAnswer.trim()} className="mt-4 w-full rounded-md bg-[var(--action)] py-2.5 font-medium text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-40">{session.phase === 'evaluating' ? '正在分析…' : copy.submit}</button>
       </section>

@@ -369,7 +369,7 @@ export default function ResumeOptimizer() {
             disabled={busy}
             aria-label={t("resume.jd.title")}
             onChange={(event) => updateResumeWorkspace({ jobDescription: event.target.value })}
-            className="h-36 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)] disabled:opacity-60"
+            className="h-36 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm outline-none transition-colors focus:border-[var(--action)] disabled:opacity-60"
             placeholder={t("resume.jd.placeholder")}
           />
           <button type="button" onClick={() => runAnalysis(resumeOriginal)} disabled={busy || !resumeOriginal.trim()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-[var(--action)] py-2 text-sm text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-50">
@@ -462,7 +462,7 @@ export default function ResumeOptimizer() {
               value={resumeOptimized}
               disabled={busy}
               onChange={(event) => updateResumeWorkspace({ optimized: event.target.value })}
-              className="min-h-[260px] w-full resize-y rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 text-sm leading-relaxed outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)] disabled:opacity-60"
+              className="min-h-[260px] w-full resize-y rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 text-sm leading-relaxed outline-none transition-colors focus:border-[var(--action)] disabled:opacity-60"
               placeholder={t("resume.optimizedPlaceholder")}
               aria-label={t("resume.optimized")}
             />
