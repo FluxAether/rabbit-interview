@@ -8,19 +8,24 @@ export default {
   theme: {
     extend: {
       colors: {
-        accent: {
-          DEFAULT: '#6366f1',
-          dark: '#4f46e5',
-        },
-        sidebar: '#f8fafc',
-        card: '#ffffff',
-        'text-primary': '#0f172a',
-        'text-secondary': '#475569',
+        canvas: 'var(--bg-app)',
+        sidebar: 'var(--bg-sidebar)',
+        surface: 'var(--bg-surface)',
+        subtle: 'var(--bg-subtle)',
+        hover: 'var(--bg-hover)',
+        'ui-border': 'var(--border-color)',
+        ink: 'var(--text-main)',
+        muted: 'var(--text-muted)',
+        action: 'var(--action)',
+        'action-text': 'var(--action-text)',
+        success: 'var(--success)',
+        warning: 'var(--warning)',
+        danger: 'var(--danger)',
       },
       borderRadius: {
-        'xl': '12px',
-        '2xl': '16px',
-        '3xl': '20px',
+        'xl': '10px',
+        '2xl': '12px',
+        '3xl': '12px',
       }
     },
   },

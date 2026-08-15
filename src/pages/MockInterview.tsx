@@ -213,55 +213,56 @@ export default function MockInterview() {
   }
 
   if (session.phase === 'setup') return (
-    <div className="w-full p-8"><div className="card mx-auto max-w-4xl p-8">
-      <h1 className="text-2xl font-semibold">{copy.title}</h1>
-      <p className="mt-1 text-sm text-[#64748b] dark:text-[#94a3b8]">根据职位、简历和 JD 动态出题，支持文本或麦克风回答。</p>
-      <div className="mt-6 grid grid-cols-2 gap-4">
-        <label className="text-sm">{copy.role}<input className="mt-1 w-full rounded-xl border p-3 dark:bg-[#0f172a] dark:border-[#334155]" value={session.config.role} onChange={e => updateConfig({ role: e.target.value })} placeholder="例如: Senior Product Manager / 资深前端工程师" /></label>
-        <label className="text-sm">{copy.company}<input className="mt-1 w-full rounded-xl border p-3 dark:bg-[#0f172a] dark:border-[#334155]" value={session.config.company} onChange={e => updateConfig({ company: e.target.value })} placeholder="例如: ByteDance / Tencent" /></label>
-        <label className="text-sm">面试类型<select className="mt-1 w-full rounded-xl border p-3 dark:bg-[#0f172a] dark:border-[#334155]" value={session.config.interviewType} onChange={e => updateConfig({ interviewType: e.target.value as any })}><option value="mixed">综合</option><option value="behavioral">行为</option><option value="technical">技术</option></select></label>
-        <label className="text-sm">难度<select className="mt-1 w-full rounded-xl border p-3 dark:bg-[#0f172a] dark:border-[#334155]" value={session.config.difficulty} onChange={e => updateConfig({ difficulty: e.target.value as any })}><option value="junior">初级</option><option value="mid">中级</option><option value="senior">高级</option></select></label>
-        <label className="text-sm">题目数量<select className="mt-1 w-full rounded-xl border p-3 dark:bg-[#0f172a] dark:border-[#334155]" value={session.config.questionCount} onChange={e => updateConfig({ questionCount: Number(e.target.value) })}><option value={5}>5</option><option value={8}>8</option><option value={10}>10</option></select></label>
-        <label className="text-sm">语言<select className="mt-1 w-full rounded-xl border p-3 dark:bg-[#0f172a] dark:border-[#334155]" value={session.config.language} onChange={e => updateConfig({ language: e.target.value as any })}><option value="zh-CN">简体中文</option><option value="zh-TW">繁體中文</option><option value="en-US">English</option></select></label>
+    <div className="w-full bg-[var(--bg-app)] px-5 py-6 text-[var(--text-main)] lg:px-8">
+      <section className="mx-auto max-w-4xl rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5 lg:p-7">
+      <h1 className="text-xl font-semibold tracking-tight">{copy.title}</h1>
+      <p className="mt-1 text-sm text-[var(--text-muted)]">根据职位、简历和 JD 动态出题，支持文本或麦克风回答。</p>
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <label className="text-sm">{copy.role}<input className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.role} onChange={e => updateConfig({ role: e.target.value })} placeholder="例如: Senior Product Manager / 资深前端工程师" /></label>
+        <label className="text-sm">{copy.company}<input className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.company} onChange={e => updateConfig({ company: e.target.value })} placeholder="例如: ByteDance / Tencent" /></label>
+        <label className="text-sm">面试类型<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.interviewType} onChange={e => updateConfig({ interviewType: e.target.value as any })}><option value="mixed">综合</option><option value="behavioral">行为</option><option value="technical">技术</option></select></label>
+        <label className="text-sm">难度<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.difficulty} onChange={e => updateConfig({ difficulty: e.target.value as any })}><option value="junior">初级</option><option value="mid">中级</option><option value="senior">高级</option></select></label>
+        <label className="text-sm">题目数量<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.questionCount} onChange={e => updateConfig({ questionCount: Number(e.target.value) })}><option value={5}>5</option><option value={8}>8</option><option value={10}>10</option></select></label>
+        <label className="text-sm">语言<select className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]" value={session.config.language} onChange={e => updateConfig({ language: e.target.value as any })}><option value="zh-CN">简体中文</option><option value="zh-TW">繁體中文</option><option value="en-US">English</option></select></label>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-4">
-        <label className="flex items-center gap-2 rounded-xl border border-[#e2e8f0] p-3 text-sm dark:border-[#334155]"><input type="checkbox" checked={session.config.voiceInputEnabled} onChange={e => updateConfig({ voiceInputEnabled: e.target.checked })} />麦克风实时转写</label>
-        <label className="flex items-center gap-2 rounded-xl border border-[#e2e8f0] p-3 text-sm dark:border-[#334155]"><input type="checkbox" checked={session.config.speechEnabled} onChange={e => updateConfig({ speechEnabled: e.target.checked })} />系统朗读题目</label>
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <label className="flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm"><input type="checkbox" checked={session.config.voiceInputEnabled} onChange={e => updateConfig({ voiceInputEnabled: e.target.checked })} />麦克风实时转写</label>
+        <label className="flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm"><input type="checkbox" checked={session.config.speechEnabled} onChange={e => updateConfig({ speechEnabled: e.target.checked })} />系统朗读题目</label>
       </div>
 
-      <div className="mt-6 rounded-2xl border border-[#e2e8f0] bg-[#fafafa] p-5 dark:border-[#334155] dark:bg-[#0f172a]/50">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2 text-sm font-medium text-[#334155] dark:text-[#e2e8f0]">
-            <FileText className="h-4 w-4 text-[#6366f1]" /> 面试上下文 (Resume & JD Context)
+      <div className="mt-6 border-t border-[var(--border-color)] pt-5">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <FileText className="h-4 w-4 text-[var(--action)]" /> 面试上下文 (Resume & JD Context)
           </div>
           <button
             type="button"
             onClick={handleSyncWorkspace}
-            className="flex items-center gap-1.5 rounded-lg bg-[#e0e7ff] px-3 py-1.5 text-xs font-medium text-[#4338ca] hover:bg-[#c7d2fe] dark:bg-[#312e81] dark:text-[#a5b4fc] transition-colors"
+            className="flex items-center justify-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--bg-hover)]"
           >
             <RefreshCw className="h-3.5 w-3.5" /> 一键同步工作区简历与JD
           </button>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div>
-            <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-[#64748b] dark:text-[#94a3b8]">
+            <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-[var(--text-muted)]">
               <span>候选人简历</span>
               <span>{session.config.resumeContext.length} 字</span>
             </div>
             <textarea
-              className="h-32 w-full rounded-xl border border-[#e2e8f0] bg-white p-3 text-xs leading-relaxed dark:border-[#334155] dark:bg-[#0f172a] dark:text-white"
+              className="h-32 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-xs leading-relaxed outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]"
               placeholder="粘贴简历内容或点击上方按钮同步..."
               value={session.config.resumeContext}
               onChange={e => updateConfig({ resumeContext: e.target.value })}
             />
           </div>
           <div>
-            <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-[#64748b] dark:text-[#94a3b8]">
+            <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-[var(--text-muted)]">
               <span>目标职位描述 (JD)</span>
               <span>{session.config.jobDescription.length} 字</span>
             </div>
             <textarea
-              className="h-32 w-full rounded-xl border border-[#e2e8f0] bg-white p-3 text-xs leading-relaxed dark:border-[#334155] dark:bg-[#0f172a] dark:text-white"
+              className="h-32 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-xs leading-relaxed outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)]"
               placeholder="粘贴目标 JD 或点击上方按钮同步..."
               value={session.config.jobDescription}
               onChange={e => updateConfig({ jobDescription: e.target.value })}
@@ -270,133 +271,138 @@ export default function MockInterview() {
         </div>
       </div>
 
-      {session.error && <div className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/60 dark:text-red-300">{session.error}</div>}
-      <button onClick={startInterview} className="mt-6 w-full rounded-2xl bg-[#6366f1] py-3 font-medium text-white hover:bg-[#4f46e5] transition-colors">{copy.start}</button>
-    </div></div>
+      {session.error && <div className="mt-4 rounded-md border border-[var(--danger)] bg-[var(--bg-subtle)] p-3 text-sm text-[var(--danger)]">{session.error}</div>}
+      <button onClick={startInterview} className="mt-6 w-full rounded-md bg-[var(--action)] py-2.5 font-medium text-[var(--action-text)] transition-opacity hover:opacity-90">{copy.start}</button>
+      </section>
+    </div>
   )
 
   if (session.phase === 'completed' && session.report) return (
-    <div className="w-full p-8"><div className="card mx-auto max-w-5xl p-8">
-      <div className="flex items-start justify-between"><div><h1 className="text-2xl font-semibold">面试报告</h1><p className="text-sm text-[#64748b] dark:text-[#94a3b8]">{session.config.role} · {session.config.company || '未指定'}</p></div><div className="text-4xl font-semibold text-[#6366f1]">{session.report.overallScore}</div></div>
-      <p className="mt-5 rounded-xl bg-[#f8fafc] p-4 dark:bg-[#0f172a]">{session.report.summary}</p>
-      <div className="mt-5 grid grid-cols-2 gap-4"><section className="rounded-xl border border-[#e2e8f0] p-4 dark:border-[#334155]"><h2 className="font-medium">优势</h2>{session.report.strengths.map(v => <div key={v} className="mt-2 text-sm">• {v}</div>)}</section><section className="rounded-xl border border-[#e2e8f0] p-4 dark:border-[#334155]"><h2 className="font-medium">优先改进</h2>{session.report.priorityImprovements.map(v => <div key={v} className="mt-2 text-sm">• {v}</div>)}</section></div>
-      <div className="mt-5 space-y-3">{session.turns.map((turn, index) => <details key={turn.question.id} className="rounded-xl border border-[#e2e8f0] p-4 dark:border-[#334155]"><summary className="cursor-pointer font-medium">第 {index + 1} 题 · {turn.feedback?.overallScore ?? 0} 分</summary><p className="mt-3">{turn.question.text}</p><p className="mt-2 rounded-lg bg-[#f8fafc] p-3 text-sm dark:bg-[#0f172a]">{turn.answer?.text}</p><p className="mt-2 text-sm text-[#475569] dark:text-[#94a3b8]">{turn.feedback?.summary}</p></details>)}</div>
-      <div className="mt-6 flex gap-3"><button onClick={exportReport} className="flex-1 rounded-xl border border-[#e2e8f0] py-2 dark:border-[#334155]">导出 Markdown</button><button onClick={reset} className="flex-1 rounded-xl bg-[#6366f1] py-2 text-white">{copy.new}</button></div>
-    </div></div>
+    <div className="w-full bg-[var(--bg-app)] px-5 py-6 text-[var(--text-main)] lg:px-8">
+      <section className="mx-auto max-w-5xl rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5 lg:p-7">
+      <div className="flex items-start justify-between gap-4"><div><h1 className="text-xl font-semibold tracking-tight">面试报告</h1><p className="mt-1 text-sm text-[var(--text-muted)]">{session.config.role} · {session.config.company || '未指定'}</p></div><div className="tabular-nums text-3xl font-semibold text-[var(--action)]">{session.report.overallScore}</div></div>
+      <p className="mt-5 border-l-2 border-[var(--action)] bg-[var(--bg-subtle)] p-4">{session.report.summary}</p>
+      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2"><section className="rounded-md border border-[var(--border-color)] p-4"><h2 className="font-medium">优势</h2>{session.report.strengths.map(v => <div key={v} className="mt-2 text-sm">• {v}</div>)}</section><section className="rounded-md border border-[var(--border-color)] p-4"><h2 className="font-medium">优先改进</h2>{session.report.priorityImprovements.map(v => <div key={v} className="mt-2 text-sm">• {v}</div>)}</section></div>
+      <div className="mt-5 space-y-3">{session.turns.map((turn, index) => <details key={turn.question.id} className="rounded-md border border-[var(--border-color)] p-4"><summary className="cursor-pointer font-medium">第 {index + 1} 题 · {turn.feedback?.overallScore ?? 0} 分</summary><p className="mt-3">{turn.question.text}</p><p className="mt-2 bg-[var(--bg-subtle)] p-3 text-sm">{turn.answer?.text}</p><p className="mt-2 text-sm text-[var(--text-muted)]">{turn.feedback?.summary}</p></details>)}</div>
+      <div className="mt-6 flex flex-col gap-3 lg:flex-row"><button onClick={exportReport} className="flex-1 rounded-md border border-[var(--border-color)] py-2 transition-colors hover:bg-[var(--bg-hover)]">导出 Markdown</button><button onClick={reset} className="flex-1 rounded-md bg-[var(--action)] py-2 text-[var(--action-text)] transition-opacity hover:opacity-90">{copy.new}</button></div>
+      </section>
+    </div>
   )
 
   const busy = ['starting', 'speaking', 'evaluating', 'generating-report', 'saving'].includes(session.phase)
   const lastFeedback = session.turns.slice().reverse().find(turn => turn.feedback)?.feedback
 
   return (
-    <div className="w-full p-8"><div className="card mx-auto max-w-6xl p-8">
-      <div className="flex items-center justify-between"><div><h1 className="text-2xl font-semibold">{copy.title}</h1><div className="text-sm text-[#64748b] dark:text-[#94a3b8]">第 {session.turns.length}/{session.config.questionCount} 题 · {Math.floor(session.elapsedSeconds / 60)}:{String(session.elapsedSeconds % 60).padStart(2, '0')}</div></div><button onClick={() => finishInterview(session.turns, false)} className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-600 dark:bg-red-950/60 dark:text-red-300">{copy.end}</button></div>
-      <div className="mt-6 grid grid-cols-[1.2fr_0.8fr] gap-5">
-        <section className="rounded-2xl border border-[#e2e8f0] p-5 dark:border-[#334155]">
+    <div className="w-full bg-[var(--bg-app)] px-5 py-6 text-[var(--text-main)] lg:px-8">
+      <section className="mx-auto max-w-6xl rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5 lg:p-7">
+      <div className="flex items-center justify-between gap-4"><div><h1 className="text-xl font-semibold tracking-tight">{copy.title}</h1><div className="mt-1 text-sm text-[var(--text-muted)]">第 {session.turns.length}/{session.config.questionCount} 题 · <span className="tabular-nums">{Math.floor(session.elapsedSeconds / 60)}:{String(session.elapsedSeconds % 60).padStart(2, '0')}</span></div></div><button onClick={() => finishInterview(session.turns, false)} className="rounded-md border border-[var(--danger)] px-4 py-2 text-sm text-[var(--danger)] transition-colors hover:bg-[var(--bg-hover)]">{copy.end}</button></div>
+      <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+        <section className="rounded-md border border-[var(--border-color)] p-5">
           <div className="flex items-center justify-between">
-            <div className="text-xs font-medium uppercase text-[#6366f1]">{session.currentQuestion?.stage}</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-[var(--action)]">{session.currentQuestion?.stage}</div>
             {session.phase === 'speaking' && (
-              <div className="flex items-center gap-1.5 text-xs text-[#6366f1] font-medium animate-pulse">
+              <div className="flex animate-pulse items-center gap-1.5 text-xs font-medium text-[var(--action)]">
                 <Volume2 className="h-3.5 w-3.5" /> 朗读题目中...
               </div>
             )}
           </div>
           <div className="mt-3 text-xl leading-relaxed">{session.currentQuestion?.text || '正在生成问题…'}</div>
-          {session.currentQuestion?.intent && <div className="mt-3 text-sm text-[#64748b] dark:text-[#94a3b8]">考察重点：{session.currentQuestion.intent}</div>}
-          <button onClick={() => session.currentQuestion && speakQuestion(session.currentQuestion)} disabled={!session.config.speechEnabled || busy} className="mt-4 rounded-xl border border-[#e2e8f0] px-3 py-2 text-sm dark:border-[#334155] disabled:opacity-40">🔊 重播题目</button>
+          {session.currentQuestion?.intent && <div className="mt-3 text-sm text-[var(--text-muted)]">考察重点：{session.currentQuestion.intent}</div>}
+          <button onClick={() => session.currentQuestion && speakQuestion(session.currentQuestion)} disabled={!session.config.speechEnabled || busy} className="mt-4 flex items-center gap-2 rounded-md border border-[var(--border-color)] px-3 py-2 text-sm transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40"><Volume2 className="h-4 w-4" /> 重播题目</button>
         </section>
 
-        <section className="rounded-2xl border border-[#e2e8f0] p-5 dark:border-[#334155]">
+        <section className="rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-5">
           <div className="font-medium">上一题多维度评估</div>
           {lastFeedback ? (
             <div className="mt-3 space-y-3">
               <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-[#6366f1]">{lastFeedback.overallScore}</span>
-                <span className="text-xs text-[#64748b] dark:text-[#94a3b8]">/ 100 综合得分</span>
+                <span className="tabular-nums text-3xl font-semibold text-[var(--action)]">{lastFeedback.overallScore}</span>
+                <span className="text-xs text-[var(--text-muted)]">/ 100 综合得分</span>
               </div>
               
               <div className="space-y-2 pt-1 text-xs">
                 <div>
                   <div className="flex justify-between mb-1">
-                    <span className="text-[#475569] dark:text-[#94a3b8]">逻辑与结构 (Structure)</span>
+                    <span className="text-[var(--text-muted)]">逻辑与结构 (Structure)</span>
                     <span className="font-medium">{lastFeedback.scores.structure || 0}%</span>
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                    <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${lastFeedback.scores.structure || 0}%` }} />
+                  <div className="h-1.5 w-full overflow-hidden bg-[var(--bg-hover)]">
+                    <div className="h-full bg-[var(--action)] transition-all duration-500" style={{ width: `${lastFeedback.scores.structure || 0}%` }} />
                   </div>
                 </div>
 
                 <div>
                   <div className="flex justify-between mb-1">
-                    <span className="text-[#475569] dark:text-[#94a3b8]">回答切题度 (Relevance)</span>
+                    <span className="text-[var(--text-muted)]">回答切题度 (Relevance)</span>
                     <span className="font-medium">{lastFeedback.scores.relevance || 0}%</span>
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                    <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${lastFeedback.scores.relevance || 0}%` }} />
+                  <div className="h-1.5 w-full overflow-hidden bg-[var(--bg-hover)]">
+                    <div className="h-full bg-[var(--success)] transition-all duration-500" style={{ width: `${lastFeedback.scores.relevance || 0}%` }} />
                   </div>
                 </div>
 
                 <div>
                   <div className="flex justify-between mb-1">
-                    <span className="text-[#475569] dark:text-[#94a3b8]">语言表达力 (Clarity)</span>
+                    <span className="text-[var(--text-muted)]">语言表达力 (Clarity)</span>
                     <span className="font-medium">{lastFeedback.scores.clarity || 0}%</span>
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                    <div className="h-full bg-sky-500 rounded-full transition-all duration-500" style={{ width: `${lastFeedback.scores.clarity || 0}%` }} />
+                  <div className="h-1.5 w-full overflow-hidden bg-[var(--bg-hover)]">
+                    <div className="h-full bg-[var(--action)] transition-all duration-500" style={{ width: `${lastFeedback.scores.clarity || 0}%` }} />
                   </div>
                 </div>
 
                 <div>
                   <div className="flex justify-between mb-1">
-                    <span className="text-[#475569] dark:text-[#94a3b8]">具体成果/影响力 (Impact)</span>
+                    <span className="text-[var(--text-muted)]">具体成果/影响力 (Impact)</span>
                     <span className="font-medium">{lastFeedback.scores.impact || 0}%</span>
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                    <div className="h-full bg-amber-500 rounded-full transition-all duration-500" style={{ width: `${lastFeedback.scores.impact || 0}%` }} />
+                  <div className="h-1.5 w-full overflow-hidden bg-[var(--bg-hover)]">
+                    <div className="h-full bg-[var(--warning)] transition-all duration-500" style={{ width: `${lastFeedback.scores.impact || 0}%` }} />
                   </div>
                 </div>
               </div>
 
-              <p className="pt-2 text-xs leading-relaxed text-[#475569] dark:text-[#94a3b8]">{lastFeedback.summary}</p>
+              <p className="pt-2 text-xs leading-relaxed text-[var(--text-muted)]">{lastFeedback.summary}</p>
             </div>
           ) : (
-            <p className="mt-3 text-sm text-[#64748b] dark:text-[#94a3b8]">提交回答后获得多维度实时评分与优化建议。</p>
+            <p className="mt-3 text-sm text-[var(--text-muted)]">提交回答后获得多维度实时评分与优化建议。</p>
           )}
         </section>
       </div>
 
-      <section className="mt-5 rounded-2xl border border-[#e2e8f0] p-5 dark:border-[#334155]">
+      <section className="mt-5 rounded-md border border-[var(--border-color)] p-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 font-medium">
             <span>{copy.answer}</span>
             {isListening && (
-              <span className="flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-normal text-red-600 dark:bg-red-950/60 dark:text-red-300">
+              <span className="flex items-center gap-1 rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-xs font-normal text-[var(--danger)]">
                 <Mic className="h-3 w-3 animate-pulse" /> 正在录音...
               </span>
             )}
           </div>
-          <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{session.draftAnswer.length}/4000</div>
+          <div className="text-xs text-[var(--text-muted)]">{session.draftAnswer.length}/4000</div>
         </div>
 
         {(isListening || session.phase === 'speaking') && (
-          <div className="my-3 flex items-center justify-center gap-1.5 rounded-xl bg-indigo-50/50 py-3 dark:bg-indigo-950/30">
-            <div className="h-4 w-1 animate-[bounce_1s_infinite_100ms] rounded-full bg-[#6366f1]" />
-            <div className="h-7 w-1 animate-[bounce_1s_infinite_200ms] rounded-full bg-[#6366f1]" />
-            <div className="h-10 w-1 animate-[bounce_1s_infinite_300ms] rounded-full bg-[#6366f1]" />
-            <div className="h-6 w-1 animate-[bounce_1s_infinite_400ms] rounded-full bg-[#6366f1]" />
-            <div className="h-8 w-1 animate-[bounce_1s_infinite_250ms] rounded-full bg-[#6366f1]" />
-            <div className="h-5 w-1 animate-[bounce_1s_infinite_150ms] rounded-full bg-[#6366f1]" />
-            <span className="ml-2 text-xs font-medium text-[#6366f1]">
+          <div className="my-3 flex items-center justify-center gap-1.5 border-y border-[var(--border-color)] bg-[var(--bg-subtle)] py-3">
+            <div className="h-4 w-1 animate-[bounce_1s_infinite_100ms] bg-[var(--action)]" />
+            <div className="h-7 w-1 animate-[bounce_1s_infinite_200ms] bg-[var(--action)]" />
+            <div className="h-10 w-1 animate-[bounce_1s_infinite_300ms] bg-[var(--action)]" />
+            <div className="h-6 w-1 animate-[bounce_1s_infinite_400ms] bg-[var(--action)]" />
+            <div className="h-8 w-1 animate-[bounce_1s_infinite_250ms] bg-[var(--action)]" />
+            <div className="h-5 w-1 animate-[bounce_1s_infinite_150ms] bg-[var(--action)]" />
+            <span className="ml-2 text-xs font-medium text-[var(--action)]">
               {session.phase === 'speaking' ? '系统发音中...' : '音频捕捉中...'}
             </span>
           </div>
         )}
 
-        <textarea maxLength={4000} value={session.draftAnswer} onChange={e => patch({ draftAnswer: e.target.value })} disabled={busy} className="mt-3 h-36 w-full rounded-xl border p-3 disabled:bg-[#f8fafc] dark:bg-[#0f172a] dark:border-[#334155]" placeholder={session.config.voiceInputEnabled ? '直接说话，转写结果可编辑…' : '输入你的回答…'} />
-        {session.interimTranscript && <div className="mt-2 text-sm text-[#64748b] dark:text-[#94a3b8]">正在识别：{session.interimTranscript}</div>}
-        <button onClick={submitAnswer} disabled={busy || !session.draftAnswer.trim()} className="mt-4 w-full rounded-2xl bg-[#6366f1] py-3 font-medium text-white hover:bg-[#4f46e5] disabled:opacity-40 transition-colors">{session.phase === 'evaluating' ? '正在分析…' : copy.submit}</button>
+        <textarea maxLength={4000} value={session.draftAnswer} onChange={e => patch({ draftAnswer: e.target.value })} disabled={busy} className="mt-3 h-36 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-3 outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)] disabled:bg-[var(--bg-subtle)]" placeholder={session.config.voiceInputEnabled ? '直接说话，转写结果可编辑…' : '输入你的回答…'} />
+        {session.interimTranscript && <div className="mt-2 text-sm text-[var(--text-muted)]">正在识别：{session.interimTranscript}</div>}
+        <button onClick={submitAnswer} disabled={busy || !session.draftAnswer.trim()} className="mt-4 w-full rounded-md bg-[var(--action)] py-2.5 font-medium text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-40">{session.phase === 'evaluating' ? '正在分析…' : copy.submit}</button>
       </section>
-      {session.error && <div className="mt-4 rounded-xl bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/60 dark:text-red-300">{session.error}<button onClick={() => patch({ phase: session.currentQuestion ? 'answering' : 'setup', error: null })} className="ml-3 underline">{copy.retry}</button></div>}
-    </div></div>
+      {session.error && <div className="mt-4 rounded-md border border-[var(--danger)] bg-[var(--bg-subtle)] p-4 text-sm text-[var(--danger)]">{session.error}<button onClick={() => patch({ phase: session.currentQuestion ? 'answering' : 'setup', error: null })} className="ml-3 underline">{copy.retry}</button></div>}
+      </section>
+    </div>
   )
 }

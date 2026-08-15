@@ -280,14 +280,15 @@ export default function ResumeOptimizer() {
   const factsReviewed = Boolean(resumeOptimized.trim()) && reviewedOptimizedText === resumeOptimized
 
   return (
-    <div className="w-full p-8">
-      <div className="mb-6 flex items-center justify-between gap-4">
+    <div className="w-full bg-[var(--bg-app)] px-5 py-6 text-[var(--text-main)] lg:px-8">
+      <div className="mx-auto max-w-6xl">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-2">
-          <div className="text-lg font-medium text-[#6366f1]">{t("resume.title")}</div>
-          <div className="rounded bg-[#6366f1] px-2 py-px text-xs text-white">{t("resume.badge")}</div>
+          <h1 className="text-xl font-semibold tracking-tight">{t("resume.title")}</h1>
+          <span className="border-l border-[var(--border-color)] pl-2 text-xs text-[var(--text-muted)]">{t("resume.badge")}</span>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={handleClear} disabled={busy} className="flex items-center gap-1 rounded-xl border border-[#e2e8f0] px-3 py-1.5 text-sm dark:border-[#334155] disabled:opacity-50">
+          <button type="button" onClick={handleClear} disabled={busy} className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-sm transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50">
             <Trash2 className="h-4 w-4" /> {t("resume.clear")}
           </button>
           <div className="relative group">
@@ -295,13 +296,13 @@ export default function ResumeOptimizer() {
               type="button"
               onClick={handleExport}
               disabled={busy || !factsReviewed}
-              className="flex items-center gap-1 rounded-xl border border-[#e2e8f0] px-4 py-1.5 text-sm dark:border-[#334155] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-1.5 text-sm transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isExporting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} {t("resume.export")}
             </button>
             {!factsReviewed && resumeOptimized.trim() && (
-              <div className="absolute right-0 top-full mt-2 hidden w-64 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 shadow-lg group-hover:block dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200 z-10">
-                <div className="font-semibold mb-1 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5 text-amber-600" /> {t("resume.exportLocked")}</div>
+              <div className="absolute right-0 top-full z-10 mt-2 hidden w-64 rounded-md border border-[var(--warning)] bg-[var(--bg-surface)] p-3 text-xs text-[var(--warning)] group-hover:block">
+                <div className="mb-1 flex items-center gap-1 font-semibold"><AlertCircle className="h-3.5 w-3.5" /> {t("resume.exportLocked")}</div>
                 {t("resume.factReviewRequired")}
               </div>
             )}
@@ -312,12 +313,12 @@ export default function ResumeOptimizer() {
       {(status || resumePersistenceError) && (
         <div
           role={status?.kind === "error" || resumePersistenceError ? "alert" : "status"}
-          className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
+          className={`mb-4 rounded-md border bg-[var(--bg-subtle)] px-4 py-3 text-sm ${
             status?.kind === "error" || resumePersistenceError
-              ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/60 dark:text-red-300"
+              ? "border-[var(--danger)] text-[var(--danger)]"
               : status?.kind === "warning"
-                ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-300"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-300"
+                ? "border-[var(--warning)] text-[var(--warning)]"
+                : "border-[var(--success)] text-[var(--success)]"
           }`}
         >
           {resumePersistenceError ? t("resume.persistenceError") : status?.text}
@@ -325,9 +326,9 @@ export default function ResumeOptimizer() {
       )}
 
       {resumeOptimized.trim() && !factsReviewed && (
-        <div className="mb-4 flex items-center justify-between rounded-xl border border-amber-300 bg-amber-50/90 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200 shadow-sm">
+        <div className="mb-4 flex flex-col gap-3 rounded-md border border-[var(--warning)] bg-[var(--bg-subtle)] p-4 text-sm text-[var(--warning)] lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
-            <AlertCircle className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <AlertCircle className="h-5 w-5 shrink-0" />
             <div>
               <span className="font-semibold">{t("resume.factReviewPending")}</span>
               <span>{t("resume.factReviewLockNotice")}</span>
@@ -336,39 +337,39 @@ export default function ResumeOptimizer() {
           <button
             type="button"
             onClick={() => setReviewedOptimizedText(resumeOptimized)}
-            className="shrink-0 rounded-lg bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
+            className="shrink-0 self-start rounded-md border border-[var(--warning)] px-3 py-1 text-xs font-medium transition-colors hover:bg-[var(--bg-hover)] lg:self-auto"
           >
             {t("resume.oneClickConfirm")}
           </button>
         </div>
       )}
 
-      <div className="mb-4 grid grid-cols-2 gap-4">
-        <section className="card p-6">
+      <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
           <div className="mb-4 flex items-center gap-2 text-sm font-medium"><Upload className="h-4 w-4" /> {t("resume.upload.title")}</div>
-          <div {...getRootProps()} className={`flex h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-[#cbd5e1] text-center dark:border-[#475569] ${isDragActive ? "bg-[#f8fafc] dark:bg-[#0f172a]" : ""} ${isParsing ? "cursor-wait opacity-60" : ""}`}>
+          <div {...getRootProps()} className={`flex h-36 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-[var(--border-color)] bg-[var(--bg-subtle)] text-center transition-colors hover:bg-[var(--bg-hover)] ${isDragActive ? "border-[var(--action)] bg-[var(--bg-hover)]" : ""} ${isParsing ? "cursor-wait opacity-60" : ""}`}>
             <input {...getInputProps()} />
-            {isParsing ? <LoaderCircle className="mb-2 h-8 w-8 animate-spin text-[#6366f1]" /> : <FileText className="mb-2 h-8 w-8 text-[#64748b] dark:text-[#94a3b8]" />}
+            {isParsing ? <LoaderCircle className="mb-2 h-8 w-8 animate-spin text-[var(--action)]" /> : <FileText className="mb-2 h-8 w-8 text-[var(--text-muted)]" />}
             <div className="text-sm">{isParsing ? t("resume.upload.parsing") : isDragActive ? t("resume.upload.drop") : t("resume.upload.choose")}</div>
-            <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{resumeSourceFileName || t("resume.upload.hint")}</div>
+            <div className="text-xs text-[var(--text-muted)]">{resumeSourceFileName || t("resume.upload.hint")}</div>
           </div>
-          <button type="button" onClick={useSample} disabled={busy} className="mt-4 w-full rounded-2xl bg-[#6366f1] py-2 text-sm text-white disabled:opacity-50">{t("common.useSample")}</button>
+          <button type="button" onClick={useSample} disabled={busy} className="mt-4 w-full rounded-md border border-[var(--border-color)] py-2 text-sm transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50">{t("common.useSample")}</button>
         </section>
 
-        <section className="card p-6">
+        <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
           <div className="mb-4 flex items-center justify-between text-sm font-medium">
             <span className="flex items-center gap-2"><FileText className="h-4 w-4" /> {t("resume.jd.title")}</span>
-            <span className="text-xs font-normal text-[#64748b] dark:text-[#94a3b8]">{jobDescription.length}/5000</span>
+            <span className="text-xs font-normal text-[var(--text-muted)]">{jobDescription.length}/5000</span>
           </div>
           <textarea
             value={jobDescription}
             maxLength={5000}
             disabled={busy}
             onChange={(event) => updateResumeWorkspace({ jobDescription: event.target.value })}
-            className="h-36 w-full rounded-xl border border-[#e2e8f0] p-3 text-sm disabled:opacity-60"
+            className="h-36 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)] disabled:opacity-60"
             placeholder={t("resume.jd.placeholder")}
           />
-          <button type="button" onClick={() => runAnalysis(resumeOriginal)} disabled={busy || !resumeOriginal.trim()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#6366f1] py-2 text-sm text-white disabled:opacity-50">
+          <button type="button" onClick={() => runAnalysis(resumeOriginal)} disabled={busy || !resumeOriginal.trim()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-[var(--action)] py-2 text-sm text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-50">
             {isAnalyzing && <LoaderCircle className="h-4 w-4 animate-spin" />}
             {isAnalyzing ? t("common.analyzing") : t("common.analyze")}
           </button>
@@ -376,14 +377,14 @@ export default function ResumeOptimizer() {
       </div>
 
       <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-1 rounded-xl bg-[#f1f5f9] p-1 dark:bg-[#1e293b]">
+        <div className="flex items-center gap-1 border-b border-[var(--border-color)]">
           <button
             type="button"
             onClick={() => setViewMode("split")}
-            className={`rounded-lg px-3 py-1 text-xs font-medium transition-all ${
+            className={`border-b-2 px-3 py-1.5 text-xs font-medium transition-colors ${
               viewMode === "split"
-                ? "bg-white text-[#6366f1] shadow-sm dark:bg-[#0f172a] dark:text-[#818cf8]"
-                : "text-[#64748b] hover:text-[#0f172a] dark:text-[#94a3b8] dark:hover:text-white"
+                ? "border-[var(--action)] text-[var(--text-main)]"
+                : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-main)]"
             }`}
           >
             {t("resume.viewSplit")}
@@ -391,10 +392,10 @@ export default function ResumeOptimizer() {
           <button
             type="button"
             onClick={() => setViewMode("diff")}
-            className={`rounded-lg px-3 py-1 text-xs font-medium transition-all ${
+            className={`border-b-2 px-3 py-1.5 text-xs font-medium transition-colors ${
               viewMode === "diff"
-                ? "bg-white text-[#6366f1] shadow-sm dark:bg-[#0f172a] dark:text-[#818cf8]"
-                : "text-[#64748b] hover:text-[#0f172a] dark:text-[#94a3b8] dark:hover:text-white"
+                ? "border-[var(--action)] text-[var(--text-main)]"
+                : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-main)]"
             }`}
           >
             {t("resume.viewDiff")}
@@ -403,28 +404,28 @@ export default function ResumeOptimizer() {
       </div>
 
       {viewMode === "diff" ? (
-        <section className="card p-5">
+        <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
           <div className="mb-3 flex items-center justify-between text-sm">
-            <div className="font-medium text-[#334155] dark:text-[#e2e8f0]">{t("resume.diffTitle")}</div>
+            <div className="font-medium">{t("resume.diffTitle")}</div>
             <div className="flex items-center gap-4 text-xs">
-              <span className="flex items-center gap-1 text-red-600 dark:text-red-400">
-                <span className="h-2 w-2 rounded-full bg-red-500" /> {t("resume.diffRemoved")}
+              <span className="flex items-center gap-1 text-[var(--danger)]">
+                <span className="h-2 w-2 bg-[var(--danger)]" /> {t("resume.diffRemoved")}
               </span>
-              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" /> {t("resume.diffAdded")}
+              <span className="flex items-center gap-1 text-[var(--success)]">
+                <span className="h-2 w-2 bg-[var(--success)]" /> {t("resume.diffAdded")}
               </span>
             </div>
           </div>
-          <div className="max-h-[400px] min-h-[260px] overflow-auto rounded-xl border border-[#e2e8f0] bg-[#fafafa] p-4 text-sm font-mono leading-relaxed dark:border-[#334155] dark:bg-[#0f172a]">
+          <div className="max-h-[400px] min-h-[260px] overflow-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm font-mono leading-relaxed">
             {computeLineDiff(resumeOriginal, resumeOptimized).map((line, idx) => (
               <div
                 key={idx}
-                className={`px-2 py-0.5 whitespace-pre-wrap rounded ${
+                className={`px-2 py-0.5 whitespace-pre-wrap ${
                   line.type === "removed"
-                    ? "bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-300 line-through"
+                    ? "bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] text-[var(--danger)] line-through"
                     : line.type === "added"
-                      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 font-medium"
-                      : "text-[#475569] dark:text-[#94a3b8]"
+                      ? "bg-[color-mix(in_srgb,var(--success)_10%,transparent)] font-medium text-[var(--success)]"
+                      : "text-[var(--text-muted)]"
                 }`}
               >
                 {line.type === "removed" ? "- " : line.type === "added" ? "+ " : "  "}
@@ -434,38 +435,38 @@ export default function ResumeOptimizer() {
           </div>
         </section>
       ) : (
-        <div className="grid grid-cols-2 gap-4">
-          <section className="card p-5">
-            <div className="mb-2 flex justify-between text-sm">
-              <div>{t("resume.original")} <span className="rounded bg-[#e2e8f0] px-1.5 text-xs dark:bg-[#334155]">v1</span></div>
-              <div className="text-[#64748b] dark:text-[#94a3b8]">{t("resume.wordCount")}: {countResumeWords(resumeOriginal)}</div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+            <div className="mb-2 flex flex-wrap justify-between gap-2 text-sm">
+              <div>{t("resume.original")} <span className="border-l border-[var(--border-color)] pl-1.5 text-xs text-[var(--text-muted)]">v1</span></div>
+              <div className="text-[var(--text-muted)]">{t("resume.wordCount")}: {countResumeWords(resumeOriginal)}</div>
             </div>
-            <div className="max-h-[360px] min-h-[260px] overflow-auto whitespace-pre-wrap rounded-xl border border-[#e2e8f0] bg-[#fafafa] p-4 text-sm leading-relaxed text-[#334155] dark:border-[#334155] dark:bg-[#0f172a] dark:text-[#e2e8f0]">
+            <div className="max-h-[360px] min-h-[260px] overflow-auto whitespace-pre-wrap rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm leading-relaxed">
               {resumeOriginal || t("resume.originalPlaceholder")}
             </div>
           </section>
 
-          <section className="card p-5">
-            <div className="mb-2 flex justify-between text-sm">
-              <div>{t("resume.optimized")} <span className="rounded bg-[#e0e7ff] px-1.5 text-xs text-[#4338ca] dark:bg-[#312e81] dark:text-[#a5b4fc]">v2</span></div>
+          <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+            <div className="mb-2 flex flex-wrap justify-between gap-2 text-sm">
+              <div>{t("resume.optimized")} <span className="border-l border-[var(--border-color)] pl-1.5 text-xs text-[var(--action)]">v2</span></div>
               <div className="flex items-center gap-3">
-                <span className="text-[#64748b] dark:text-[#94a3b8]">{t("resume.wordCount")}: {countResumeWords(resumeOptimized)}</span>
-                <button type="button" onClick={() => runAnalysis(resumeOptimized || resumeOriginal)} disabled={busy || !(resumeOptimized || resumeOriginal).trim()} className="text-xs text-[#6366f1] disabled:opacity-40">{t("common.reoptimize")}</button>
+                <span className="text-[var(--text-muted)]">{t("resume.wordCount")}: {countResumeWords(resumeOptimized)}</span>
+                <button type="button" onClick={() => runAnalysis(resumeOptimized || resumeOriginal)} disabled={busy || !(resumeOptimized || resumeOriginal).trim()} className="text-xs text-[var(--action)] hover:underline disabled:opacity-40">{t("common.reoptimize")}</button>
               </div>
             </div>
             <textarea
               value={resumeOptimized}
               disabled={busy}
               onChange={(event) => updateResumeWorkspace({ optimized: event.target.value })}
-              className="min-h-[260px] w-full resize-y rounded-xl border bg-white p-4 text-sm leading-relaxed disabled:opacity-60 dark:bg-[#0f172a] dark:border-[#334155]"
+              className="min-h-[260px] w-full resize-y rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 text-sm leading-relaxed outline-none transition-colors focus:border-[var(--action)] focus:ring-1 focus:ring-[var(--action)] disabled:opacity-60"
               placeholder={t("resume.optimizedPlaceholder")}
               aria-label={t("resume.optimized")}
             />
             <div
-              className={`mt-3 rounded-xl border p-3 transition-colors ${
+              className={`mt-3 rounded-md border bg-[var(--bg-subtle)] p-3 transition-colors ${
                 !factsReviewed && resumeOptimized.trim()
-                  ? "border-amber-300 bg-amber-50/80 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
-                  : "border-[#e2e8f0] bg-[#f8fafc] dark:border-[#334155] dark:bg-[#0f172a]"
+                  ? "border-[var(--warning)] text-[var(--warning)]"
+                  : "border-[var(--border-color)]"
               }`}
             >
               <label className="flex items-start gap-2.5 text-xs leading-relaxed cursor-pointer">
@@ -474,7 +475,7 @@ export default function ResumeOptimizer() {
                   checked={factsReviewed}
                   disabled={busy || !resumeOptimized.trim()}
                   onChange={(event) => setReviewedOptimizedText(event.target.checked ? resumeOptimized : "")}
-                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#6366f1] focus:ring-[#6366f1]"
+                  className="mt-0.5 h-4 w-4 rounded border-[var(--border-color)] text-[var(--action)] focus:ring-[var(--action)]"
                 />
                 <div>
                   <span className="font-medium">
@@ -488,51 +489,52 @@ export default function ResumeOptimizer() {
         </div>
       )}
 
-      <section className="card mt-4 p-5">
+      <section className="mt-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
         <div>
           <div>
             <div className="font-medium">{t("resume.suggestions")}</div>
             {jobDescription.trim() && (
-              <div className="mt-1 text-xs text-[#64748b] dark:text-[#94a3b8]">
+              <div className="mt-1 text-xs text-[var(--text-muted)]">
                 {t("resume.keywordMatch")}: {resumeMatchedKeywords.length} · {t("resume.keywordMissing")}: {resumeMissingKeywords.length}
               </div>
             )}
           </div>
         </div>
         {resumeSuggestions.length === 0 ? (
-          <p className="mt-4 text-sm text-[#64748b] dark:text-[#94a3b8]">{t("resume.noSuggestions")}</p>
+          <p className="mt-4 text-sm text-[var(--text-muted)]">{t("resume.noSuggestions")}</p>
         ) : (
-          <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="mt-4 divide-y divide-[var(--border-color)] border-y border-[var(--border-color)]">
             {resumeSuggestions.map((suggestion) => (
-              <article key={suggestion.id} className="rounded-xl border border-[#e2e8f0] bg-white p-3 dark:border-[#334155] dark:bg-[#0f172a]">
-                <div className="flex items-start justify-between gap-3">
+              <article key={suggestion.id} className="py-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <div className="text-xs text-[#6366f1]">{categoryLabel(suggestion.category)}</div>
+                    <div className="text-xs text-[var(--action)]">{categoryLabel(suggestion.category)}</div>
                     <div className="mt-1 text-sm font-medium">{suggestion.title ?? t(suggestion.titleKey ?? "")}</div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={`text-xs ${suggestion.applied ? "text-[#047857] dark:text-emerald-400" : "text-[#b45309] dark:text-amber-400"}`}>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className={`text-xs ${suggestion.applied ? "text-[var(--success)]" : "text-[var(--warning)]"}`}>
                       {t(suggestion.applied ? "resume.includedInDraft" : "resume.manualRequired")}
                     </span>
                     <button
                       type="button"
                       onClick={() => handleApplySuggestion(suggestion)}
                       disabled={busy || suggestion.applied}
-                      className="flex items-center gap-1 rounded-lg bg-[#6366f1] px-2.5 py-1 text-xs text-white hover:bg-[#4f46e5] disabled:opacity-40"
+                      className="flex items-center gap-1 rounded-md bg-[var(--action)] px-2.5 py-1 text-xs text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-40"
                     >
                       <Sparkles className="h-3 w-3" />
                       {suggestion.applied ? t("resume.applied") : t("resume.applyOneClick")}
                     </button>
                   </div>
                 </div>
-                <p className="mt-2 text-xs leading-relaxed text-[#64748b] dark:text-[#94a3b8]">{suggestion.description ?? t(suggestion.descriptionKey ?? "", suggestion.descriptionParams)}</p>
+                <p className="mt-2 text-xs leading-relaxed text-[var(--text-muted)]">{suggestion.description ?? t(suggestion.descriptionKey ?? "", suggestion.descriptionParams)}</p>
               </article>
             ))}
           </div>
         )}
       </section>
 
-      <div className="mt-5 text-center text-xs text-[#64748b] dark:text-[#94a3b8]">{t("resume.confidential")}</div>
+      <div className="mt-5 text-center text-xs text-[var(--text-muted)]">{t("resume.confidential")}</div>
+      </div>
     </div>
   )
 }

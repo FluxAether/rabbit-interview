@@ -111,6 +111,8 @@ export default function History() {
 
   const waveformRef = useRef<HTMLDivElement>(null)
   const wavesurferRef = useRef<any>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [audioReady, setAudioReady] = useState(false)
 
@@ -139,11 +141,12 @@ export default function History() {
     let wavesurfer: ReturnType<typeof WaveSurfer.create> | null = null
     let cancelled = false
     try {
+      const styles = getComputedStyle(document.documentElement)
       wavesurfer = WaveSurfer.create({
         container: waveformRef.current,
         backend: 'WebAudio',
-        waveColor: '#6366f1',
-        progressColor: '#4f46e5',
+        waveColor: styles.getPropertyValue('--text-muted').trim() || '#8a8a8a',
+        progressColor: styles.getPropertyValue('--text-main').trim() || '#202020',
         height: 60,
         barWidth: 2,
         barGap: 1,
@@ -194,6 +197,35 @@ export default function History() {
     setAudioReady(false)
   }
 
+  useEffect(() => {
+    if (!selected) return
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const frame = window.requestAnimationFrame(() => closeButtonRef.current?.focus({ preventScroll: true }))
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeReplay()
+      if (event.key !== 'Tab' || !dialogRef.current) return
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      ))
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      document.removeEventListener('keydown', handleKeyDown)
+      previousFocus?.focus({ preventScroll: true })
+    }
+  }, [selected])
+
   const exportCurrentPage = () => {
     if (records.length === 0 || isExporting) return
     setIsExporting(true)
@@ -224,121 +256,104 @@ export default function History() {
   }
 
   return (
-    <div className="w-full p-8">
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <h1 className="text-2xl font-semibold text-[#0f172a] dark:text-[#f8fafc]">{t('history.title')}</h1>
-          <div className="text-sm text-[#475569] dark:text-[#94a3b8]">{t('history.subtitle')}</div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div
-            className={`transition-opacity duration-300 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800 ${
-              showExportToast ? 'opacity-100' : 'opacity-0 pointer-events-none'
-            }`}
-          >
-            <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-bold">
-              ✓
-            </div>
-            <span>{t('history.exportSuccess')}</span>
+    <div className="h-full w-full overflow-auto bg-[var(--bg-app)] p-6 text-[var(--text-main)] sm:p-8">
+      <div className="mx-auto w-full max-w-5xl">
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">{t('history.title')}</h1>
+            <div className="mt-1 text-sm text-[var(--text-muted)]">{t('history.subtitle')}</div>
           </div>
-          <button
-            type="button"
-            className="px-4 py-1.5 text-sm border border-[#e2e8f0] dark:border-[#334155] rounded-xl text-[#0f172a] dark:text-[#f8fafc] hover:bg-white dark:hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:opacity-40"
-            onClick={exportCurrentPage}
-            disabled={records.length === 0 || isExporting}
-          >
-            {isExporting ? `${t('common.export')}…` : t('common.export')}
-          </button>
-        </div>
-      </div>
-
-      <input
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        className="w-full mb-4 bg-white dark:bg-[#1e293b] border border-[#e2e8f0] dark:border-[#334155] text-[#0f172a] dark:text-[#f8fafc] rounded-2xl px-4 py-2 text-sm placeholder:text-[#94a3b8] outline-none focus:ring-2 focus:ring-[#6366f1]"
-        placeholder={t('history.search')}
-      />
-
-      <div className="mb-4 flex gap-2 rounded-2xl border border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1e293b] p-1">
-        {tabs.map((tab) => {
-          const active = tab.id === activeTab
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => {
-                setActiveTab(tab.id)
-                setPage(1)
-              }}
-              className={`flex-1 rounded-xl px-3 py-2 text-sm transition-all ${
-                active
-                  ? 'bg-[#e0e7ff] dark:bg-[#312e81] font-semibold text-[#4338ca] dark:text-[#a5b4fc]'
-                  : 'text-[#64748b] dark:text-[#94a3b8] hover:bg-[#f8fafc] dark:hover:bg-[#0f172a]'
+          <div className="flex items-center gap-3">
+            <div
+              className={`flex items-center gap-1.5 text-xs text-[var(--success)] transition-opacity duration-300 ${
+                showExportToast ? 'opacity-100' : 'opacity-0 pointer-events-none'
               }`}
             >
-              {tab.label}
-              <span className={`ml-2 text-xs ${active ? 'text-[#6366f1]' : 'text-[#94a3b8]'}`}>
-                {tab.count}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-
-      <div className="space-y-2">
-        {records.map((item) => (
-          <div key={item.id ?? `${item.date}-${item.role}`} className="card flex items-center justify-between px-5 py-3.5 text-sm">
-            <div className="flex items-center gap-4">
-              <div>
-                <div className="text-xs text-[#94a3b8]">{item.date}</div>
-                <div className="font-medium text-[#0f172a] dark:text-[#f8fafc]">{item.role}</div>
-                <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{item.company}</div>
-              </div>
+              <span aria-hidden="true">✓</span>
+              <span>{t('history.exportSuccess')}</span>
             </div>
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-1.5 text-sm hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={exportCurrentPage}
+              disabled={records.length === 0 || isExporting}
+            >
+              {isExporting ? `${t('common.export')}…` : t('common.export')}
+            </button>
+          </div>
+        </div>
 
-            <div className="flex items-center gap-4">
-              <div className="score-circle">
-                <svg width="52" height="52">
-                  <circle cx="26" cy="26" r="22" fill="none" className="stroke-[#e2e8f0] dark:stroke-[#334155]" strokeWidth="5" />
-                  <circle
-                    cx="26"
-                    cy="26"
-                    r="22"
-                    fill="none"
-                    stroke="#6366f1"
-                    strokeWidth="5"
-                    strokeDasharray={138}
-                    strokeDashoffset={item.score == null ? 138 : 138 - (item.score / 100 * 138)}
-                  />
-                </svg>
-                <div className="absolute inset-0 flex items-center justify-center text-xl font-semibold leading-none text-[#0f172a] dark:text-[#f8fafc]">
-                  {item.score ?? '—'}
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="mb-4 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-sm outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--text-muted)]"
+          placeholder={t('history.search')}
+        />
+
+        <div className="mb-4 flex gap-5 border-b border-[var(--border-color)]">
+          {tabs.map((tab) => {
+            const active = tab.id === activeTab
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(tab.id)
+                  setPage(1)
+                }}
+                className={`border-b-2 px-1 py-2 text-sm transition-colors ${
+                  active
+                    ? 'border-[var(--text-main)] font-medium text-[var(--text-main)]'
+                    : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-main)]'
+                }`}
+              >
+                {tab.label}
+                <span className="ml-2 text-xs tabular-nums text-[var(--text-muted)]">
+                  {tab.count}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="divide-y divide-[var(--border-color)] overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]">
+          {records.map((item) => (
+            <div key={item.id ?? `${item.date}-${item.role}`} className="flex items-center justify-between gap-5 px-4 py-3 text-sm hover:bg-[var(--bg-hover)]">
+              <div className="grid min-w-0 flex-1 grid-cols-[8rem_minmax(0,1fr)] items-center gap-4">
+                <div className="text-xs tabular-nums text-[var(--text-muted)]">{item.date}</div>
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{item.role}</div>
+                  <div className="truncate text-xs text-[var(--text-muted)]">{item.company}</div>
                 </div>
               </div>
 
-              <button
-                onClick={() => setSelected(item)}
-                className="px-4 py-1.5 border border-[#e2e8f0] dark:border-[#334155] text-xs font-medium text-[#0f172a] dark:text-[#f8fafc] hover:bg-[#f8fafc] dark:hover:bg-[#0f172a] rounded-xl"
-              >
-                {t('common.viewDetails')}
-              </button>
-            </div>
-          </div>
-        ))}
-        {records.length === 0 && (
-          <div className="text-sm text-[#64748b] dark:text-[#94a3b8] p-4">
-            {t(activeTab === 'mock' ? 'history.empty.mock' : 'history.empty.copilot')}
-          </div>
-        )}
-      </div>
+              <div className="flex shrink-0 items-center gap-4">
+                <div className="w-9 text-right text-base font-semibold tabular-nums">{item.score ?? '—'}</div>
 
-      {total > PAGE_SIZE && (
-        <div className="mt-4 flex items-center justify-center gap-3 text-sm text-[#64748b] dark:text-[#94a3b8]">
+                <button
+                  type="button"
+                  onClick={() => setSelected(item)}
+                  className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--bg-subtle)]"
+                >
+                  {t('common.viewDetails')}
+                </button>
+              </div>
+            </div>
+          ))}
+          {records.length === 0 && (
+            <div className="p-8 text-center text-sm text-[var(--text-muted)]">
+              {t(activeTab === 'mock' ? 'history.empty.mock' : 'history.empty.copilot')}
+            </div>
+          )}
+        </div>
+
+        {total > PAGE_SIZE && (
+        <div className="mt-4 flex items-center justify-center gap-3 text-sm text-[var(--text-muted)]">
           <button
             type="button"
             onClick={() => setPage((current) => Math.max(1, current - 1))}
             disabled={page <= 1}
-            className="rounded-xl border border-[#e2e8f0] px-3 py-1.5 text-[#0f172a] disabled:cursor-not-allowed disabled:opacity-40 dark:border-[#334155] dark:text-[#f8fafc]"
+            className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-[var(--text-main)] hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-40"
           >
             ←
           </button>
@@ -347,27 +362,34 @@ export default function History() {
             type="button"
             onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
             disabled={page >= totalPages}
-            className="rounded-xl border border-[#e2e8f0] px-3 py-1.5 text-[#0f172a] disabled:cursor-not-allowed disabled:opacity-40 dark:border-[#334155] dark:text-[#f8fafc]"
+            className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-[var(--text-main)] hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-40"
           >
             →
           </button>
         </div>
-      )}
+        )}
 
       {/* Replay Modal */}
-      {selected && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4" onClick={closeReplay}>
-          <div className="card w-full max-w-[620px] p-6 shadow-2xl bg-white dark:bg-[#1e293b]" onClick={e => e.stopPropagation()}>
-            <div className="font-semibold text-lg text-[#0f172a] dark:text-[#f8fafc] mb-1">
+        {selected && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onClick={closeReplay}>
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="history-replay-title"
+            className="w-full max-w-[620px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-6 text-[var(--text-main)] shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div id="history-replay-title" className="mb-1 text-lg font-semibold">
               {t('history.replayModal.title')} — {selected.role} @ {selected.company}
             </div>
-            <div className="text-sm text-[#64748b] dark:text-[#94a3b8] mb-3">
-              {t('misc.score')}: <span className="font-semibold text-[#6366f1]">{selected.score ?? t('history.notScored')}</span> • {t('history.replayModal.duration')}: {Math.floor(selected.duration/60)}m
+            <div className="mb-3 text-sm text-[var(--text-muted)]">
+              {t('misc.score')}: <span className="font-semibold text-[var(--text-main)]">{selected.score ?? t('history.notScored')}</span> • {t('history.replayModal.duration')}: {Math.floor(selected.duration/60)}m
             </div>
 
-            <div className="mb-3 max-h-[320px] min-h-48 overflow-auto rounded-xl bg-[#f8fafc] dark:bg-[#0f172a] p-3 text-sm">
+            <div className="mb-3 max-h-[320px] min-h-48 overflow-auto rounded-md bg-[var(--bg-subtle)] p-3 text-sm">
               {selectedMessages.length === 0 ? (
-                <div className="flex min-h-40 items-center justify-center px-6 text-center text-xs text-[#64748b] dark:text-[#94a3b8]">
+                <div className="flex min-h-40 items-center justify-center px-6 text-center text-xs text-[var(--text-muted)]">
                   {t('history.transcriptPlaceholder')}
                 </div>
               ) : (
@@ -378,22 +400,22 @@ export default function History() {
                     return (
                       <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                         <article className="max-w-[88%]">
-                          <div className={`mb-1 px-1 text-[13px] font-medium text-[#64748b] dark:text-[#94a3b8] ${mine ? 'text-right' : ''}`}>
+                          <div className={`mb-1 px-1 text-[13px] font-medium text-[var(--text-muted)] ${mine ? 'text-right' : ''}`}>
                             {roleLabels[message.role]}
                           </div>
-                          <div className={`flex items-start gap-2 rounded-xl px-3 py-2 text-[15px] leading-relaxed ${
+                          <div className={`flex items-start gap-2 rounded-md px-3 py-2 text-[15px] leading-relaxed ${
                             mine
-                              ? 'rounded-br-sm bg-[#4f46e5] text-white'
+                              ? 'rounded-br-sm bg-[var(--action)] text-[var(--action-text)]'
                               : assistant
-                                ? 'rounded-bl-sm border border-[#c7d2fe] dark:border-[#3730a3] bg-[#eef2ff] dark:bg-[#312e81] text-[#312e81] dark:text-[#e0e7ff]'
-                                : 'rounded-bl-sm border border-[#e2e8f0] dark:border-[#334155] bg-white dark:bg-[#1e293b] text-[#1e293b] dark:text-[#f8fafc]'
+                                ? 'rounded-bl-sm border border-[var(--border-color)] bg-[var(--bg-hover)] text-[var(--text-main)]'
+                                : 'rounded-bl-sm border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-main)]'
                           }`}>
                             <div className="min-w-0 flex-1 whitespace-pre-wrap">{message.text}</div>
                             {assistant && (
                               <button
                                 type="button"
                                 onClick={() => void navigator.clipboard.writeText(message.text)}
-                                className="shrink-0 rounded p-1 text-[#4f46e5] dark:text-[#a5b4fc] hover:bg-[#e0e7ff] dark:hover:bg-[#3730a3]"
+                                className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-main)]"
                                 aria-label={t('copilot.copySuggestion')}
                               >
                                 <Clipboard className="h-3.5 w-3.5" />
@@ -409,9 +431,9 @@ export default function History() {
             </div>
 
             {selected.recordingPath ? (
-              <div ref={waveformRef} className="w-full bg-[#f8fafc] dark:bg-[#0f172a] rounded-xl p-2 mb-3 min-h-[70px]" />
+              <div ref={waveformRef} className="mb-3 min-h-[70px] w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-2" />
             ) : (
-              <div className="mb-3 rounded-xl bg-amber-50 dark:bg-amber-950/60 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+              <div className="mb-3 rounded-md border border-[var(--warning)] px-4 py-3 text-sm text-[var(--warning)]">
                 {t('history.recordingUnavailable')}
               </div>
             )}
@@ -420,12 +442,14 @@ export default function History() {
               <button
                 onClick={toggleReplayAudio}
                 disabled={!selected.recordingPath || !audioReady}
-                className="flex-1 py-2 border border-[#e2e8f0] dark:border-[#334155] rounded-xl flex items-center justify-center gap-2 text-sm font-medium text-[#0f172a] dark:text-[#f8fafc] hover:bg-[#f8fafc] dark:hover:bg-[#0f172a] disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-[var(--border-color)] py-2 text-sm font-medium hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isPlaying ? '⏸ ' + t('common.pause') : '▶ ' + t('common.play')}
               </button>
               <button
-                className="flex-1 py-2 bg-[#6366f1] hover:bg-[#4f46e5] text-white rounded-xl text-sm font-medium"
+                ref={closeButtonRef}
+                type="button"
+                className="flex-1 rounded-md bg-[var(--action)] py-2 text-sm font-medium text-[var(--action-text)] hover:opacity-90"
                 onClick={closeReplay}
               >
                 {t('common.close')}
@@ -433,7 +457,8 @@ export default function History() {
             </div>
           </div>
         </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }

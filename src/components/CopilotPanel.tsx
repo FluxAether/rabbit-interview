@@ -201,26 +201,26 @@ export default function CopilotPanel({
 
   return (
     <section
-      className={`floating-panel flex min-h-0 w-full flex-col border border-[#e2e8f0] p-4 text-sm transition-opacity duration-150 dark:border-[#334155] ${
-        floating ? "h-[100dvh] rounded-none bg-white/85 dark:bg-[#1e293b]/85" : "h-full shadow-xl bg-white dark:bg-[#1e293b]"
+      className={`floating-panel flex min-h-0 w-full flex-col border border-[var(--border-color)] bg-[var(--bg-surface)] p-3 text-sm text-[var(--text-main)] shadow-none transition-opacity duration-150 ${
+        floating ? "h-[100dvh] rounded-none" : "h-full rounded-lg"
       }`}
       aria-label={t("copilot.floating.title")}
     >
       {/* Header Controls */}
       <header
-        className={`mb-2 flex items-center justify-between gap-3 px-1 ${floating ? "cursor-move select-none" : ""}`}
+        className={`mb-2 flex items-center justify-between gap-3 ${floating ? "cursor-move select-none" : ""}`}
         data-tauri-drag-region={floating ? true : undefined}
         onMouseDown={startWindowDrag}
       >
         <div className="flex min-w-0 items-center gap-2">
-          <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${running ? "bg-red-500 animate-pulse" : "bg-[#6366f1]"}`}>
-            <Mic className="h-3.5 w-3.5 text-white" />
+          <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${running ? "bg-[var(--danger)]" : "bg-[var(--action)]"}`}>
+            <Mic className="h-3.5 w-3.5 text-[var(--action-text)]" />
           </div>
           <div className="min-w-0">
-            <div className="truncate font-semibold tracking-tight text-[#0f172a] dark:text-[#f8fafc]">
+            <div className="truncate font-semibold tracking-tight text-[var(--text-main)]">
               {t("copilot.floating.title")}
             </div>
-            <div className="text-[10px] text-[#64748b] dark:text-[#94a3b8]" role="status">
+            <div className="text-[10px] text-[var(--text-muted)]" role="status">
               {t(`copilot.phase.${copilot.phase}`)}
             </div>
           </div>
@@ -228,12 +228,12 @@ export default function CopilotPanel({
 
         {/* Toolbar: Font Size, Opacity (floating mode) & Duration */}
         <div className="ml-auto flex items-center gap-2">
-          <div className={`flex items-center rounded-lg border border-[#e2e8f0] p-0.5 text-xs dark:border-[#334155] ${floating ? "bg-white/70 dark:bg-[#0f172a]/70" : "bg-white dark:bg-[#0f172a]"}`}>
+          <div className="flex items-center rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-0.5 text-xs">
             <button
               type="button"
               onClick={decreaseFontSize}
               disabled={!fontSizeReady || fontSize === "sm"}
-              className={`rounded p-1 hover:bg-[#f1f5f9] disabled:opacity-40 dark:hover:bg-[#1e293b] ${fontSize === "sm" ? "text-[#6366f1] font-bold" : "text-[#64748b] dark:text-[#94a3b8]"}`}
+              className={`rounded p-1 hover:bg-[var(--bg-hover)] disabled:opacity-40 ${fontSize === "sm" ? "font-bold text-[var(--text-main)]" : "text-[var(--text-muted)]"}`}
               title="缩小字体 (小/中/大)"
               aria-label="缩小字体"
               data-no-drag
@@ -241,7 +241,7 @@ export default function CopilotPanel({
               <ZoomOut className="h-3.5 w-3.5" />
             </button>
             <span
-              className="min-w-5 px-0.5 text-center text-[10px] font-semibold tabular-nums text-[#475569] dark:text-[#cbd5e1]"
+              className="min-w-5 px-0.5 text-center text-[10px] font-semibold tabular-nums text-[var(--text-muted)]"
               title={`当前字体：${fontSizeLabels[fontSize]}`}
               data-no-drag
             >
@@ -251,7 +251,7 @@ export default function CopilotPanel({
               type="button"
               onClick={increaseFontSize}
               disabled={!fontSizeReady || fontSize === "lg"}
-              className={`rounded p-1 hover:bg-[#f1f5f9] disabled:opacity-40 dark:hover:bg-[#1e293b] ${fontSize === "lg" ? "text-[#6366f1] font-bold" : "text-[#64748b] dark:text-[#94a3b8]"}`}
+              className={`rounded p-1 hover:bg-[var(--bg-hover)] disabled:opacity-40 ${fontSize === "lg" ? "font-bold text-[var(--text-main)]" : "text-[var(--text-muted)]"}`}
               title="放大字体 (小/中/大)"
               aria-label="放大字体"
               data-no-drag
@@ -262,11 +262,11 @@ export default function CopilotPanel({
 
           {floating && (
             <div
-              className="flex items-center gap-1.5 rounded-lg border border-[#e2e8f0] bg-white/70 px-2 py-1 text-xs dark:border-[#334155] dark:bg-[#0f172a]/70"
+              className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-2 py-1 text-xs"
               title="滑动调节透明度"
               data-no-drag
             >
-              <EyeOff className="h-3.5 w-3.5 shrink-0 text-[#64748b] dark:text-[#94a3b8]" />
+              <EyeOff className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
               <input
                 type="range"
                 min={30}
@@ -274,10 +274,11 @@ export default function CopilotPanel({
                 step={1}
                 value={opacity}
                 onChange={(event) => handleOpacityChange(Number(event.target.value))}
-                className="h-1.5 w-16 cursor-pointer appearance-none rounded-lg bg-[#e2e8f0] accent-[#6366f1] dark:bg-[#334155]"
+                className="h-1.5 w-16 cursor-pointer appearance-none rounded-lg bg-[var(--bg-hover)] accent-[var(--action)]"
+                aria-label="调整浮窗透明度"
                 data-no-drag
               />
-              <span className="w-7 text-right font-mono text-[10px] font-medium text-[#64748b] dark:text-[#94a3b8]">
+              <span className="w-7 text-right font-mono text-[10px] font-medium text-[var(--text-muted)]">
                 {opacity}%
               </span>
             </div>
@@ -285,7 +286,7 @@ export default function CopilotPanel({
 
           {copilot.startedAt != null && (
             <div
-              className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium tabular-nums text-[#475569] dark:bg-[#0f172a] dark:text-[#a5b4fc]"
+              className="rounded-md bg-[var(--bg-subtle)] px-2.5 py-1 text-[11px] font-medium tabular-nums text-[var(--text-muted)]"
               title={t("copilot.sessionDuration")}
             >
               {formatElapsed(sessionElapsedSeconds)}
@@ -296,7 +297,7 @@ export default function CopilotPanel({
             <button
               type="button"
               onClick={onHide}
-              className="rounded-lg p-1.5 text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#334155] dark:text-[#94a3b8] dark:hover:bg-[#334155] dark:hover:text-white"
+              className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
               aria-label={t("copilot.hide")}
               data-tauri-drag-region="false"
               data-no-drag
@@ -308,9 +309,9 @@ export default function CopilotPanel({
       </header>
 
       {/* Dynamic Audio Visualizer Bar */}
-      <div className="mb-2.5 flex h-1.5 items-center gap-1 overflow-hidden rounded-full bg-[#e2e8f0] px-1 dark:bg-[#334155]" aria-hidden="true">
+      <div className="mb-2 flex h-1 items-center overflow-hidden rounded-full bg-[var(--bg-hover)]" aria-hidden="true">
         <div
-          className="h-full rounded-full bg-[#6366f1] transition-all duration-75"
+          className={`h-full rounded-full transition-all duration-75 ${running ? "bg-[var(--success)]" : "bg-[var(--text-muted)]"}`}
           style={{ width: `${amplitude}%` }}
         />
       </div>
@@ -320,18 +321,16 @@ export default function CopilotPanel({
         <div
           ref={messagesRef}
           onScroll={handleScroll}
-          className={`h-full overflow-y-auto overscroll-contain rounded-xl p-3 ${
-            floating ? "bg-[#f8fafc]/70 dark:bg-[#0f172a]/70 backdrop-blur-sm" : "bg-[#f8fafc] dark:bg-[#0f172a]"
-          }`}
+          className={`h-full overflow-y-auto overscroll-contain rounded-lg p-3 ${floating ? "bg-[var(--bg-sidebar)]" : "bg-[var(--bg-surface)]"}`}
           aria-live="polite"
         >
           {copilot.messages.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center px-6 text-center text-xs text-[#64748b] dark:text-[#94a3b8]">
-              <Sparkles className="mb-2 h-8 w-8 text-[#6366f1] opacity-50 animate-bounce" />
+            <div className="flex h-full flex-col items-center justify-center px-6 text-center text-xs text-[var(--text-muted)]">
+              <Sparkles className="mb-2 h-7 w-7 opacity-40" />
               {t("copilot.chat.empty")}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {copilot.messages.map((message) => {
                 const mine = message.role === "me"
                 const assistant = message.role === "assistant"
@@ -340,15 +339,15 @@ export default function CopilotPanel({
 
                 return (
                   <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                    <article className="max-w-[92%]">
+                    <article className={assistant ? "w-full" : "max-w-[88%]"}>
                       <div
-                        className={`mb-1 flex items-center gap-2 px-1 text-xs font-semibold text-[#475569] dark:text-[#cbd5e1] ${
+                        className={`mb-1 flex items-center gap-2 px-1 text-[11px] font-medium text-[var(--text-muted)] ${
                           mine ? "justify-end" : ""
-                        } ${floating ? "[text-shadow:0_1px_2px_rgba(0,0,0,0.4)]" : ""}`}
+                        }`}
                       >
                         <span>{roleLabels[message.role]}</span>
                         {message.createdAt ? (
-                          <span className="text-[10px] font-normal tabular-nums text-[#64748b] dark:text-[#94a3b8]">
+                          <span className="text-[10px] font-normal tabular-nums text-[var(--text-muted)]">
                             {formatClock(message.createdAt)}
                           </span>
                         ) : null}
@@ -356,44 +355,30 @@ export default function CopilotPanel({
 
                       {/* Main Content Box */}
                       <div
-                        className={`flex flex-col gap-2 rounded-2xl p-3.5 ${fontSizeClass} leading-relaxed transition-all shadow-sm ${
+                        className={`flex flex-col gap-3 ${fontSizeClass} leading-7 transition-colors ${
                           mine
-                            ? floating
-                              ? "rounded-br-none border border-[#6366f1]/50 bg-[#4338ca] font-medium text-white"
-                              : "rounded-br-none bg-[#4f46e5] font-medium text-white"
+                            ? "rounded-lg bg-[var(--bg-subtle)] px-3.5 py-2.5 text-[var(--text-main)]"
                             : assistant
                               ? floating
-                                ? "rounded-bl-none border-2 border-[#818cf8] bg-[#312e81] font-semibold text-white shadow-md"
-                                : "rounded-bl-none border border-[#c7d2fe] bg-[#eef2ff] font-semibold text-[#0f172a] dark:border-[#6366f1] dark:bg-[#312e81] dark:text-[#f8fafc]"
-                              : floating
-                                ? "rounded-bl-none border border-slate-300 bg-white font-medium text-slate-900 dark:border-[#475569] dark:bg-[#1e293b] dark:text-white"
-                                : "rounded-bl-none border border-[#e2e8f0] bg-white text-[#1e293b] dark:border-[#334155] dark:bg-[#1e293b] dark:text-[#f8fafc]"
+                                ? "rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-3.5 text-[var(--text-main)]"
+                                : "bg-transparent px-1 py-2 text-[var(--text-main)]"
+                              : "rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-[var(--text-main)]"
                         }`}
                       >
                         {/* Highlighted Takeaways for AI Assistant */}
                         {assistant && keyTakeaways.length > 0 && (
-                          <div
-                            className={`mb-1 rounded-xl border p-2.5 shadow-xs ${takeawaySizeClass} ${
-                              floating
-                                ? "border-[#a5b4fc]/50 bg-white text-[#1e1b4b]"
-                                : "border-[#a5b4fc]/60 bg-white text-[#1e1b4b] dark:border-[#6366f1]/50 dark:bg-[#0f172a] dark:text-[#e0e7ff]"
-                            }`}
-                          >
+                          <div className={`rounded-lg border border-[var(--border-color)] bg-[var(--bg-subtle)] p-2.5 text-[var(--text-main)] ${takeawaySizeClass}`}>
                             <div
-                              className={`flex items-center justify-between font-bold ${
-                                floating ? "text-[#4338ca]" : "text-[#4338ca] dark:text-[#c7d2fe]"
-                              }`}
+                              className="flex items-center justify-between font-semibold text-[var(--text-main)]"
                             >
                               <div className="flex items-center gap-1.5">
-                                <Sparkles className="h-3.5 w-3.5 text-[#6366f1]" />
+                                <Sparkles className="h-3.5 w-3.5 text-[var(--text-muted)]" />
                                 <span>核心提示词 (Key Points)</span>
                               </div>
                               <button
                                 type="button"
                                 onClick={() => toggleTakeawayCollapse(message.id)}
-                                className={`rounded p-0.5 text-[#6366f1] ${
-                                  floating ? "hover:bg-[#e0e7ff]" : "hover:bg-[#e0e7ff] dark:hover:bg-[#312e81]"
-                                }`}
+                                className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
                                 title={isTakeawayCollapsed ? "展开提示词" : "折叠提示词"}
                               >
                                 {isTakeawayCollapsed ? (
@@ -407,8 +392,8 @@ export default function CopilotPanel({
                               <ul className="mt-1.5 space-y-1 pl-1">
                                 {keyTakeaways.map((point, idx) => (
                                   <li key={idx} className="flex items-start gap-1.5">
-                                    <span className="font-bold text-[#6366f1]">•</span>
-                                    <span className="font-semibold leading-relaxed">{point}</span>
+                                    <span className="font-bold text-[var(--text-muted)]">•</span>
+                                    <span className="leading-relaxed">{point}</span>
                                   </li>
                                 ))}
                               </ul>
@@ -416,48 +401,26 @@ export default function CopilotPanel({
                           </div>
                         )}
 
-                        <div
-                          className={`min-w-0 flex-1 whitespace-pre-wrap leading-relaxed ${
-                            assistant
-                              ? floating
-                                ? "text-white"
-                                : "text-[#0f172a] dark:text-[#f8fafc]"
-                              : ""
-                          }`}
-                        >
+                        <div className="min-w-0 flex-1 whitespace-pre-wrap text-[var(--text-main)]">
                           {message.text}
                         </div>
 
                         {/* Copy Helper for Assistant */}
                         {assistant && (
-                          <div
-                            className={`mt-1 flex items-center justify-between border-t pt-2 text-xs ${
-                              floating
-                                ? "border-white/20"
-                                : "border-[#c7d2fe]/50 dark:border-[#6366f1]/40"
-                            }`}
-                          >
-                            <span
-                              className={`text-[10px] ${
-                                floating ? "text-[#c7d2fe]" : "text-[#4f46e5] dark:text-[#c7d2fe]"
-                              }`}
-                            >
+                          <div className="mt-1 flex items-center justify-between border-t border-[var(--border-color)] pt-2 text-xs">
+                            <span className="text-[10px] text-[var(--text-muted)]">
                               推荐提示
                             </span>
                             <button
                               type="button"
                               onClick={() => handleCopy(message.id, message.text)}
-                              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium shadow-xs ${
-                                floating
-                                  ? "bg-white text-[#4338ca] hover:bg-[#e0e7ff]"
-                                  : "bg-white text-[#4f46e5] hover:bg-[#e0e7ff] dark:bg-[#1e1b4b] dark:text-[#c7d2fe]"
-                              }`}
+                              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
                               aria-label={t("copilot.copySuggestion")}
                             >
                               {copiedId === message.id ? (
                                 <>
-                                  <Check className="h-3 w-3 text-emerald-600" />
-                                  <span className="text-emerald-600">已复制</span>
+                                  <Check className="h-3 w-3 text-[var(--success)]" />
+                                  <span className="text-[var(--success)]">已复制</span>
                                 </>
                               ) : (
                                 <>
@@ -482,7 +445,7 @@ export default function CopilotPanel({
           <button
             type="button"
             onClick={scrollToBottom}
-            className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5 rounded-full bg-[#6366f1] px-3 py-1.5 text-xs font-semibold text-white shadow-lg transition-transform hover:scale-105 hover:bg-[#4f46e5] animate-bounce"
+            className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] hover:bg-[var(--bg-hover)]"
           >
             <ArrowDown className="h-3.5 w-3.5" />
             <span>↓ 有新消息</span>
@@ -494,8 +457,8 @@ export default function CopilotPanel({
         <div
           className={`mt-2 rounded-lg px-2.5 py-2 text-xs ${
             copilot.answerStatus === "incomplete"
-              ? "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-              : "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+              ? "bg-[var(--bg-subtle)] text-[var(--warning)]"
+              : "bg-[var(--bg-subtle)] text-[var(--text-muted)]"
           }`}
           role={copilot.answerStatus === "incomplete" ? "alert" : "status"}
         >
@@ -508,10 +471,10 @@ export default function CopilotPanel({
         <div
           className={`mt-2 rounded-lg px-2.5 py-2 text-xs ${
             copilot.archiveStatus === "error"
-              ? "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300"
+              ? "bg-[var(--bg-subtle)] text-[var(--danger)]"
               : copilot.archiveStatus === "saved"
-                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
-                : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                ? "bg-[var(--bg-subtle)] text-[var(--success)]"
+                : "bg-[var(--bg-subtle)] text-[var(--text-muted)]"
           }`}
           role={copilot.archiveStatus === "error" ? "alert" : "status"}
         >
@@ -522,7 +485,7 @@ export default function CopilotPanel({
       )}
 
       {copilot.error && (
-        <div className="mt-2 rounded-lg bg-red-50 px-2.5 py-2 text-xs text-red-700 dark:bg-red-950/60 dark:text-red-300" role="alert">
+        <div className="mt-2 rounded-lg bg-[var(--bg-subtle)] px-2.5 py-2 text-xs text-[var(--danger)]" role="alert">
           {copilot.error}
         </div>
       )}
@@ -533,15 +496,13 @@ export default function CopilotPanel({
           value={followUp}
           onChange={(event) => setFollowUp(event.target.value)}
           placeholder={t("copilot.followUp")}
-          className={`min-w-0 flex-1 rounded-xl border border-[#e2e8f0] px-3 py-2 text-xs outline-none focus:border-[#6366f1] focus:ring-2 focus:ring-[#6366f1]/20 dark:border-[#334155] dark:text-[#f8fafc] ${
-            floating ? "bg-white/90 dark:bg-[#0f172a]/90 font-medium" : "bg-white dark:bg-[#0f172a]"
-          }`}
+          className="min-w-0 flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2 text-xs text-[var(--text-main)] outline-none focus:border-[var(--text-muted)] disabled:opacity-50"
           disabled={!running}
           aria-label={t("copilot.followUp")}
         />
         <button
           type="submit"
-          className="rounded-xl bg-[#6366f1] px-3 py-2 text-xs font-medium text-white shadow-xs disabled:opacity-40"
+          className="rounded-lg bg-[var(--action)] px-3 py-2 text-xs font-medium text-[var(--action-text)] disabled:opacity-40"
           disabled={!running || !followUp.trim()}
         >
           {t("copilot.ask")}
@@ -549,13 +510,13 @@ export default function CopilotPanel({
       </form>
 
       {/* Control Buttons Footer */}
-      <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-[#e2e8f0] pt-2.5 dark:border-[#334155]">
+      <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-[var(--border-color)] pt-2.5">
         <button
           type="button"
           onClick={() => void sendCopilotCommand({ type: "toggle" })}
           disabled={busy}
-          className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-medium text-white shadow-sm transition-colors disabled:opacity-60 ${
-            running ? "bg-rose-500 hover:bg-rose-600" : "bg-[#6366f1] hover:bg-[#4f46e5]"
+          className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-medium text-[var(--action-text)] transition-colors disabled:opacity-60 ${
+            running ? "bg-[var(--danger)]" : "bg-[var(--action)]"
           }`}
         >
           {running ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
@@ -566,9 +527,7 @@ export default function CopilotPanel({
           type="button"
           onClick={() => void sendCopilotCommand({ type: "retry" })}
           disabled={!running || !copilot.question}
-          className={`flex items-center gap-1 rounded-xl border border-[#e2e8f0] px-2.5 py-1.5 text-xs text-[#475569] hover:bg-[#f8fafc] disabled:opacity-40 dark:border-[#334155] dark:text-[#94a3b8] dark:hover:bg-[#1e293b] ${
-            floating ? "bg-white/80 dark:bg-[#0f172a]/80" : "bg-white dark:bg-[#0f172a]"
-          }`}
+          className="flex items-center gap-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-40"
         >
           <RefreshCw className="h-3.5 w-3.5" /> {t("copilot.retry")}
         </button>
@@ -576,9 +535,7 @@ export default function CopilotPanel({
         <button
           type="button"
           onClick={() => void sendCopilotCommand({ type: "clear" })}
-          className={`flex items-center gap-1 rounded-xl border border-[#e2e8f0] px-2.5 py-1.5 text-xs text-[#475569] hover:bg-[#f8fafc] dark:border-[#334155] dark:text-[#94a3b8] dark:hover:bg-[#1e293b] ${
-            floating ? "bg-white/80 dark:bg-[#0f172a]/80" : "bg-white dark:bg-[#0f172a]"
-          }`}
+          className="flex items-center gap-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
         >
           <Trash2 className="h-3.5 w-3.5" /> {t("copilot.clear")}
         </button>
@@ -588,14 +545,14 @@ export default function CopilotPanel({
             type="button"
             onClick={onExportRecording}
             disabled={!canExportRecording}
-            className="flex items-center gap-1 rounded-xl border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs text-[#475569] hover:bg-[#f8fafc] disabled:opacity-40 dark:border-[#334155] dark:bg-[#0f172a] dark:text-[#94a3b8] dark:hover:bg-[#1e293b]"
+            className="flex items-center gap-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-40"
           >
             <Download className="h-3.5 w-3.5" /> {t("copilot.exportRecording")}
           </button>
         )}
 
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 text-[10px] text-[#64748b] dark:text-[#94a3b8]">
-          <span className={`flex items-center gap-1 rounded-full px-2 py-1 ${windowStatus?.protection_applied ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"}`} title={t("copilot.protection.caveat")}>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 text-[10px] text-[var(--text-muted)]">
+          <span className={`flex items-center gap-1 rounded-md bg-[var(--bg-subtle)] px-2 py-1 ${windowStatus?.protection_applied ? "text-[var(--success)]" : "text-[var(--warning)]"}`} title={t("copilot.protection.caveat")}>
             <Shield className="h-3 w-3" /> {protectionLabel}
           </span>
         </div>
@@ -603,8 +560,8 @@ export default function CopilotPanel({
 
       {(copilot.capabilityNotice || windowStatus?.error) && (
         <div className="mt-2 text-[10px]">
-          {copilot.capabilityNotice && <div className="text-amber-700 dark:text-amber-400">{copilot.capabilityNotice}</div>}
-          {windowStatus?.error && <div className="text-red-600 dark:text-red-400">{windowStatus.error}</div>}
+          {copilot.capabilityNotice && <div className="text-[var(--warning)]">{copilot.capabilityNotice}</div>}
+          {windowStatus?.error && <div className="text-[var(--danger)]">{windowStatus.error}</div>}
         </div>
       )}
     </section>

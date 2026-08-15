@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
-import { Clock, FileText, LayoutDashboard, Mic, PanelLeftClose, PanelLeftOpen, Rocket, Settings as SettingsIcon } from 'lucide-react'
+import { Clock, FileText, LayoutDashboard, MessageSquareText, Mic, PanelLeftClose, PanelLeftOpen, Settings as SettingsIcon } from 'lucide-react'
 import CopilotPanel from './components/CopilotPanel'
 import Dashboard from './pages/Dashboard'
 import History from './pages/History'
@@ -33,7 +33,7 @@ export type Page = 'dashboard' | 'copilot' | 'mock' | 'resume' | 'history' | 'se
 
 const navItems = [
   { id: 'dashboard' as Page, labelKey: 'nav.dashboard', icon: LayoutDashboard },
-  { id: 'copilot' as Page, labelKey: 'nav.copilot', icon: Rocket },
+  { id: 'copilot' as Page, labelKey: 'nav.copilot', icon: MessageSquareText },
   { id: 'mock' as Page, labelKey: 'nav.mock', icon: Mic },
   { id: 'resume' as Page, labelKey: 'nav.resume', icon: FileText },
   { id: 'history' as Page, labelKey: 'nav.history', icon: Clock },
@@ -54,29 +54,30 @@ function Sidebar({
   const t = useTranslation()
   return (
     <aside
-      className={`flex h-screen flex-col border-r border-[#e2e8f0] bg-[#f8fafc] p-3 transition-all duration-200 dark:border-[#334155] dark:bg-[#0f172a] ${
-        collapsed ? 'w-16 items-center' : 'w-60'
+      className={`flex h-[100dvh] shrink-0 flex-col border-r border-[var(--border-color)] bg-[var(--bg-sidebar)] p-3 transition-[width] duration-200 ${
+        collapsed ? 'w-[64px] items-center' : 'w-[240px]'
       }`}
     >
       {/* Brand Header */}
       {collapsed ? (
-        <div className="mb-4 flex flex-col items-center gap-2 py-3">
-          <img src="/logo.png" alt="Logo" className="h-9 w-9 shrink-0 rounded-xl object-contain shadow-sm" />
+        <div className="mb-4 flex flex-col items-center gap-2 py-2">
+          <img src="/logo.png" alt={t('app.name')} className="h-9 w-9 shrink-0 rounded-lg object-contain" />
           <button
             type="button"
             onClick={onToggleCollapse}
-            className="rounded-lg p-1 text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0f172a] dark:text-[#94a3b8] dark:hover:bg-[#1e293b] dark:hover:text-[#f8fafc]"
+            className="rounded-md p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
             title="展开侧边栏"
+            aria-label="展开侧边栏"
           >
-            <PanelLeftOpen className="h-4 w-4" />
+            <PanelLeftOpen className="h-4 w-4" strokeWidth={1.8} />
           </button>
         </div>
       ) : (
-        <div className="mb-4 flex items-center justify-between px-2 py-3">
+        <div className="mb-4 flex items-center justify-between px-2 py-2">
           <div className="flex items-center gap-3 min-w-0">
-            <img src="/logo.png" alt="Logo" className="h-9 w-9 shrink-0 rounded-xl object-contain shadow-sm" />
+            <img src="/logo.png" alt={t('app.name')} className="h-9 w-9 shrink-0 rounded-lg object-contain" />
             <div className="min-w-0">
-              <div className="truncate text-base font-semibold tracking-tight text-[#0f172a] dark:text-[#f8fafc]">
+              <div className="truncate text-sm font-semibold tracking-[-0.01em] text-[var(--text-main)]">
                 {t('app.name')}
               </div>
             </div>
@@ -84,10 +85,11 @@ function Sidebar({
           <button
             type="button"
             onClick={onToggleCollapse}
-            className="rounded-lg p-1 text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0f172a] dark:text-[#94a3b8] dark:hover:bg-[#1e293b] dark:hover:text-[#f8fafc]"
+            className="rounded-md p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
             title="折叠侧边栏"
+            aria-label="折叠侧边栏"
           >
-            <PanelLeftClose className="h-4 w-4" />
+            <PanelLeftClose className="h-4 w-4" strokeWidth={1.8} />
           </button>
         </div>
       )}
@@ -103,37 +105,22 @@ function Sidebar({
               type="button"
               onClick={() => onNavigate(item.id)}
               title={collapsed ? t(item.labelKey) : undefined}
-              className={`sidebar-item relative flex w-full items-center rounded-xl py-2.5 transition-all ${
+              aria-current={active ? 'page' : undefined}
+              className={`sidebar-item relative flex w-full items-center py-2.5 ${
                 collapsed ? 'justify-center px-0' : 'gap-3 px-3 text-left'
               } ${
                 active
-                  ? 'bg-[#e0e7ff] font-semibold text-[#4338ca] dark:bg-[#312e81] dark:text-[#a5b4fc]'
-                  : 'text-[#475569] hover:bg-[#f1f5f9] dark:text-[#94a3b8] dark:hover:bg-[#1e293b]'
+                  ? 'active bg-[var(--bg-hover)] font-semibold text-[var(--text-main)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
               }`}
             >
-              {active && (
-                <span className="absolute left-0 top-1/2 h-5 w-[3.5px] -translate-y-1/2 rounded-r bg-[#6366f1]" />
-              )}
-              <Icon className="h-4.5 w-4.5 shrink-0" />
+              <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.8} />
               {!collapsed && <span className="truncate text-[13.5px]">{t(item.labelKey)}</span>}
             </button>
           )
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="mt-auto w-full border-t border-[#e2e8f0] pt-3 dark:border-[#334155]">
-        {!collapsed ? (
-          <div className="px-2 text-xs">
-            <div className="truncate font-medium text-[#0f172a] dark:text-[#f8fafc]">{t('app.name')}</div>
-            <div className="truncate text-[10px] text-[#64748b] dark:text-[#94a3b8]">{t('app.tagline')}</div>
-          </div>
-        ) : (
-          <div className="flex justify-center" title={t('app.name')}>
-            <img src="/logo.png" alt="" className="h-8 w-8 rounded-lg object-contain" />
-          </div>
-        )}
-      </div>
     </aside>
   )
 }
@@ -287,7 +274,7 @@ export default function App() {
     return (
       <div
         ref={floatingRef}
-        className="h-screen w-screen overflow-hidden bg-transparent text-[#0f172a] outline-none dark:text-[#f8fafc]"
+        className="h-[100dvh] w-screen overflow-hidden bg-transparent text-[var(--text-main)] outline-none"
         tabIndex={-1}
         onKeyDown={(event) => {
           if (event.key === 'Escape') void hide()
@@ -310,14 +297,14 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f1f5f9] text-[#0f172a] dark:bg-[#0f172a] dark:text-[#f8fafc]">
+    <div className="flex h-[100dvh] overflow-hidden bg-[var(--bg-app)] text-[var(--text-main)]">
       <Sidebar
         currentPage={currentPage}
         onNavigate={setCurrentPage}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
       />
-      <main className={`min-w-0 flex-1 ${currentPage === 'copilot' ? 'overflow-hidden' : 'overflow-auto'}`}>
+      <main id="main-content" className={`min-w-0 flex-1 bg-[var(--bg-app)] ${currentPage === 'copilot' ? 'overflow-hidden' : 'overflow-auto'}`}>
         {renderPage()}
       </main>
     </div>

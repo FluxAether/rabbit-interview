@@ -591,11 +591,11 @@ export default function Settings() {
     return (
       <div className="space-y-1.5">
         <div className="flex items-center gap-2">
-          <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs font-medium">Key</span>
+          <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Key</span>
           <div className="relative flex-1">
             <input
               type={isVisible ? 'text' : 'password'}
-              className="w-full bg-white border border-[#e2e8f0] rounded-lg pl-3 pr-9 py-1 text-xs font-mono dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
+              className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] py-1 pl-3 pr-9 text-xs font-mono text-[var(--text-main)]"
               placeholder={isConfigured ? '•••••••• (configured)' : placeholderName}
               value={keyInputs[provider]}
               onChange={(e) => {
@@ -607,7 +607,7 @@ export default function Settings() {
             <button
               type="button"
               onClick={() => setShowKey((prev) => ({ ...prev, [provider]: !prev[provider] }))}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94a3b8] hover:text-[#475569] dark:hover:text-[#f8fafc]"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)]"
               title={isVisible ? 'Hide key' : 'Show key'}
             >
               {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
@@ -617,16 +617,16 @@ export default function Settings() {
             type="button"
             onClick={() => void testConnection(provider)}
             disabled={testResult.loading}
-            className="flex items-center gap-1.5 text-xs px-3 py-1 rounded-lg border border-[#e2e8f0] text-[#475569] bg-white hover:bg-[#f8fafc] hover:border-[#cbd5e1] disabled:opacity-50 transition-colors dark:border-[#334155] dark:bg-[#0f172a] dark:text-[#cbd5e1] dark:hover:bg-[#1e293b]"
+            className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-50"
           >
             {testResult.loading ? (
               <>
-                <Loader2 className="w-3 h-3 animate-spin text-[#6366f1]" />
+                <Loader2 className="h-3 w-3 animate-spin" />
                 <span>{t('settings.test.testing')}</span>
               </>
             ) : (
               <>
-                <Zap className="w-3 h-3 text-[#6366f1]" />
+                <Zap className="h-3 w-3" />
                 <span>{t('settings.test.testConnection')}</span>
               </>
             )}
@@ -636,12 +636,12 @@ export default function Settings() {
         {testResult.message && (
           <div className="pl-14 flex items-center gap-1.5 text-xs">
             {testResult.success ? (
-              <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
+              <span className="flex items-center gap-1 font-medium text-[var(--success)]">
                 <Check className="w-3.5 h-3.5" />
                 {testResult.message}
               </span>
             ) : (
-              <span className="text-rose-600 dark:text-rose-400 flex items-center gap-1 font-medium">
+              <span className="flex items-center gap-1 font-medium text-[var(--danger)]">
                 <AlertCircle className="w-3.5 h-3.5" />
                 {testResult.message}
               </span>
@@ -688,37 +688,33 @@ export default function Settings() {
   }
 
   return (
-    <div className="p-8 overflow-auto h-full">
-      <div className="w-full max-w-6xl">
-        <div className="flex items-center justify-between mb-8">
+    <div className="h-full overflow-auto bg-[var(--bg-app)] p-6 text-[var(--text-main)] sm:p-8">
+      <div className="mx-auto w-full max-w-6xl">
+        <div className="mb-6 flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight mb-1">{t('settings.title')}</h1>
-            <p className="text-[#475569] dark:text-[#94a3b8]">{t('settings.description')}</p>
+            <h1 className="mb-1 text-2xl font-semibold tracking-tight">{t('settings.title')}</h1>
+            <p className="text-sm text-[var(--text-muted)]">{t('settings.description')}</p>
           </div>
 
           {/* Auto-save toast badge (fades after 2s) */}
           <div
-            className={`transition-opacity duration-300 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800 ${
+            className={`flex items-center gap-1.5 text-xs text-[var(--success)] transition-opacity duration-300 ${
               showSavedToast ? 'opacity-100' : 'opacity-0 pointer-events-none'
             }`}
           >
-            <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-bold">
-              ✓
-            </div>
+            <span aria-hidden="true">✓</span>
             <span>{t('settings.saved')}</span>
           </div>
         </div>
 
-        {/* Sidebar + Main Content Layout */}
-        <div className="flex gap-8 items-start">
-          {/* Left Navigation Sidebar */}
-          <nav className="w-56 shrink-0 space-y-1">
+        <div className="flex flex-col items-start gap-6 lg:flex-row lg:gap-8">
+          <nav className="flex w-full gap-1 overflow-x-auto border-b border-[var(--border-color)] pb-2 lg:w-52 lg:shrink-0 lg:flex-col lg:border-b-0 lg:pb-0">
             <button
               onClick={() => setActiveTab('general')}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${
+              className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
                 activeTab === 'general'
-                  ? 'bg-[#6366f1] text-white shadow-sm'
-                  : 'text-[#475569] hover:bg-[#f1f5f9] dark:text-[#94a3b8] dark:hover:bg-[#1e293b]'
+                  ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
               }`}
             >
               <Sliders className="w-4 h-4" />
@@ -727,10 +723,10 @@ export default function Settings() {
 
             <button
               onClick={() => setActiveTab('ai')}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${
+              className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
                 activeTab === 'ai'
-                  ? 'bg-[#6366f1] text-white shadow-sm'
-                  : 'text-[#475569] hover:bg-[#f1f5f9] dark:text-[#94a3b8] dark:hover:bg-[#1e293b]'
+                  ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
               }`}
             >
               <Cpu className="w-4 h-4" />
@@ -739,10 +735,10 @@ export default function Settings() {
 
             <button
               onClick={() => setActiveTab('stt')}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${
+              className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
                 activeTab === 'stt'
-                  ? 'bg-[#6366f1] text-white shadow-sm'
-                  : 'text-[#475569] hover:bg-[#f1f5f9] dark:text-[#94a3b8] dark:hover:bg-[#1e293b]'
+                  ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
               }`}
             >
               <Mic className="w-4 h-4" />
@@ -751,10 +747,10 @@ export default function Settings() {
 
             <button
               onClick={() => setActiveTab('shortcuts_privacy')}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${
+              className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
                 activeTab === 'shortcuts_privacy'
-                  ? 'bg-[#6366f1] text-white shadow-sm'
-                  : 'text-[#475569] hover:bg-[#f1f5f9] dark:text-[#94a3b8] dark:hover:bg-[#1e293b]'
+                  ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
               }`}
             >
               <Shield className="w-4 h-4" />
@@ -763,10 +759,10 @@ export default function Settings() {
 
             <button
               onClick={() => setActiveTab('storage')}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${
+              className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
                 activeTab === 'storage'
-                  ? 'bg-[#6366f1] text-white shadow-sm'
-                  : 'text-[#475569] hover:bg-[#f1f5f9] dark:text-[#94a3b8] dark:hover:bg-[#1e293b]'
+                  ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
               }`}
             >
               <HardDrive className="w-4 h-4" />
@@ -774,22 +770,21 @@ export default function Settings() {
             </button>
           </nav>
 
-          {/* Right Main Content Panel */}
-          <div className="flex-1 space-y-6">
+          <div className="w-full min-w-0 flex-1 space-y-4">
             {/* TAB 1: General */}
             {activeTab === 'general' && (
               <>
                 {/* Application Card */}
-                <div className="card p-6">
-                  <div className="font-semibold text-[#6366f1] mb-4">{t('settings.application')}</div>
+                <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+                  <div className="mb-4 font-semibold">{t('settings.application')}</div>
 
                   <div className="space-y-4">
                     <div className="flex items-center justify-between py-1">
                       <div className="flex items-center gap-3">
-                        <Sun className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
+                        <Sun className="h-4 w-4 text-[var(--text-muted)]" />
                         <div>
                           <div className="font-medium">{t('settings.theme')}</div>
-                          <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.themeDesc')}</div>
+                          <div className="text-xs text-[var(--text-muted)]">{t('settings.themeDesc')}</div>
                         </div>
                       </div>
                       <select
@@ -802,7 +797,7 @@ export default function Settings() {
                             emit('app-theme-changed', val).catch((error) => console.warn('Theme sync failed:', error))
                           )
                         }}
-                        className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
+                        className="rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                       >
                         <option value="Light">{t('settings.theme.light')}</option>
                         <option value="Dark">{t('settings.theme.dark')}</option>
@@ -814,23 +809,23 @@ export default function Settings() {
                 </div>
 
                 {/* Updates Card */}
-                <div className="card p-6">
+                <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
                   <div className="flex items-center justify-between mb-4">
-                    <div className="font-semibold text-[#6366f1]">{t('settings.updates')}</div>
+                    <div className="font-semibold">{t('settings.updates')}</div>
                     <button
                       type="button"
                       onClick={() => void handleCheckUpdate(false)}
                       disabled={checkingUpdate || downloading}
-                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[#e2e8f0] text-[#475569] bg-white hover:bg-[#f8fafc] hover:border-[#cbd5e1] disabled:opacity-50 transition-colors dark:border-[#334155] dark:bg-[#0f172a] dark:text-[#cbd5e1] dark:hover:bg-[#1e293b]"
+                      className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-50"
                     >
                       {checkingUpdate ? (
                         <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin text-[#6366f1]" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           <span>{t('settings.checkingUpdate')}</span>
                         </>
                       ) : (
                         <>
-                          <RefreshCw className="w-3.5 h-3.5 text-[#6366f1]" />
+                          <RefreshCw className="h-3.5 w-3.5" />
                           <span>{t('settings.checkUpdate')}</span>
                         </>
                       )}
@@ -839,9 +834,9 @@ export default function Settings() {
 
                   <div className="space-y-4">
                     {updateStatusMsg && (
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-[#f8fafc] border border-[#e2e8f0] dark:bg-[#0f172a] dark:border-[#334155]">
-                        <div className="text-xs font-medium text-[#334155] dark:text-[#cbd5e1] flex items-center gap-2">
-                          {availableUpdate ? <Download className="w-4 h-4 text-[#6366f1]" /> : <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                      <div className="flex items-center justify-between rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3">
+                        <div className="flex items-center gap-2 text-xs font-medium">
+                          {availableUpdate ? <Download className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />}
                           <span>{updateStatusMsg}</span>
                         </div>
                         {availableUpdate && (
@@ -849,11 +844,11 @@ export default function Settings() {
                             type="button"
                             onClick={() => void handleDownloadAndInstall()}
                             disabled={downloading}
-                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[#6366f1] text-white hover:bg-[#4f46e5] disabled:opacity-50 transition-colors"
+                            className="flex items-center gap-1.5 rounded-md bg-[var(--action)] px-3 py-1.5 text-xs text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-50"
                           >
                             {downloading ? (
                               <>
-                                <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                 <span>{downloadProgress > 0 ? `${downloadProgress}%` : t('settings.downloadingUpdate')}</span>
                               </>
                             ) : (
@@ -866,10 +861,10 @@ export default function Settings() {
 
                     <div className="flex items-center justify-between py-1">
                       <div className="flex items-center gap-3">
-                        <RefreshCw className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
+                        <RefreshCw className="h-4 w-4 text-[var(--text-muted)]" />
                         <div>
                           <div className="font-medium">{t('settings.autoUpdate')}</div>
-                          <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.autoUpdateDesc')}</div>
+                          <div className="text-xs text-[var(--text-muted)]">{t('settings.autoUpdateDesc')}</div>
                         </div>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
@@ -879,22 +874,22 @@ export default function Settings() {
                           onChange={(e) => setAutoUpdate(e.target.checked)}
                           className="sr-only peer"
                         />
-                        <div className="w-9 h-5 bg-[#e2e8f0] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#6366f1] dark:bg-[#334155]"></div>
+                        <div className="peer h-5 w-9 rounded-full bg-[var(--bg-subtle)] after:absolute after:left-[1px] after:top-[1px] after:h-4 after:w-4 after:rounded-full after:border after:border-[var(--border-color)] after:bg-[var(--bg-surface)] after:content-[''] after:transition-all peer-checked:bg-[var(--action)] peer-checked:after:translate-x-full peer-focus:outline-none"></div>
                       </label>
                     </div>
 
                     <div className="flex items-center justify-between py-1">
                       <div className="flex items-center gap-3">
-                        <Sliders className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
+                        <Sliders className="h-4 w-4 text-[var(--text-muted)]" />
                         <div>
                           <div className="font-medium">{t('settings.updateChannel')}</div>
-                          <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.updateChannelDesc')}</div>
+                          <div className="text-xs text-[var(--text-muted)]">{t('settings.updateChannelDesc')}</div>
                         </div>
                       </div>
                       <select
                         value={updateChannel}
                         onChange={(e) => setUpdateChannel(e.target.value as any)}
-                        className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
+                        className="rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                       >
                         <option value="Stable">Stable</option>
                         <option value="Beta">Beta</option>
@@ -904,20 +899,20 @@ export default function Settings() {
                 </div>
 
                 {/* Language Card */}
-                <div className="card p-6">
-                  <div className="font-semibold text-[#6366f1] mb-4">{t('settings.language')}</div>
+                <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+                  <div className="mb-4 font-semibold">{t('settings.language')}</div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <Shield className="w-4 h-4 text-[#64748b] dark:text-[#94a3b8]" />
+                      <Shield className="h-4 w-4 text-[var(--text-muted)]" />
                       <div>
                         <div className="font-medium">{t('settings.language')}</div>
-                        <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">{t('settings.languageDesc')}</div>
+                        <div className="text-xs text-[var(--text-muted)]">{t('settings.languageDesc')}</div>
                       </div>
                     </div>
                     <select
                       value={language}
                       onChange={(e) => handleLanguageChange(e.target.value as SupportedLanguage)}
-                      className="bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm min-w-[190px] dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
+                      className="min-w-[190px] rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                     >
                       {LANGUAGE_OPTIONS.map((opt) => (
                         <option key={opt.code} value={opt.code}>
@@ -929,8 +924,8 @@ export default function Settings() {
                 </div>
 
                 {/* Stealth Mode */}
-                <div className="card p-6">
-                  <div className="font-semibold text-[#6366f1] mb-3">{t('settings.stealth.title')}</div>
+                <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+                  <div className="mb-3 font-semibold">{t('settings.stealth.title')}</div>
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -939,24 +934,24 @@ export default function Settings() {
                     />
                     <span>{t('settings.stealth.desc')}</span>
                   </label>
-                  <p className="text-xs mt-2 text-[#64748b] dark:text-[#94a3b8]">{t('settings.stealth.note')}</p>
+                  <p className="mt-2 text-xs text-[var(--text-muted)]">{t('settings.stealth.note')}</p>
                 </div>
               </>
             )}
 
             {/* TAB 2: AI Model & Key */}
             {activeTab === 'ai' && (
-              <div className="card p-6">
-                <div className="font-semibold text-[#6366f1] mb-1">{t('settings.aiModel')}</div>
-                <div className="text-xs text-[#64748b] dark:text-[#94a3b8] mb-4">{t('settings.aiModel.lowLatency')}</div>
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+                <div className="mb-1 font-semibold">{t('settings.aiModel')}</div>
+                <div className="mb-4 text-xs text-[var(--text-muted)]">{t('settings.aiModel.lowLatency')}</div>
 
                 <div className="space-y-4">
                   {/* Groq */}
                   <div
-                    className={`border rounded-xl p-4 transition-colors ${
+                    className={`rounded-md border p-4 transition-colors ${
                       activeProvider === 'groq'
-                        ? 'border-[#6366f1] bg-[#f5f5ff] dark:bg-[#1e1b4b]'
-                        : 'border-[#e2e8f0] hover:border-[#cbd5e1] dark:border-[#334155] dark:hover:border-[#64748b]'
+                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
+                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
@@ -967,13 +962,13 @@ export default function Settings() {
                         </span>
                       </div>
                       {activeProvider === 'groq' ? (
-                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">
+                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
                           Active
                         </span>
                       ) : (
                         <button
                           onClick={() => activateProvider('groq', groqModel)}
-                          className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors dark:border-[#818cf8] dark:text-[#a5b4fc] dark:hover:bg-[#312e81]"
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
                           Use Groq
                         </button>
@@ -982,11 +977,11 @@ export default function Settings() {
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs font-medium">Model</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Model</span>
                         <select
                           value={groqModel}
                           onChange={(e) => updateProviderModel('groq', e.target.value)}
-                          className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                         >
                           <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant</option>
                           <option value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile</option>
@@ -1000,27 +995,27 @@ export default function Settings() {
 
                   {/* OpenAI */}
                   <div
-                    className={`border rounded-xl p-4 transition-colors ${
+                    className={`rounded-md border p-4 transition-colors ${
                       activeProvider === 'openai'
-                        ? 'border-[#6366f1] bg-[#f5f5ff] dark:bg-[#1e1b4b]'
-                        : 'border-[#e2e8f0] hover:border-[#cbd5e1] dark:border-[#334155] dark:hover:border-[#64748b]'
+                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
+                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">OpenAI</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+                        <span className="rounded-full bg-[var(--bg-subtle)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
                           GPT family
                         </span>
                       </div>
                       {activeProvider === 'openai' ? (
-                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">
+                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
                           Active
                         </span>
                       ) : (
                         <button
                           onClick={() => activateProvider('openai', openaiModel)}
-                          className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors dark:border-[#818cf8] dark:text-[#a5b4fc] dark:hover:bg-[#312e81]"
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
                           Use OpenAI
                         </button>
@@ -1029,11 +1024,11 @@ export default function Settings() {
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs font-medium">Model</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Model</span>
                         <select
                           value={openaiModel}
                           onChange={(e) => updateProviderModel('openai', e.target.value)}
-                          className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                         >
                           <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
                           <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
@@ -1047,27 +1042,27 @@ export default function Settings() {
 
                   {/* Anthropic / Claude */}
                   <div
-                    className={`border rounded-xl p-4 transition-colors ${
+                    className={`rounded-md border p-4 transition-colors ${
                       activeProvider === 'anthropic'
-                        ? 'border-[#6366f1] bg-[#f5f5ff] dark:bg-[#1e1b4b]'
-                        : 'border-[#e2e8f0] hover:border-[#cbd5e1] dark:border-[#334155] dark:hover:border-[#64748b]'
+                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
+                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">Anthropic</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+                        <span className="rounded-full bg-[var(--bg-subtle)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
                           Claude
                         </span>
                       </div>
                       {activeProvider === 'anthropic' ? (
-                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">
+                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
                           Active
                         </span>
                       ) : (
                         <button
                           onClick={() => activateProvider('anthropic', anthropicModel)}
-                          className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors dark:border-[#818cf8] dark:text-[#a5b4fc] dark:hover:bg-[#312e81]"
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
                           Use Claude
                         </button>
@@ -1076,11 +1071,11 @@ export default function Settings() {
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs font-medium">Model</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Model</span>
                         <select
                           value={anthropicModel}
                           onChange={(e) => updateProviderModel('anthropic', e.target.value)}
-                          className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                         >
                           <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
                           <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
@@ -1094,10 +1089,10 @@ export default function Settings() {
 
                   {/* Google Gemini */}
                   <div
-                    className={`border rounded-xl p-4 transition-colors ${
+                    className={`rounded-md border p-4 transition-colors ${
                       activeProvider === 'gemini'
-                        ? 'border-[#6366f1] bg-[#f5f5ff] dark:bg-[#1e1b4b]'
-                        : 'border-[#e2e8f0] hover:border-[#cbd5e1] dark:border-[#334155] dark:hover:border-[#64748b]'
+                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
+                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
@@ -1108,13 +1103,13 @@ export default function Settings() {
                         </span>
                       </div>
                       {activeProvider === 'gemini' ? (
-                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">
+                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
                           Active
                         </span>
                       ) : (
                         <button
                           onClick={() => activateProvider('gemini', geminiModel)}
-                          className="text-xs px-3 py-1 rounded-lg border border-[#6366f1] text-[#6366f1] hover:bg-[#6366f1] hover:text-white transition-colors dark:border-[#818cf8] dark:text-[#a5b4fc] dark:hover:bg-[#312e81]"
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
                         >
                           Use Gemini
                         </button>
@@ -1123,11 +1118,11 @@ export default function Settings() {
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs font-medium">Model</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Model</span>
                         <select
                           value={geminiModel}
                           onChange={(e) => updateProviderModel('gemini', e.target.value)}
-                          className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                         >
                           <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
                           <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
@@ -1139,20 +1134,20 @@ export default function Settings() {
                   </div>
                 </div>
 
-                <div className="mt-4 text-[11px] text-[#64748b] dark:text-[#94a3b8]">{t('settings.apiKeys.help')}</div>
+                <div className="mt-4 text-[11px] text-[var(--text-muted)]">{t('settings.apiKeys.help')}</div>
               </div>
             )}
 
             {/* TAB 3: STT Speech-to-Text */}
             {activeTab === 'stt' && (
-              <div className="card p-6">
-                <div className="font-semibold text-[#6366f1] mb-1">Speech-to-Text</div>
-                <div className="text-xs text-[#64748b] dark:text-[#94a3b8] mb-4">
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+                <div className="mb-1 font-semibold">Speech-to-Text</div>
+                <div className="mb-4 text-xs text-[var(--text-muted)]">
                   Real-time transcription for Stealth Copilot. Currently powered by Deepgram (high accuracy, low latency).
                 </div>
 
                 <div className="space-y-4">
-                  <div className="border border-[#6366f1] bg-[#f5f5ff] rounded-xl p-4 dark:bg-[#1e1b4b]">
+                  <div className="rounded-md border border-[var(--text-muted)] bg-[var(--bg-subtle)] p-4">
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">Deepgram</span>
@@ -1160,18 +1155,18 @@ export default function Settings() {
                           Real-time WS
                         </span>
                       </div>
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#6366f1] text-white">
+                      <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
                         Active
                       </span>
                     </div>
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs font-medium">Model</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Model</span>
                         <select
                           value={sttModel}
                           onChange={(e) => updateSttConfig('deepgram', e.target.value)}
-                          className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                         >
                           <option value="nova-3">nova-3 (Recommended - multilingual)</option>
                           <option value="nova-2">nova-2 (general)</option>
@@ -1182,12 +1177,12 @@ export default function Settings() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <span className="w-12 text-[#64748b] dark:text-[#94a3b8] text-xs font-medium">Language</span>
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">Language</span>
                         <select
                           aria-label="Deepgram language"
                           value={sttLanguage}
                           onChange={(e) => setSttLanguage(e.target.value as SttLanguage)}
-                          className="flex-1 bg-white border border-[#e2e8f0] rounded-lg px-3 py-1 text-sm dark:bg-[#0f172a] dark:text-[#f8fafc] dark:border-[#334155]"
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                         >
                           <option value="zh-CN">简体中文</option>
                           <option value="zh-TW">繁體中文</option>
@@ -1201,7 +1196,7 @@ export default function Settings() {
                   </div>
                 </div>
 
-                <div className="mt-4 text-[11px] text-[#64748b] dark:text-[#94a3b8]">
+                <div className="mt-4 text-[11px] text-[var(--text-muted)]">
                   The selected STT model is used for live transcription. Deepgram keys are separate from LLM keys.
                 </div>
               </div>
@@ -1211,8 +1206,8 @@ export default function Settings() {
             {activeTab === 'shortcuts_privacy' && (
               <>
                 {/* Audio Capture */}
-                <div className="card p-6">
-                  <div className="font-semibold text-[#6366f1] mb-3">{t('settings.audio.title')}</div>
+                <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+                  <div className="mb-3 font-semibold">{t('settings.audio.title')}</div>
                   <div className="text-sm mb-2">{t('settings.audio.device')}</div>
 
                   <button
@@ -1220,43 +1215,43 @@ export default function Settings() {
                       const devices = await invoke<string[]>('list_audio_devices')
                       alert(t('settings.audio.listDevices') + ':\n' + devices.join('\n'))
                     }}
-                    className="text-xs px-3 py-1 border border-[#e2e8f0] rounded mb-3 hover:bg-[#f8fafc] transition-colors dark:border-[#334155] dark:hover:bg-[#1e293b]"
+                    className="mb-3 rounded-md border border-[var(--border-color)] px-3 py-1 text-xs transition-colors hover:bg-[var(--bg-hover)]"
                   >
                     {t('settings.audio.listDevices')}
                   </button>
 
-                  <div className="text-xs p-3 bg-emerald-50 border border-emerald-200 rounded-lg space-y-2 dark:border-emerald-900 dark:bg-emerald-950/60">
+                  <div className="space-y-2 rounded-md border border-[var(--success)] p-3 text-xs">
                     <div>
                       <b>✅ macOS system audio: AudioTee</b>
                     </div>
-                    <div className="text-emerald-700 dark:text-emerald-300">
+                    <div className="text-[var(--success)]">
                       The bundled, pinned AudioTee sidecar captures the default system output. Microphone capture remains a separate option.
                     </div>
                     <div>
                       <b>✅ Windows system audio: WASAPI loopback</b>
                     </div>
-                    <div className="text-emerald-700 dark:text-emerald-300">
+                    <div className="text-[var(--success)]">
                       Shared-mode loopback captures the default render endpoint mix. Microphone capture remains a separate option.
                     </div>
-                    <div className="pt-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                    <div className="pt-1 text-[10px] text-[var(--success)]">
                       macOS requires 14.2+. Windows uses the default output device for the active session. Unsupported platforms use microphone-only mode.
                     </div>
                   </div>
                 </div>
 
                 {/* Keyboard Shortcuts */}
-                <div className="card p-6">
-                  <div className="font-semibold text-[#6366f1] mb-3">{t('settings.shortcuts.title')}</div>
+                <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+                  <div className="mb-3 font-semibold">{t('settings.shortcuts.title')}</div>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span>{t('settings.shortcuts.toggle')}</span>
-                      <span className="font-mono text-xs bg-[#f1f5f9] px-1.5 py-px rounded dark:bg-[#0f172a]">
+                      <span className="rounded bg-[var(--bg-subtle)] px-1.5 py-px font-mono text-xs">
                         ⌘⇧I
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span>{t('settings.shortcuts.capture')}</span>
-                      <span className="font-mono text-xs bg-[#f1f5f9] px-1.5 py-px rounded dark:bg-[#0f172a]">
+                      <span className="rounded bg-[var(--bg-subtle)] px-1.5 py-px font-mono text-xs">
                         ⌘⇧C
                       </span>
                     </div>
@@ -1264,13 +1259,13 @@ export default function Settings() {
                 </div>
 
                 {/* Privacy */}
-                <div className="card p-6">
-                  <div className="font-semibold text-[#6366f1] mb-3">{t('settings.privacy.title')}</div>
+                <div className="rounded-lg border border-[var(--danger)] bg-[var(--bg-surface)] p-5">
+                  <div className="mb-3 font-semibold text-[var(--danger)]">{t('settings.privacy.title')}</div>
                   <p className="text-sm">{t('settings.privacy.desc')}</p>
                   <button
                     type="button"
                     onClick={() => void handleClearLocalData()}
-                    className="mt-4 text-red-600 hover:text-red-700 text-sm font-medium transition-colors"
+                    className="mt-4 rounded-md border border-[var(--danger)] px-3 py-1.5 text-sm font-medium text-[var(--danger)] transition-colors hover:bg-[var(--bg-hover)]"
                   >
                     {t('settings.privacy.clear')}
                   </button>
@@ -1280,20 +1275,20 @@ export default function Settings() {
 
             {/* TAB 5: Storage */}
             {activeTab === 'storage' && (
-              <div className="space-y-6">
-                <div className="card p-6">
+              <div className="space-y-4">
+                <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
                   <div className="flex items-start justify-between gap-6">
                     <div className="flex items-start gap-3">
-                      <HardDrive className="w-5 h-5 mt-0.5 text-[#6366f1]" />
+                      <HardDrive className="mt-0.5 h-5 w-5 text-[var(--text-muted)]" />
                       <div>
                         <div className="font-semibold">{t('settings.storage.recordings')}</div>
-                        <div className="mt-1 text-sm text-[#64748b] dark:text-[#94a3b8]">
+                        <div className="mt-1 text-sm text-[var(--text-muted)]">
                           {t('settings.storage.recordingsDesc')}
                         </div>
-                        <div className="mt-3 text-lg font-semibold text-[#0f172a] dark:text-[#f8fafc]">
+                        <div className="mt-3 text-lg font-semibold">
                           {storageLoading ? '—' : formatStorageBytes(recordingStorage.bytes)}
                         </div>
-                        <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">
+                        <div className="text-xs text-[var(--text-muted)]">
                           {storageLoading ? '—' : t('settings.storage.fileCount', { count: recordingStorage.fileCount })}
                         </div>
                       </div>
@@ -1302,7 +1297,7 @@ export default function Settings() {
                       type="button"
                       onClick={() => void handleClearRecordings()}
                       disabled={storageLoading || storageAction !== null}
-                      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:hover:bg-red-950/50"
+                      className="flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--danger)] px-3 py-1.5 text-sm font-medium text-[var(--danger)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {storageAction === 'recordings' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                       {t('settings.storage.clearRecordings')}
@@ -1310,19 +1305,19 @@ export default function Settings() {
                   </div>
                 </div>
 
-                <div className="card p-6">
+                <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
                   <div className="flex items-start justify-between gap-6">
                     <div className="flex items-start gap-3">
-                      <HistoryIcon className="w-5 h-5 mt-0.5 text-[#6366f1]" />
+                      <HistoryIcon className="mt-0.5 h-5 w-5 text-[var(--text-muted)]" />
                       <div>
                         <div className="font-semibold">{t('settings.storage.history')}</div>
-                        <div className="mt-1 text-sm text-[#64748b] dark:text-[#94a3b8]">
+                        <div className="mt-1 text-sm text-[var(--text-muted)]">
                           {t('settings.storage.historyDesc')}
                         </div>
-                        <div className="mt-3 text-lg font-semibold text-[#0f172a] dark:text-[#f8fafc]">
+                        <div className="mt-3 text-lg font-semibold">
                           {storageLoading ? '—' : formatStorageBytes(historyStorage.bytes)}
                         </div>
-                        <div className="text-xs text-[#64748b] dark:text-[#94a3b8]">
+                        <div className="text-xs text-[var(--text-muted)]">
                           {storageLoading ? '—' : t('settings.storage.recordCount', { count: historyStorage.recordCount })}
                         </div>
                       </div>
@@ -1331,7 +1326,7 @@ export default function Settings() {
                       type="button"
                       onClick={() => void handleClearHistory()}
                       disabled={storageLoading || storageAction !== null || historyStorage.recordCount === 0}
-                      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:hover:bg-red-950/50"
+                      className="flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--danger)] px-3 py-1.5 text-sm font-medium text-[var(--danger)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {storageAction === 'history' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                       {t('settings.storage.clearHistory')}
@@ -1340,13 +1335,13 @@ export default function Settings() {
                 </div>
 
                 {storageError && (
-                  <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">
+                  <div role="alert" className="flex items-start gap-2 rounded-md border border-[var(--danger)] p-3 text-sm text-[var(--danger)]">
                     <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
                     <span>{storageError}</span>
                   </div>
                 )}
                 {storageNotice && !storageError && (
-                  <div role="status" className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300">
+                  <div role="status" className="flex items-start gap-2 rounded-md border border-[var(--success)] p-3 text-sm text-[var(--success)]">
                     <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
                     <span>{storageNotice}</span>
                   </div>
@@ -1354,7 +1349,7 @@ export default function Settings() {
               </div>
             )}
 
-            <div className="mt-8 text-xs text-[#64748b] dark:text-[#94a3b8] flex items-center gap-1.5">
+            <div className="mt-8 flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
               <Shield className="w-3.5 h-3.5" /> {t('settings.secureNote')}
             </div>
           </div>

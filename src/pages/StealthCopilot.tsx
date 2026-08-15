@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
-import { ChevronDown, ExternalLink, Mic, SlidersHorizontal, Volume2 } from "lucide-react"
+import { ChevronDown, ExternalLink, Mic, RefreshCw, SlidersHorizontal, Volume2 } from "lucide-react"
 import CopilotPanel from "../components/CopilotPanel"
 import { useTranslation } from "../i18n"
 import {
@@ -76,26 +76,26 @@ export default function StealthCopilot() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden p-6 md:p-8">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-app)] p-4 text-[var(--text-main)]">
       <div className="flex min-h-0 w-full flex-1 flex-col">
         {/* Header Bar */}
-        <div className="mb-3 flex shrink-0 items-center justify-between gap-4">
+        <div className="mb-2 flex shrink-0 items-center justify-between gap-4 border-b border-[var(--border-color)] pb-2">
           <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <h1 className="truncate text-2xl font-semibold tracking-tight text-[#0f172a] dark:text-[#f8fafc]">
+            <div className="flex items-center gap-2.5">
+              <h1 className="truncate text-xl font-semibold tracking-tight text-[var(--text-main)]">
                 {t("copilot.title")}
               </h1>
               <span
-                className={`rounded-full px-3 py-0.5 text-xs font-semibold ${
+                className={`rounded-md bg-[var(--bg-subtle)] px-2 py-0.5 text-[11px] font-medium ${
                   running
-                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 animate-pulse"
-                    : "bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+                    ? "text-[var(--success)]"
+                    : "text-[var(--text-muted)]"
                 }`}
               >
                 {t(`copilot.phase.${copilot.phase}`)}
               </span>
             </div>
-            <p className="mt-0.5 truncate text-xs text-[#64748b] dark:text-[#94a3b8]">
+            <p className="truncate text-xs text-[var(--text-muted)]">
               {t("copilot.subtitle")}
             </p>
           </div>
@@ -104,10 +104,10 @@ export default function StealthCopilot() {
             <button
               type="button"
               onClick={() => setAudioSettingsOpen((open) => !open)}
-              className="flex items-center gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2 text-xs font-medium hover:bg-[#f8fafc] dark:border-[#334155] dark:bg-[#1e293b] dark:text-[#f8fafc]"
+              className="flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] hover:bg-[var(--bg-hover)]"
               aria-expanded={audioSettingsOpen}
             >
-              <SlidersHorizontal className="h-3.5 w-3.5 text-[#6366f1]" />
+              <SlidersHorizontal className="h-3.5 w-3.5 text-[var(--text-muted)]" />
               <span>音频输入配置</span>
               <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-150 ${audioSettingsOpen ? "rotate-180" : ""}`} />
             </button>
@@ -115,20 +115,20 @@ export default function StealthCopilot() {
             <button
               type="button"
               onClick={() => void showCopilotWindow().then(setWindowStatus)}
-              className="flex items-center gap-2 rounded-xl border border-[#e2e8f0] bg-white px-3.5 py-2 text-xs font-medium text-[#0f172a] hover:bg-[#f8fafc] dark:border-[#334155] dark:bg-[#1e293b] dark:text-[#f8fafc]"
+              className="flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] hover:bg-[var(--bg-hover)]"
             >
-              <ExternalLink className="h-3.5 w-3.5 text-[#6366f1]" />
+              <ExternalLink className="h-3.5 w-3.5 text-[var(--text-muted)]" />
               <span>{t("copilot.detach")}</span>
             </button>
 
             {/* Audio Settings Dropdown Popover Panel */}
             {audioSettingsOpen && (
               <section
-                className="absolute right-0 top-full z-50 mt-2 w-80 md:w-96 rounded-2xl border border-[#e2e8f0] bg-white p-4 shadow-xl dark:border-[#334155] dark:bg-[#1e293b]"
+                className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 shadow-[0_8px_24px_rgba(0,0,0,0.08)] md:w-96"
                 aria-label={t("copilot.device")}
               >
                 <div className="grid gap-3 md:grid-cols-2 md:items-center">
-                  <label className="flex items-center gap-2 text-sm font-medium text-[#0f172a] dark:text-[#f8fafc]">
+                  <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-main)]">
                     <input
                       type="checkbox"
                       checked={useSystemAudio && Boolean(capabilities?.system_audio_available)}
@@ -138,12 +138,12 @@ export default function StealthCopilot() {
                         setUseSystemAudio(checked)
                         void persistCaptureMode(checked, useMicrophone)
                       }}
-                      className="h-4 w-4 rounded accent-[#6366f1]"
+                      className="h-4 w-4 rounded accent-[var(--action)]"
                     />
                     {t("copilot.useSystemAudio")}
                   </label>
 
-                  <label className="flex items-center gap-2 text-sm font-medium text-[#0f172a] dark:text-[#f8fafc]">
+                  <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-main)]">
                     <input
                       type="checkbox"
                       checked={useMicrophone}
@@ -153,26 +153,26 @@ export default function StealthCopilot() {
                         setUseMicrophone(checked)
                         void persistCaptureMode(useSystemAudio, checked)
                       }}
-                      className="h-4 w-4 rounded accent-[#6366f1]"
+                      className="h-4 w-4 rounded accent-[var(--action)]"
                     />
                     {t("copilot.alsoCaptureMic")}
                   </label>
                 </div>
 
                 {!capabilities?.system_audio_available && capabilities?.system_audio_reason && (
-                  <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                  <p className="mt-2 rounded-lg bg-[var(--bg-subtle)] px-3 py-2 text-xs text-[var(--warning)]">
                     {capabilities.system_audio_reason}
                   </p>
                 )}
 
                 {capabilities?.system_audio_available && (
-                  <p className="mt-2 text-[11px] text-[#64748b] dark:text-[#94a3b8]">
+                  <p className="mt-2 text-[11px] text-[var(--text-muted)]">
                     AudioTee {capabilities.audiotee_commit.slice(0, 12)} · 16 kHz mono · macOS Default Output
                   </p>
                 )}
 
                 <div className="mt-3 flex items-center gap-2 text-xs">
-                  <span className="shrink-0 font-medium text-[#64748b] dark:text-[#94a3b8]">
+                  <span className="shrink-0 font-medium text-[var(--text-muted)]">
                     {t("copilot.device")}:
                   </span>
                   <select
@@ -182,7 +182,7 @@ export default function StealthCopilot() {
                       void persistCaptureMode(useSystemAudio, useMicrophone, event.target.value)
                     }}
                     disabled={running || !useMicrophone}
-                    className="min-w-0 flex-1 rounded-xl border border-[#e2e8f0] bg-white px-3 py-1.5 text-xs text-[#0f172a] outline-none dark:border-[#334155] dark:bg-[#0f172a] dark:text-[#f8fafc]"
+                    className="min-w-0 flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-main)] outline-none"
                   >
                     {devices.length === 0 && <option value="">{t("copilot.defaultDevice")}</option>}
                     {devices.map((device) => (
@@ -195,10 +195,10 @@ export default function StealthCopilot() {
                     type="button"
                     onClick={() => void loadDevices()}
                     disabled={running}
-                    className="rounded-lg p-1.5 text-[#6366f1] hover:bg-[#e0e7ff] dark:hover:bg-[#312e81]"
+                    className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
                     title="刷新设备列表"
                   >
-                    ↻
+                    <RefreshCw className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </section>
@@ -207,31 +207,31 @@ export default function StealthCopilot() {
         </div>
 
         {/* Compact Status Pills Bar */}
-        <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-[#e2e8f0] bg-white/80 px-3.5 py-1.5 text-xs text-[#64748b] backdrop-blur-sm dark:border-[#334155] dark:bg-[#1e293b]/80 dark:text-[#94a3b8]">
+        <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2 px-1 py-1 text-xs text-[var(--text-muted)]">
           <div className="flex items-center gap-1.5 font-medium">
-            <Volume2 className="h-3.5 w-3.5 text-[#6366f1]" />
+            <Volume2 className="h-3.5 w-3.5" />
             <span>系统声音:</span>
-            <span className={useSystemAudio ? "font-semibold text-emerald-600 dark:text-emerald-400" : "text-slate-400"}>
+            <span className={useSystemAudio ? "font-semibold text-[var(--success)]" : "text-[var(--text-muted)]"}>
               {useSystemAudio ? "已开启" : "已禁用"}
             </span>
           </div>
-          <span className="text-[#cbd5e1] dark:text-[#475569]">•</span>
+          <span className="text-[var(--border-color)]">•</span>
           <div className="flex items-center gap-1.5 font-medium">
-            <Mic className="h-3.5 w-3.5 text-[#6366f1]" />
+            <Mic className="h-3.5 w-3.5" />
             <span>麦克风:</span>
-            <span className={useMicrophone ? "font-semibold text-emerald-600 dark:text-emerald-400" : "text-slate-400"}>
+            <span className={useMicrophone ? "font-semibold text-[var(--success)]" : "text-[var(--text-muted)]"}>
               {useMicrophone ? "已开启" : "已禁用"}
             </span>
           </div>
           {selectedDevice && (
             <>
-              <span className="text-[#cbd5e1] dark:text-[#475569]">•</span>
-              <span className="truncate max-w-[200px] font-mono text-[11px] text-[#475569] dark:text-[#a5b4fc]" title={selectedDevice}>
+              <span className="text-[var(--border-color)]">•</span>
+              <span className="max-w-[200px] truncate font-mono text-[11px] text-[var(--text-muted)]" title={selectedDevice}>
                 {selectedDevice}
               </span>
             </>
           )}
-          <span className="ml-auto text-[11px] text-[#94a3b8]">
+          <span className="ml-auto text-[11px] text-[var(--text-muted)]">
             {t("copilot.archive.autoSaveHint")}
           </span>
         </div>
