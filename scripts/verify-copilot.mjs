@@ -289,6 +289,26 @@ if (sessionState) {
     failedArchive?.archiveStatus === 'error' && failedArchive.archiveNotice === 'disk full',
     'automatic archive failures are exposed to the user',
   )
+  let retainedHistory = starting
+  for (let index = 1; index <= 81; index += 1) {
+    retainedHistory = reduceCopilotSnapshot(retainedHistory, {
+      type: 'message',
+      sessionId: 7,
+      message: {
+        id: 100 + index,
+        role: index % 2 === 0 ? 'me' : 'interviewer',
+        source: index % 2 === 0 ? 'microphone-stt' : 'system-stt',
+        text: `turn ${index}`,
+        createdAt: index,
+      },
+    })
+  }
+  check(
+    retainedHistory.messages.length === 81
+      && retainedHistory.messages[0]?.text === 'turn 1'
+      && retainedHistory.messages[80]?.text === 'turn 81',
+    'chat snapshot keeps the full current session instead of dropping messages after 80',
+  )
 }
 
 const { createCopilotInterviewRecord, generateCopilotSessionTitle } = loadTypeScriptModule(

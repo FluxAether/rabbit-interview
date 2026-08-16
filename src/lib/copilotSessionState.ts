@@ -95,7 +95,7 @@ function upsertMessage(messages: CopilotMessage[], message: CopilotMessage): Cop
     next[index] = message
     return next
   }
-  return [...messages, message].slice(-80)
+  return [...messages, message]
 }
 
 export function reduceCopilotSnapshot(
