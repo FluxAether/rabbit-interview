@@ -38,6 +38,11 @@ Thumbs.db
 .env.*
 !.env.example
 
+# Local machine paths and AI tooling
+Users/
+.claude/
+.serena/project.local.yml
+
 # Tauri generated files
 src-tauri/gen/
 src-tauri/*.log

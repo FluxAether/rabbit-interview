@@ -1,8 +1,8 @@
 # Design References
 
-All UI in this project must be implemented to match the following high-fidelity mocks as closely as possible:
+All UI in this project must be implemented to match the following high-fidelity mocks as closely as possible.
 
-Located in `the local design mock directory`:
+The original mock images were used locally during design and are not shipped in this repository:
 
 1. `grok-8a3e230e-8cdb-468a-abe3-88e52bb47e29.jpg` — Settings (General)
 2. `grok-9370e132-0d20-436d-98da-357d32d0cb25.jpg` — Floating AI Interview Assistant (Stealth Copilot)

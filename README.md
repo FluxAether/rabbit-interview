@@ -9,8 +9,7 @@ Replicates and enhances core interview copilot features:
 - Interview History + Replay
 
 ## Design Fidelity
-**All UI strictly follows the design references** located at:
-`the local design mock directory` (6 reference images)
+UI follows the mock set described in [`docs/DESIGN_REFERENCES.md`](docs/DESIGN_REFERENCES.md).
 
 ## Getting Started
 
@@ -36,7 +35,7 @@ npm run preview:marketing
 - ✅ Dashboard, Settings, History, Mock Interview, Resume Optimizer, Stealth preview
 - 🚧 Phase 1 in progress: Audio capture + real floating window + Deepgram integration
 
-See the full phased plan in the session plan file for complete scope and milestones.
+See `docs/` for feature plans and design notes.
 
 ## Tech Stack
 Tauri 2 (Rust) • React 19 + TS • Tailwind • Framer Motion • Lucide • SQLite (planned) • Deepgram (STT) + Groq / OpenAI / Claude / Google Gemini (LLM)
@@ -69,7 +68,7 @@ See Packaging section below for more details.
 See Settings > Audio Capture for more details.
 
 ## License
-Proprietary (internal project)
+MIT. See [LICENSE](LICENSE).
 
 ## Packaging & Signing (Phase 4)
 
@@ -110,7 +109,7 @@ Entitlements are in `src-tauri/entitlements.plist`; `Info.plist` declares microp
 3. GitHub Actions builds macOS and Windows in parallel, then always publishes installers, updater artifacts, `latest.json`, and `SHA256SUMS.txt` to this repository's Release. If the token is set, it also publishes those assets and the Pages site to the public repository.
 4. `.github/workflows/marketing.yml` republishes `main/docs` only when the token is set and all four fixed public download assets exist.
 
-Public distribution lives at `https://github.com/thomas92118/rabbit-interview-downloads`. The application source remains in this private repository.
+Installers and the marketing site are published to [`thomas92118/rabbit-interview-downloads`](https://github.com/thomas92118/rabbit-interview-downloads). This repository holds the application source.
 
 **Required GitHub Secrets** (for signed builds):
 - `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD` (macOS)
