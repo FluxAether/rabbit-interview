@@ -45,13 +45,6 @@ Frontend-only (no native audio or windows):
 npm run dev
 ```
 
-Marketing site:
-
-```bash
-npm run dev:marketing
-npm run build:marketing
-```
-
 ## Build
 
 ```bash
@@ -74,7 +67,6 @@ npm run verify:mock
 npm run verify:resume
 npm run verify:theme
 npm run verify:db-storage
-npm run verify:marketing
 ```
 
 ## Audio Capture
@@ -112,13 +104,12 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`. The workflow builds mac
 
 The in-app updater reads `plugins.updater.endpoints` in `src-tauri/tauri.conf.json`. That URL must be publicly downloadable.
 
-Optional CI secrets for signed or mirrored builds:
+Optional CI secrets for signed builds:
 
 | Secret | Purpose |
 | --- | --- |
 | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD` | macOS signing |
 | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Updater signatures |
-| `PUBLIC_DISTRIBUTION_TOKEN` | Mirror installers and the marketing site to a public downloads repository |
 
 Unsigned packages may trigger OS security warnings. Prefer Release assets and check `SHA256SUMS.txt`.
 
@@ -129,10 +120,9 @@ macOS notarization and Windows Authenticode signing are operator-specific; see `
 ```text
 src/                 React UI and feature logic
 src-tauri/           Tauri / Rust host, audio, speech, windows
-marketing/           Independent marketing site
 docs/                Design notes and feature plans
 scripts/             Build, verify, and migration helpers
-.github/workflows/   Release and marketing publish
+.github/workflows/   Release workflow
 ```
 
 ## Tech Stack

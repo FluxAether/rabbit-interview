@@ -20,7 +20,7 @@ for (const platform of ['darwin-aarch64', 'darwin-x86_64', 'windows-x86_64']) {
   const item = manifest.platforms?.[platform]
   if (!item?.signature || !item?.url) throw new Error(`Missing updater platform: ${platform}`)
   const url = new URL(item.url)
-  if (url.hostname !== 'github.com' || !url.pathname.startsWith('/thomas92118/rabbit-interview-downloads/releases/download/')) {
+  if (url.hostname !== 'github.com' || !url.pathname.startsWith('/FluxAether/rabbit-interview/releases/download/')) {
     throw new Error(`Unexpected updater URL: ${item.url}`)
   }
   const asset = decodeURIComponent(url.pathname.split('/').at(-1))
