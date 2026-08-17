@@ -55,13 +55,17 @@ export function normalizeResumeWorkspace(value: unknown): ResumeWorkspace {
   const original = typeof saved.original === 'string' ? saved.original : ''
   const optimized = typeof saved.optimized === 'string' ? saved.optimized : ''
   const jobDescription = typeof saved.jobDescription === 'string' ? saved.jobDescription.slice(0, 5000) : ''
-  const keywordMatch = matchResumeKeywords(optimized || original, jobDescription)
+  const targetKeywords = Array.isArray(saved.targetKeywords)
+    ? saved.targetKeywords.filter((keyword): keyword is string => typeof keyword === 'string' && Boolean(keyword.trim())).slice(0, 12)
+    : []
+  const keywordMatch = matchResumeKeywords(optimized || original, jobDescription, targetKeywords)
   return {
     original,
     optimized,
     jobDescription,
     suggestions: Array.isArray(saved.suggestions) ? saved.suggestions.filter(isSuggestion) : [],
     sourceFileName: typeof saved.sourceFileName === 'string' ? saved.sourceFileName : '',
+    targetKeywords,
     ...keywordMatch,
   }
 }
@@ -73,6 +77,7 @@ export function toPersistedResumeWorkspace(workspace: ResumeWorkspace): Omit<Res
     jobDescription: workspace.jobDescription,
     suggestions: workspace.suggestions,
     sourceFileName: workspace.sourceFileName,
+    targetKeywords: workspace.targetKeywords,
   }
 }
 

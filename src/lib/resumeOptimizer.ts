@@ -20,8 +20,19 @@ export interface ResumeSuggestion {
 export interface ResumeAnalysisResult {
   optimizedText: string
   suggestions: ResumeSuggestion[]
+  targetKeywords: string[]
   matchedKeywords: string[]
   missingKeywords: string[]
+}
+
+export type ResumeRequirementPriority = 'required' | 'preferred'
+export type ResumeRequirementStatus = 'supported' | 'unsupported'
+
+interface ResumeRequirement {
+  keyword: string
+  priority: ResumeRequirementPriority
+  status: ResumeRequirementStatus
+  evidence: string
 }
 
 export interface ResumeWorkspace {
@@ -30,6 +41,7 @@ export interface ResumeWorkspace {
   jobDescription: string
   suggestions: ResumeSuggestion[]
   sourceFileName: string
+  targetKeywords: string[]
   matchedKeywords: string[]
   missingKeywords: string[]
 }
@@ -51,7 +63,14 @@ function protectedFactCounts(text: string): Map<string, number> {
     .replace(/(?<=\d),(?=\d{3}(?:\D|$))/g, '')
   const numbers = [...normalizedNumbers.matchAll(
     /(?<![\p{L}\p{N}])([+-])?\s*([$€£¥])?\s*(\d[\d,]*(?:\.\d+)?)\s*(%)?/gu,
-  )].map((match) => `number:${match[1] ?? ''}${match[2] ?? ''}${match[3].replace(/,/g, '.')}${match[4] ?? ''}`)
+  )].map((match) => {
+    const normalized = match[3].replace(/,/g, '.')
+    const year = Number(normalized)
+    if (!match[1] && !match[2] && !match[4] && /^\d{4}$/.test(normalized) && year >= 1900 && year <= 2100) {
+      return `year:${normalized}`
+    }
+    return `number:${match[1] ?? ''}${match[2] ?? ''}${normalized}${match[4] ?? ''}`
+  })
   const facts = [
     ...numbers,
     ...(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []).map((value) => `email:${value.toLocaleLowerCase()}`),
@@ -63,13 +82,67 @@ function protectedFactCounts(text: string): Map<string, number> {
   return counts
 }
 
+function canonicalEvidenceText(text: string): string {
+  return normalizeResumeText(text).toLocaleLowerCase().replace(/\s+/g, ' ')
+}
+
+function normalizeResumeRequirements(
+  value: unknown,
+  sourceText: string,
+  jobDescription: string,
+): ResumeRequirement[] {
+  if (!Array.isArray(value) || !jobDescription.trim()) return []
+  const source = canonicalEvidenceText(sourceText)
+  const posting = canonicalEvidenceText(jobDescription)
+  const seen = new Set<string>()
+  const requirements: ResumeRequirement[] = []
+
+  for (const item of value.slice(0, 16)) {
+    if (!item || typeof item !== 'object') continue
+    const requirement = item as Record<string, unknown>
+    const keyword = typeof requirement.keyword === 'string' ? requirement.keyword.trim().slice(0, 120) : ''
+    const priority = requirement.priority as ResumeRequirementPriority
+    const status = requirement.status as ResumeRequirementStatus
+    const evidence = typeof requirement.evidence === 'string' ? requirement.evidence.trim().slice(0, 500) : ''
+    const normalizedKeyword = canonicalEvidenceText(keyword)
+    const normalizedEvidence = canonicalEvidenceText(evidence)
+
+    if (!keyword || !['required', 'preferred'].includes(priority) || !['supported', 'unsupported'].includes(status)) continue
+    if (!normalizedKeyword || !posting.includes(normalizedKeyword) || seen.has(normalizedKeyword)) continue
+    if (status === 'supported' && (!normalizedEvidence || !source.includes(normalizedEvidence))) continue
+    if (status === 'unsupported' && evidence) continue
+
+    seen.add(normalizedKeyword)
+    requirements.push({ keyword, priority, status, evidence })
+    if (requirements.length >= 12) break
+  }
+
+  return requirements.sort((left, right) => {
+    if (left.priority === right.priority) return 0
+    return left.priority === 'required' ? -1 : 1
+  })
+}
+
+function protectedFactsAreSafe(sourceFacts: Map<string, number>, optimizedFacts: Map<string, number>): boolean {
+  for (const [fact, optimizedCount] of optimizedFacts) {
+    if (optimizedCount > (sourceFacts.get(fact) ?? 0)) return false
+  }
+  for (const [fact, sourceCount] of sourceFacts) {
+    if ((fact.startsWith('year:') || fact.startsWith('email:') || fact.startsWith('url:'))
+      && optimizedFacts.get(fact) !== sourceCount) {
+      return false
+    }
+  }
+  return true
+}
+
 export function normalizeLlmResumeResult(
   value: unknown,
   sourceText: string,
   jobDescription: string,
 ): ResumeAnalysisResult {
   if (!value || typeof value !== 'object') throw new Error('The LLM returned an invalid resume result.')
-  const result = value as { optimizedText?: unknown; suggestions?: unknown }
+  const result = value as { optimizedText?: unknown; suggestions?: unknown; requirements?: unknown }
   if (typeof result.optimizedText !== 'string' || !result.optimizedText.trim()) {
     throw new Error('The LLM returned an empty optimized resume.')
   }
@@ -84,12 +157,14 @@ export function normalizeLlmResumeResult(
   }
   const sourceFacts = protectedFactCounts(normalizedSource)
   const optimizedFacts = protectedFactCounts(optimizedText)
-  if ([...new Set([...sourceFacts.keys(), ...optimizedFacts.keys()])].some((fact) =>
-    sourceFacts.get(fact) !== optimizedFacts.get(fact)
-  )) {
+  if (!protectedFactsAreSafe(sourceFacts, optimizedFacts)) {
     throw new Error('The LLM changed protected factual content.')
   }
-  const keywordMatch = matchResumeKeywords(optimizedText, jobDescription)
+  const requirements = normalizeResumeRequirements(result.requirements, normalizedSource, jobDescription)
+  const targetKeywords = requirements.length
+    ? requirements.map((requirement) => requirement.keyword)
+    : extractKeywords(jobDescription)
+  const keywordMatch = matchResumeKeywords(optimizedText, jobDescription, targetKeywords)
 
   const suggestions = result.suggestions
     .slice(0, 12)
@@ -113,13 +188,15 @@ export function normalizeLlmResumeResult(
       }
     })
 
-  return { optimizedText, suggestions, ...keywordMatch }
+  return { optimizedText, suggestions, targetKeywords, ...keywordMatch }
 }
 
 const ENGLISH_STOPWORDS = new Set([
   'and', 'are', 'for', 'from', 'have', 'into', 'job', 'our', 'role', 'that', 'the', 'their',
   'this', 'with', 'will', 'work', 'working', 'years', 'you', 'your', 'ability', 'experience',
-  'preferred', 'required', 'requirements', 'responsibilities', 'skills',
+  'preferred', 'required', 'requirements', 'responsibilities', 'skills', 'must', 'should', 'need',
+  'needs', 'needed', 'strong', 'proficient', 'proficiency', 'expertise', 'essential', 'nice', 'bonus',
+  'ideal', 'ideally', 'candidate', 'candidates', 'looking', 'team', 'teams', 'including', 'using', 'knowledge',
 ])
 
 export function createEmptyResumeWorkspace(): ResumeWorkspace {
@@ -129,6 +206,7 @@ export function createEmptyResumeWorkspace(): ResumeWorkspace {
     jobDescription: '',
     suggestions: [],
     sourceFileName: '',
+    targetKeywords: [],
     matchedKeywords: [],
     missingKeywords: [],
   }
@@ -138,10 +216,14 @@ export function mergeResumeWorkspace(
   current: ResumeWorkspace,
   update: Partial<ResumeWorkspace>,
 ): ResumeWorkspace {
-  const next = { ...current, ...update }
+  const jobDescriptionChanged = update.jobDescription !== undefined && update.jobDescription !== current.jobDescription
+  const targetKeywords = jobDescriptionChanged && update.targetKeywords === undefined
+    ? []
+    : update.targetKeywords ?? current.targetKeywords
+  const next = { ...current, ...update, targetKeywords }
   return {
     ...next,
-    ...matchResumeKeywords(next.optimized || next.original, next.jobDescription),
+    ...matchResumeKeywords(next.optimized || next.original, next.jobDescription, next.targetKeywords),
   }
 }
 
@@ -198,31 +280,73 @@ export function normalizeResumeText(text: string): string {
 }
 
 function extractKeywords(jobDescription: string): string[] {
-  const keywords = new Map<string, string>()
-  for (const token of jobDescription.match(/[A-Za-z][A-Za-z0-9+#.-]{1,}/g) ?? []) {
-    const normalized = token.toLowerCase().replace(/[.-]+$/, '')
-    if (normalized.length < 3 || ENGLISH_STOPWORDS.has(normalized)) continue
-    if (!keywords.has(normalized)) keywords.set(normalized, token.replace(/[.-]+$/, ''))
+  const keywords = new Map<string, { display: string; score: number; firstIndex: number }>()
+  const requiredContext = /\b(?:must|required|requirements?|proficient|proficiency|strong|expertise|hands-on|need(?:ed)?|essential)\b/i
+  const preferredContext = /\b(?:preferred|nice[- ]to[- ]have|bonus|ideally|plus)\b/i
+  let tokenIndex = 0
+
+  for (const line of jobDescription.split(/\r?\n/)) {
+    const contextScore = requiredContext.test(line) ? 4 : preferredContext.test(line) ? 2 : 0
+    for (const token of line.match(/[A-Za-z][A-Za-z0-9+#.-]{1,}/g) ?? []) {
+      const display = token.replace(/[.-]+$/, '')
+      const normalized = display.toLowerCase()
+      if (normalized.length < 3 || ENGLISH_STOPWORDS.has(normalized)) continue
+      const technicalScore = /[+#]/.test(display) || /\d/.test(display) || /^[A-Z0-9]{2,}$/.test(display) ? 3 : 0
+      const existing = keywords.get(normalized)
+      keywords.set(normalized, {
+        display: existing?.display ?? display,
+        score: (existing?.score ?? 0) + 1 + contextScore + technicalScore,
+        firstIndex: existing?.firstIndex ?? tokenIndex,
+      })
+      tokenIndex += 1
+    }
   }
 
   for (const run of jobDescription.match(/[\p{Script=Han}]{2,}/gu) ?? []) {
-    const parts = run.split(/(?:以及|并且|同时|具有|具备|熟悉|掌握|负责|要求|优先|能力|经验|相关|岗位|职位|工作|和|与|及|或|的)+/)
+    const parts = run.split(/(?:以及|并且|同时|具有|具备|熟悉|掌握|负责|要求|必须|优先|能力|经验|相关|岗位|职位|工作|和|与|及|或|的)+/)
     for (const part of parts) {
       if (part.length < 2 || part.length > 8) continue
-      if (!keywords.has(part)) keywords.set(part, part)
+      const existing = keywords.get(part)
+      const contextScore = /(?:必须|要求|具备|掌握|熟悉)/.test(run) ? 4 : /优先/.test(run) ? 2 : 0
+      keywords.set(part, {
+        display: part,
+        score: (existing?.score ?? 0) + 1 + contextScore,
+        firstIndex: existing?.firstIndex ?? tokenIndex,
+      })
+      tokenIndex += 1
     }
   }
-  return [...keywords.values()].slice(0, 12)
+
+  return [...keywords.values()]
+    .sort((left, right) => right.score - left.score || left.firstIndex - right.firstIndex)
+    .slice(0, 12)
+    .map((item) => item.display)
 }
 
-export function matchResumeKeywords(resumeText: string, jobDescription: string): {
+function resumeContainsKeyword(resumeText: string, keyword: string): boolean {
+  const normalizedKeyword = keyword.trim().toLocaleLowerCase()
+  if (!normalizedKeyword) return false
+  if (/[^\x00-\x7F]/.test(normalizedKeyword)) return resumeText.toLocaleLowerCase().includes(normalizedKeyword)
+
+  const escaped = normalizedKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const startsWithWord = /^[A-Za-z0-9]/.test(normalizedKeyword)
+  const endsWithWord = /[A-Za-z0-9]$/.test(normalizedKeyword)
+  const pattern = `${startsWithWord ? '(?<![A-Za-z0-9])' : ''}${escaped}${endsWithWord ? '(?![A-Za-z0-9])' : ''}`
+  return new RegExp(pattern, 'i').test(resumeText)
+}
+
+export function matchResumeKeywords(resumeText: string, jobDescription: string, explicitKeywords?: readonly string[]): {
   matchedKeywords: string[]
   missingKeywords: string[]
 } {
-  const keywords = extractKeywords(jobDescription)
-  const comparableResume = resumeText.toLocaleLowerCase()
+  const keywords = explicitKeywords?.length
+    ? [...new Map(explicitKeywords
+      .map((keyword) => keyword.trim())
+      .filter(Boolean)
+      .map((keyword) => [keyword.toLocaleLowerCase(), keyword] as const)).values()].slice(0, 12)
+    : extractKeywords(jobDescription)
   return {
-    matchedKeywords: keywords.filter((keyword) => comparableResume.includes(keyword.toLocaleLowerCase())),
-    missingKeywords: keywords.filter((keyword) => !comparableResume.includes(keyword.toLocaleLowerCase())),
+    matchedKeywords: keywords.filter((keyword) => resumeContainsKeyword(resumeText, keyword)),
+    missingKeywords: keywords.filter((keyword) => !resumeContainsKeyword(resumeText, keyword)),
   }
 }

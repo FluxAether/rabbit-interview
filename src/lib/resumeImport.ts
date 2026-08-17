@@ -1,5 +1,5 @@
 export const MAX_RESUME_FILE_SIZE = 5 * 1024 * 1024
-export const MAX_RESUME_TEXT_LENGTH = 6_000
+export const MAX_RESUME_TEXT_LENGTH = 50_000
 
 export type ResumeFileValidationError = 'file-empty' | 'file-too-large' | 'unsupported-file-type'
 export type ResumeTextValidationError = 'empty-resume-text' | 'resume-text-too-long'

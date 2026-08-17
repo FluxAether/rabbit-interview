@@ -6,6 +6,7 @@ import {
   createEmptyResumeWorkspace,
   createResumeAnalysisRequestCoordinator,
   mergeResumeWorkspace,
+  matchResumeKeywords,
   normalizeLlmResumeResult,
   normalizeResumeText,
 } from '../src/lib/resumeOptimizer.ts'
@@ -39,6 +40,17 @@ const editedWorkspace = mergeResumeWorkspace({
 assert.deepEqual(editedWorkspace.missingKeywords, [], 'recomputes keyword gaps after resume edits')
 const changedJob = mergeResumeWorkspace(editedWorkspace, { jobDescription: 'Kubernetes' })
 assert.deepEqual(changedJob.missingKeywords, ['Kubernetes'], 'recomputes keyword gaps after job-description edits')
+const prioritizedFallback = matchResumeKeywords(
+  'Rust Kubernetes',
+  'Must have Rust and Kubernetes.\nNice to have Figma.',
+)
+assert.deepEqual(prioritizedFallback.matchedKeywords, ['Rust', 'Kubernetes'], 'prioritizes concrete required skills in local ATS fallback')
+assert.deepEqual(prioritizedFallback.missingKeywords, ['Figma'], 'keeps preferred concrete skills after required skills in local ATS fallback')
+assert.deepEqual(
+  matchResumeKeywords('JavaScript TypeScript', '', ['Java', 'TypeScript']),
+  { matchedKeywords: ['TypeScript'], missingKeywords: ['Java'] },
+  'does not count JavaScript as a false-positive match for Java',
+)
 
 const requests = createResumeAnalysisRequestCoordinator(10_000)
 const firstRequest = requests.start()
@@ -57,6 +69,20 @@ timedRequest.finish()
 
 const llmAnalysis = normalizeLlmResumeResult({
   optimizedText: 'Alex Morgan\n• Led product design',
+  requirements: [
+    {
+      keyword: 'TypeScript',
+      priority: 'preferred',
+      status: 'unsupported',
+      evidence: '',
+    },
+    {
+      keyword: 'Product design',
+      priority: 'required',
+      status: 'supported',
+      evidence: 'Led product design',
+    },
+  ],
   suggestions: [
     {
       title: 'Improved formatting',
@@ -76,7 +102,18 @@ assert.equal(llmAnalysis.optimizedText, 'Alex Morgan\n• Led product design', '
 assert.equal(llmAnalysis.suggestions[0]?.title, 'Improved formatting', 'keeps LLM copy separate from translation keys')
 assert.equal(llmAnalysis.suggestions[0]?.applied, true, 'marks changes already included by the LLM as applied')
 assert.equal(llmAnalysis.suggestions[1]?.applied, false, 'leaves factual gaps for manual input')
-assert.ok(llmAnalysis.missingKeywords.some((keyword) => keyword.toLowerCase() === 'typescript'), 'derives keyword gaps locally')
+assert.deepEqual(llmAnalysis.targetKeywords, ['Product design', 'TypeScript'], 'keeps the analyzed job requirements as stable ATS targets')
+assert.deepEqual(llmAnalysis.matchedKeywords, ['Product design'], 'uses evidence-backed requirement phrases for ATS matching')
+assert.deepEqual(llmAnalysis.missingKeywords, ['TypeScript'], 'keeps unsupported job requirements visible as gaps')
+const targetedWorkspace = mergeResumeWorkspace(
+  { ...createEmptyResumeWorkspace(), original: 'Product design', optimized: 'Product design', jobDescription: 'Product design TypeScript' },
+  { targetKeywords: llmAnalysis.targetKeywords },
+)
+const editedTargetedWorkspace = mergeResumeWorkspace(targetedWorkspace, { optimized: 'Product design leadership' })
+assert.deepEqual(editedTargetedWorkspace.targetKeywords, llmAnalysis.targetKeywords, 'keeps analyzed ATS targets while the user edits the resume')
+assert.deepEqual(editedTargetedWorkspace.missingKeywords, ['TypeScript'], 'recomputes the same analyzed ATS targets after a resume edit')
+const retargetedWorkspace = mergeResumeWorkspace(editedTargetedWorkspace, { jobDescription: 'Rust' })
+assert.deepEqual(retargetedWorkspace.targetKeywords, [], 'clears analyzed ATS targets when the job description changes')
 const faithfulRewrite = normalizeLlmResumeResult({
   optimizedText: 'Contributed to product onboarding',
   suggestions: [],
@@ -105,9 +142,15 @@ assert.throws(
   () => normalizeLlmResumeResult({ optimizedText: 'Increased revenue by 40%', suggestions: [] }, 'Improved revenue', ''),
   'rejects numeric facts not present in the source resume',
 )
+const prunedMetric = normalizeLlmResumeResult(
+  { optimizedText: 'Improved revenue', suggestions: [] },
+  'Improved revenue by 20%',
+  '',
+)
+assert.equal(prunedMetric.optimizedText, 'Improved revenue', 'allows a low-signal metric to be omitted with its bullet content')
 assert.throws(
-  () => normalizeLlmResumeResult({ optimizedText: 'Improved revenue', suggestions: [] }, 'Improved revenue by 20%', ''),
-  'rejects removal of a protected numeric fact',
+  () => normalizeLlmResumeResult({ optimizedText: 'Example Corp\nEngineer\n2020', suggestions: [] }, 'Example Corp\nEngineer\n2020-2024', ''),
+  'rejects removal of an employment year',
 )
 assert.throws(
   () => normalizeLlmResumeResult({ optimizedText: 'Variance: +20%', suggestions: [] }, 'Variance: -20%', ''),
@@ -189,10 +232,11 @@ assert.doesNotMatch(rendered.value, /<h1>负责产品设计与用户研究。<\/
 
 const persisted = toPersistedResumeWorkspace({
   original: 'original', optimized: 'optimized', jobDescription: 'jd', suggestions: [],
-  sourceFileName: 'resume.docx', matchedKeywords: ['saved?'], missingKeywords: ['saved?'],
+  sourceFileName: 'resume.docx', targetKeywords: ['Rust'], matchedKeywords: ['saved?'], missingKeywords: ['saved?'],
 })
 assert.equal('matchedKeywords' in persisted, false, 'does not persist derived matched keywords')
 assert.equal('missingKeywords' in persisted, false, 'does not persist derived missing keywords')
+assert.deepEqual(persisted.targetKeywords, ['Rust'], 'persists the analyzed ATS target list for stable recomputation')
 assert.equal(hasResumeWorkspaceContent(createEmptyResumeWorkspace()), false, 'clears persistence for an empty workspace')
 assert.equal(hasResumeWorkspaceContent({ ...createEmptyResumeWorkspace(), jobDescription: 'React' }), true, 'persists a workspace containing only a job description')
 const restored = normalizeResumeWorkspace({
@@ -211,6 +255,16 @@ await assert.rejects(enqueue(async () => { throw new Error('disk failure') }), '
 let recoveredWriteRan = false
 await enqueue(async () => { recoveredWriteRan = true })
 assert.equal(recoveredWriteRan, true, 'continues persistence after an earlier write failure')
+
+const optimizerAi = fs.readFileSync('src/lib/resumeOptimizerAi.ts', 'utf8')
+for (const phrase of [
+  'requirement-evidence matrix',
+  'Cut by signal',
+  'interview backtrack test',
+  'literal phrase that appears in the job description',
+]) {
+  assert.ok(optimizerAi.includes(phrase), `keeps evidence-first resume tailoring rule: ${phrase}`)
+}
 
 const translations = fs.readFileSync('src/i18n/translations.ts', 'utf8')
 for (const key of [

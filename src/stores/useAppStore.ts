@@ -51,6 +51,7 @@ export interface AppState {
   jobDescription: string
   resumeSuggestions: ResumeSuggestion[]
   resumeSourceFileName: string
+  resumeTargetKeywords: string[]
   resumeMatchedKeywords: string[]
   resumeMissingKeywords: string[]
   resumeHydrated: boolean
@@ -71,6 +72,7 @@ function resumeStateFromWorkspace(workspace: ResumeWorkspace) {
     jobDescription: workspace.jobDescription,
     resumeSuggestions: workspace.suggestions,
     resumeSourceFileName: workspace.sourceFileName,
+    resumeTargetKeywords: workspace.targetKeywords,
     resumeMatchedKeywords: workspace.matchedKeywords,
     resumeMissingKeywords: workspace.missingKeywords,
   }
@@ -83,6 +85,7 @@ export function selectResumeWorkspace(state: AppState): ResumeWorkspace {
     jobDescription: state.jobDescription,
     suggestions: state.resumeSuggestions,
     sourceFileName: state.resumeSourceFileName,
+    targetKeywords: state.resumeTargetKeywords,
     matchedKeywords: state.resumeMatchedKeywords,
     missingKeywords: state.resumeMissingKeywords,
   }
@@ -122,6 +125,7 @@ export const useAppStore = create<AppState>((set) => ({
   jobDescription: '',
   resumeSuggestions: [],
   resumeSourceFileName: '',
+  resumeTargetKeywords: [],
   resumeMatchedKeywords: [],
   resumeMissingKeywords: [],
   resumeHydrated: false,
@@ -134,6 +138,7 @@ export const useAppStore = create<AppState>((set) => ({
     mergeResumeWorkspace(selectResumeWorkspace(state), {
       optimized: result.optimizedText,
       suggestions: result.suggestions,
+      targetKeywords: result.targetKeywords,
     }),
   )),
   clearResumeWorkspace: () => {
