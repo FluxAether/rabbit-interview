@@ -12,10 +12,10 @@ const dashboard = read('src/pages/Dashboard.tsx')
 const stealth = read('src/pages/StealthCopilot.tsx')
 const panel = read('src/components/CopilotPanel.tsx')
 
-assert.match(mock, /sessionRef\.current\.phase === \'speaking\'/)
+assert.match(mock, /current\.currentQuestion\?\.id === question\.id && current\.phase === 'speaking'/)
 assert.match(mock, /copy\.roleRequired/)
 assert.match(mock, /finishingRef\.current/)
-assert.match(mock, /await stopVoice\(\{ saveRecording: false \}\)/)
+assert.match(mock, /await mockInterviewVoiceSession\.stop\(\{ saveRecording: false \}\)/)
 assert.equal(mock.includes('suggestion.description || suggestion.title'), false)
 
 assert.match(resume, /if \(!suggestion\.replacement\) return/)

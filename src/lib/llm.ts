@@ -373,6 +373,12 @@ export interface DeepgramTranscriptEvent {
   boundary: TranscriptBoundary;
 }
 
+export interface DeepgramStreamOptions {
+  language?: string;
+  endpointingMs?: number;
+  utteranceEndMs?: number;
+}
+
 export interface DeepgramStream extends WebSocket {
   __deepgramManaged?: boolean;
   __deepgramClosedByClient?: boolean;
@@ -380,6 +386,7 @@ export interface DeepgramStream extends WebSocket {
   __deepgramReconnectTimer?: ReturnType<typeof globalThis.setTimeout> | null;
   __deepgramReconnectAttempt?: number;
   __deepgramSampleRate?: number;
+  __deepgramOptions?: DeepgramStreamOptions;
   __deepgramOnTranscript?: (event: DeepgramTranscriptEvent) => void;
   __deepgramOnError?: (err: any) => void;
   __deepgramReplaceSocket?: (next: WebSocket) => void;
@@ -480,6 +487,8 @@ async function reconnectDeepgramStream(ws: DeepgramStream): Promise<void> {
     ws.__deepgramOnTranscript || (() => {}),
     ws.__deepgramOnError,
     true,
+    undefined,
+    ws.__deepgramOptions,
   ) as DeepgramStream;
 
   // Transfer managed state onto the replacement socket and update caller's reference.
@@ -487,6 +496,7 @@ async function reconnectDeepgramStream(ws: DeepgramStream): Promise<void> {
   next.__deepgramClosedByClient = false;
   next.__deepgramReconnectAttempt = 0;
   next.__deepgramSampleRate = ws.__deepgramSampleRate;
+  next.__deepgramOptions = ws.__deepgramOptions;
   next.__deepgramOnTranscript = ws.__deepgramOnTranscript;
   next.__deepgramOnError = ws.__deepgramOnError;
   next.__deepgramReplaceSocket = ws.__deepgramReplaceSocket;
@@ -503,6 +513,7 @@ async function openDeepgramSocket(
   onError?: (err: any) => void,
   isReconnect = false,
   apiKey?: string,
+  options: DeepgramStreamOptions = {},
 ): Promise<WebSocket> {
   const DEEPGRAM_API_KEY = apiKey ?? (await getKeys(true)).deepgram; // force fresh read so newly entered keys are picked up immediately
 
@@ -510,7 +521,7 @@ async function openDeepgramSocket(
   const { settings } = useAppStore.getState();
   const sttProvider = (settings?.sttProvider as string) || 'deepgram';
   const sttModel = (settings?.sttModel as string) || 'nova-3';
-  const sttLanguage = (settings?.sttLanguage as string) || 'zh-CN';
+  const sttLanguage = options.language || (settings?.sttLanguage as string) || 'zh-CN';
 
   if (!DEEPGRAM_API_KEY) {
     throw new Error('No Deepgram API key is configured. Add it in Settings before starting capture.');
@@ -523,12 +534,14 @@ async function openDeepgramSocket(
 
   // Browser/WebView clients authenticate with Deepgram's token WebSocket subprotocol.
   const language = `&language=${encodeURIComponent(sttLanguage)}`;
-  const endpointing = sttLanguage === 'multi' ? 100 : 300;
-  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true&utterance_end_ms=1000&vad_events=true${language}&endpointing=${endpointing}`;
+  const endpointing = options.endpointingMs ?? (sttLanguage === 'multi' ? 100 : 300);
+  const utteranceEndMs = options.utteranceEndMs ?? 1000;
+  const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true&utterance_end_ms=${utteranceEndMs}&vad_events=true${language}&endpointing=${endpointing}`;
 
   const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]) as DeepgramStream;
   ws.binaryType = 'arraybuffer';
   ws.__deepgramSampleRate = sampleRate;
+  ws.__deepgramOptions = { ...options };
   ws.__deepgramOnTranscript = onTranscript;
   ws.__deepgramOnError = onError;
   attachDeepgramHandlers(ws);
@@ -575,8 +588,9 @@ export async function startDeepgramStream(
   onError?: (err: any) => void,
   sampleRate: number = 16000,
   onSocketChange?: (ws: WebSocket) => void,
+  options: DeepgramStreamOptions = {},
 ): Promise<WebSocket> {
-  const ws = await openDeepgramSocket(sampleRate, onTranscript, onError, false) as DeepgramStream;
+  const ws = await openDeepgramSocket(sampleRate, onTranscript, onError, false, undefined, options) as DeepgramStream;
   ws.__deepgramManaged = true;
   ws.__deepgramClosedByClient = false;
   ws.__deepgramReconnectAttempt = 0;
@@ -608,7 +622,11 @@ export async function generateStructuredJson<T>(
   system: string,
   prompt: string,
   signal?: AbortSignal,
-  options: { allowProviderFallback?: boolean; maxOutputTokens?: number } = {},
+  options: {
+    allowProviderFallback?: boolean
+    maxOutputTokens?: number
+    thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high'
+  } = {},
 ): Promise<T> {
   const { provider, model, apiKey } = await resolveConfiguredProvider(options.allowProviderFallback !== false);
   if (!apiKey) throw new Error('No LLM API key is configured. Add a provider key in Settings and retry.');
@@ -622,10 +640,19 @@ export async function generateStructuredJson<T>(
       body: JSON.stringify({ model, max_tokens: maxOutputTokens, system, messages: [{ role: 'user', content: prompt }] }),
     });
   } else if (provider === 'gemini') {
+    const generationConfig: Record<string, unknown> = {
+      maxOutputTokens,
+      responseMimeType: 'application/json',
+    };
+    if (model.startsWith('gemini-3')) {
+      generationConfig.thinkingConfig = { thinkingLevel: options.thinkingLevel ?? 'medium' };
+    } else {
+      generationConfig.temperature = 0.3;
+    }
     response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: 'POST', signal,
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens, responseMimeType: 'application/json' } }),
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ parts: [{ text: prompt }] }], generationConfig }),
     });
   } else {
     const url = provider === 'groq' ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
@@ -638,6 +665,14 @@ export async function generateStructuredJson<T>(
 
   const data = await response.json();
   if (!response.ok) throw new Error(data?.error?.message || `${provider} error ${response.status}`);
+  const finishReason = provider === 'anthropic'
+    ? data?.stop_reason
+    : provider === 'gemini'
+      ? data?.candidates?.[0]?.finishReason
+      : data?.choices?.[0]?.finish_reason;
+  if (['length', 'max_tokens', 'max-tokens'].includes(String(finishReason || '').toLowerCase())) {
+    throw new Error('llm-output-truncated');
+  }
   const text = provider === 'anthropic'
     ? (data?.content || []).filter((block: any) => block?.type === 'text').map((block: any) => block.text).join('\n')
     : provider === 'gemini'

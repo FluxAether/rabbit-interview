@@ -1,15 +1,30 @@
-# RabbitInterview — Desktop Interview Copilot
+# Rabbit Interview
 
-Full-featured cross-platform desktop app built with **Tauri 2 + React 19**.
+Desktop interview copilot for **macOS** and **Windows**, built with **Tauri 2** and **React 19**.
 
-Replicates and enhances core interview copilot features:
-- Real-time Stealth Copilot (system audio + AI suggestions in floating window)
-- AI Mock Interviews
-- Intelligent Resume Optimizer
-- Interview History + Replay
+Bring your own API keys. Settings, resumes, interview history, and keys stay on the local machine.
 
-## Design Fidelity
-UI follows the mock set described in [`docs/DESIGN_REFERENCES.md`](docs/DESIGN_REFERENCES.md).
+## Features
+
+- **Stealth Copilot** — Capture system audio and/or the microphone, transcribe in real time, and show structured answer suggestions in a floating window.
+- **AI Mock Interviews** — Generate a role-specific plan, ask follow-ups, score answers, and produce a practice report. Voice turns are supported.
+- **Resume Optimizer** — Match a resume against a job description and export an edited DOCX.
+- **History** — Review saved Copilot and mock-interview sessions, including recordings when they were captured.
+
+The UI supports Simplified Chinese, Traditional Chinese, and English. Theme follows Light, Dark, or System.
+
+## Requirements
+
+- Node.js 20+
+- Rust stable (for native builds)
+- On macOS 14.2+, a Swift toolchain if you want system-audio capture (AudioTee sidecar)
+- Your own keys:
+  - **Deepgram** for speech-to-text
+  - **Groq**, **OpenAI**, **Anthropic**, or **Google Gemini** for language features
+
+API keys are entered in **Settings**. They are stored in the local SQLite database under the app data directory (`com.rabbitinterview.desktop`). They are not committed to this repository.
+
+Use the copilot only where interview or assessment rules allow assistance tools.
 
 ## Getting Started
 
@@ -18,104 +33,102 @@ npm install
 npm run tauri dev
 ```
 
-Build for production:
+On macOS, system-audio capture in development:
+
 ```bash
+npm run tauri:mac-audio
+```
+
+Frontend-only (no native audio or windows):
+
+```bash
+npm run dev
+```
+
+## Build
+
+```bash
+# Current platform
 npm run tauri build
+
+# macOS universal app with AudioTee
+npm run build:mac
+
+# Windows x64
+npm run build:win
 ```
 
-Build or preview the independent marketing site:
+Checks used in development:
+
 ```bash
-npm run dev:marketing
-npm run build:marketing
-npm run preview:marketing
+npm run lint
+npm run verify:copilot
+npm run verify:mock
+npm run verify:resume
+npm run verify:theme
+npm run verify:db-storage
 ```
 
-## Current Progress (aligned with project plan)
-- ✅ Phase 0: Project bootstrap + modern React + Tailwind + design system
-- ✅ Dashboard, Settings, History, Mock Interview, Resume Optimizer, Stealth preview
-- 🚧 Phase 1 in progress: Audio capture + real floating window + Deepgram integration
+## Audio Capture
 
-See `docs/` for feature plans and design notes.
+Stealth Copilot can listen to **your microphone**, **the interviewer's playback** (system output), or both. When both are enabled, the native layer mixes them.
+
+### macOS
+
+- **14.2+** uses a bundled [AudioTee](https://github.com/makeusabrew/audiotee) sidecar for 16 kHz mono capture of the default system output.
+- Microphone capture uses `cpal` and is optional.
+- The sidecar source commit is pinned; `scripts/build-audiotee.sh` verifies it and writes architecture checksums to `src-tauri/target/audiotee-checksums.txt`. Policy and reference hashes live in `src-tauri/binaries/audiotee.lock`.
+- The first system-audio session requests **System Audio Recording** permission. AudioTee does not capture the screen.
+- macOS 13.0–14.1 stays on microphone-only mode.
+
+### Windows
+
+- System audio uses WASAPI loopback on the default render device (shared mode) via `cpal`.
+- Microphone capture is optional; both sources mix in the native layer.
+- If the default output device changes, restart capture. Exclusive-mode playback and DRM-protected content are not supported.
+
+Other platforms fall back to microphone-only mode. See **Settings → Audio Capture**.
+
+## Privacy
+
+- No product account and no first-party backend for interview content.
+- Resume text, history, settings, and API keys live in local app data.
+- Recordings are files under the app data directory, not in this git tree.
+- Speech and model calls go directly from the app to the providers you configure.
+
+`.env` files, local AI tool directories, and generated sidecars are gitignored. Copy `.env.example` only if you need `TAURI_DEV_HOST`.
+
+## Releases
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`. The workflow builds macOS (universal) and Windows installers, then publishes them to this repository's GitHub Release together with `latest.json` and `SHA256SUMS.txt`.
+
+The in-app updater reads `plugins.updater.endpoints` in `src-tauri/tauri.conf.json`. That URL must be publicly downloadable.
+
+Optional CI secrets for signed builds:
+
+| Secret | Purpose |
+| --- | --- |
+| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD` | macOS signing |
+| `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Updater signatures |
+
+Unsigned packages may trigger OS security warnings. Prefer Release assets and check `SHA256SUMS.txt`.
+
+macOS notarization and Windows Authenticode signing are operator-specific; see `src-tauri/tauri.conf.json`, `src-tauri/entitlements.plist`, and the release workflow.
+
+## Project Layout
+
+```text
+src/                 React UI and feature logic
+src-tauri/           Tauri / Rust host, audio, speech, windows
+docs/                Design notes and feature plans
+scripts/             Build, verify, and migration helpers
+.github/workflows/   Release workflow
+```
 
 ## Tech Stack
-Tauri 2 (Rust) • React 19 + TS • Tailwind • Framer Motion • Lucide • SQLite (planned) • Deepgram (STT) + Groq / OpenAI / Claude / Google Gemini (LLM)
 
-## Audio Capture (Important for Interviews)
-
-The Stealth Copilot can capture **both your voice and the interviewer's voice** (system audio) for real-time transcription and suggestions.
-
-### Recommended on macOS
-
-- macOS 14.2+ uses the bundled [AudioTee](https://github.com/makeusabrew/audiotee) sidecar to capture 16 kHz mono audio from the default system output.
-- Microphone audio remains optional and is captured with `cpal`; when both sources are enabled they are mixed in the native layer.
-- The integration is pinned to commit `56ac954369a09318e46b88a6eec33c2d2b0d32a3`. Each build records architecture-specific SHA-256 values in `src-tauri/target/audiotee-checksums.txt`; reviewed reference hashes and policy live in `src-tauri/binaries/audiotee.lock`.
-- Run `npm run tauri:mac-audio` for development. `npm run build:mac` builds and bundles both sidecar architectures.
-- The first system-audio capture requests macOS **System Audio Recording** permission. AudioTee does not use screen recording permission or capture screen contents.
-
-See Packaging section below for more details.
-
-### Windows
-
-- Windows uses cpal's WASAPI host. Opening the default render endpoint as an input stream enables loopback capture of the system mix (shared mode).
-- Microphone capture remains optional via cpal input devices; both sources mix in the native layer.
-- Loopback follows the current default output device only for the active capture session. If the default device changes, restart capture. Exclusive-mode playback and DRM-protected content are not supported.
-
-### Fallback / Other platforms
-
-- macOS 13.0–14.1 remains supported in microphone-only mode.
-- Unsupported platforms fall back to microphone-only mode.
-
-See Settings > Audio Capture for more details.
+Tauri 2 (Rust) · React 19 · TypeScript · Tailwind · Lucide · SQLite · Deepgram (STT) · Groq / OpenAI / Anthropic / Gemini (LLM)
 
 ## License
-MIT. See [LICENSE](LICENSE).
 
-## Packaging & Signing (Phase 4)
-
-### macOS (with native audio capture)
-1. Make sure a Swift 6.3.2 toolchain is installed and selected:
-   ```bash
-   xcode-select -s /Applications/Xcode.app/Contents/Developer
-   ```
-   `scripts/build-audiotee.sh` verifies the reviewed source commit and records the resulting architecture-specific checksum.
-
-2. `npm run build:mac` (or `npm run tauri build`)
-
-3. Attach `src-tauri/target/audiotee-checksums.txt` to the release audit. Swift embeds build-path details, so binary hashes are recorded per build rather than treated as cross-machine reproducible values.
-
-4. For notarization:
-   - Create App Store Connect API key or use `xcrun notarytool store-credentials`
-   - `xcrun notarytool submit --keychain-profile "AC_PASSWORD" --wait ./target/release/bundle/macos/RabbitInterview.app.tar.gz`
-5. Staple: `xcrun stapler staple ./target/.../RabbitInterview.app`
-
-Entitlements are in `src-tauri/entitlements.plist`; `Info.plist` declares microphone and system-audio capture usage descriptions.
-
-### Windows
-- `npm run build:win`
-- For signing use EV certificate or Azure Trusted Signing.
-- Configure in `tauri.conf.json` under `bundle.windows` or via env `TAURI_SIGNING_PRIVATE_KEY`.
-
-### General
-- Update `tauri.conf.json` identifier, version, and updater pubkey before release.
-- Use GitHub Releases + Tauri updater for auto-updates.
-- The app fetches `plugins.updater.endpoints` → `.../releases/latest/download/latest.json`.
-- That endpoint must be **publicly downloadable** (no GitHub auth). Private repos return 404 to the desktop app.
-- Test on clean machines.
-
-### Automated Releases (Recommended)
-
-1. Optional: add `PUBLIC_DISTRIBUTION_TOKEN`, a fine-grained token with Contents read/write access only to `thomas92118/rabbit-interview-downloads`.
-2. Tag a version: `git tag v0.6.0 && git push origin v0.6.0`.
-3. GitHub Actions builds macOS and Windows in parallel, then always publishes installers, updater artifacts, `latest.json`, and `SHA256SUMS.txt` to this repository's Release. If the token is set, it also publishes those assets and the Pages site to the public repository.
-4. `.github/workflows/marketing.yml` republishes `main/docs` only when the token is set and all four fixed public download assets exist.
-
-Installers and the marketing site are published to [`thomas92118/rabbit-interview-downloads`](https://github.com/thomas92118/rabbit-interview-downloads). This repository holds the application source.
-
-**Required GitHub Secrets** (for signed builds):
-- `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD` (macOS)
-- `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (updater + Windows)
-- `PUBLIC_DISTRIBUTION_TOKEN` (optional; skip public Release and Pages publishing when unset)
-
-See the workflow for details.
-
-See `src-tauri/tauri.conf.json` and the full development plan for details.
+[MIT](LICENSE)

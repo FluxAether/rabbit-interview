@@ -9,38 +9,8 @@ concurrency:
   group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
-env:
-  PUBLIC_REPO: thomas92118/rabbit-interview-downloads
-
 jobs:
-  prepare-public-release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Create public draft release
-        env:
-          GH_TOKEN: ${{ secrets.PUBLIC_DISTRIBUTION_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "PUBLIC_DISTRIBUTION_TOKEN is not set; skipping public draft release."
-            exit 0
-          fi
-          if gh release view "$GITHUB_REF_NAME" -R "$PUBLIC_REPO" >/dev/null 2>&1; then
-            echo "Public release $GITHUB_REF_NAME already exists; assets will be replaced."
-          else
-            gh release create "$GITHUB_REF_NAME" \
-              -R "$PUBLIC_REPO" \
-              --target main \
-              --draft \
-              --title "Rabbit Interview $GITHUB_REF_NAME 测试版" \
-              --notes "构建进行中。安装包与校验文件将在双平台构建完成后发布。"
-          fi
-
   build:
-    needs: prepare-public-release
     strategy:
       fail-fast: false
       matrix:
@@ -114,7 +84,7 @@ jobs:
             --target "${{ matrix.target }}" \
             --version "$VERSION" \
             --tag "$GITHUB_REF_NAME" \
-            --repo "$PUBLIC_REPO" \
+            --repo "${{ github.repository }}" \
             --notes "$GITHUB_REF_NAME 测试版" \
             --out "updater-fragment-${{ matrix.platform_os }}.json"
 
@@ -164,7 +134,6 @@ jobs:
 
   publish:
     needs:
-      - prepare-public-release
       - build
     runs-on: ubuntu-latest
     permissions:
@@ -211,11 +180,6 @@ jobs:
           \) -print0 | sort -z | xargs -0 sha256sum | sed 's#  dist-release/#  #' > dist-release/SHA256SUMS.txt
           node scripts/verify-release-assets.mjs dist-release
 
-      - name: Build marketing site
-        run: |
-          npm run verify:marketing
-          npm run build:marketing
-
       - name: Upload and publish source release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -240,48 +204,3 @@ jobs:
           for required in RabbitInterview-macOS-universal.dmg RabbitInterview-Windows-x64.exe latest.json SHA256SUMS.txt; do
             grep -Fxq "$required" <<<"$ASSETS" || { echo "Missing source release asset: $required" >&2; exit 1; }
           done
-
-      - name: Upload and publish public release
-        env:
-          GH_TOKEN: ${{ secrets.PUBLIC_DISTRIBUTION_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "PUBLIC_DISTRIBUTION_TOKEN is not set; skipping public repository publish."
-            exit 0
-          fi
-          gh release upload "$GITHUB_REF_NAME" dist-release/* -R "$PUBLIC_REPO" --clobber
-          gh release edit "$GITHUB_REF_NAME" \
-            -R "$PUBLIC_REPO" \
-            --draft=false \
-            --title "Rabbit Interview $GITHUB_REF_NAME 测试版" \
-            --notes $'公开测试版。\n\n当前 macOS 包没有 Developer ID 与公证，Windows 包没有 Authenticode 签名，安装时可能出现系统安全警告。请从本 Release 下载，并核对 SHA256SUMS.txt。\n\n使用实时语音需要 Deepgram API Key，回答建议需要任一受支持的模型 API Key。仅在面试或测评规则允许辅助工具时使用。'
-          ASSETS="$(gh release view "$GITHUB_REF_NAME" -R "$PUBLIC_REPO" --json assets --jq '.assets[].name')"
-          for required in RabbitInterview-macOS-universal.dmg RabbitInterview-Windows-x64.exe latest.json SHA256SUMS.txt; do
-            grep -Fxq "$required" <<<"$ASSETS" || { echo "Missing public release asset: $required" >&2; exit 1; }
-          done
-
-      - name: Publish Pages files
-        env:
-          GH_TOKEN: ${{ secrets.PUBLIC_DISTRIBUTION_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "PUBLIC_DISTRIBUTION_TOKEN is not set; skipping public Pages publish."
-            exit 0
-          fi
-          gh auth setup-git
-          gh repo clone "$PUBLIC_REPO" public-distribution -- --branch main --single-branch
-          rsync -a --delete dist-marketing/ public-distribution/docs/
-          touch public-distribution/docs/.nojekyll
-          git -C public-distribution config user.name github-actions[bot]
-          git -C public-distribution config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git -C public-distribution add docs
-          if git -C public-distribution diff --cached --quiet; then
-            echo "Pages output already current."
-          else
-            git -C public-distribution commit -m "Publish $GITHUB_REF_NAME marketing site"
-            git -C public-distribution push origin main
-          fi

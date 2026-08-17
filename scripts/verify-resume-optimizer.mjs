@@ -147,6 +147,18 @@ const formattedDateRange = normalizeLlmResumeResult({
   suggestions: [],
 }, '示例公司｜产品经理｜2020-2024', '')
 assert.equal(formattedDateRange.optimizedText, '示例公司｜产品经理｜2020 - 2024', 'accepts harmless date-range spacing')
+const prunedRuntimeName = normalizeLlmResumeResult({
+  optimizedText: 'Alex Morgan\nSkills: TypeScript\nBackend developer',
+  suggestions: [],
+}, 'Alex Morgan\nSkills: Node.js TypeScript\nBackend developer', '')
+assert.equal(prunedRuntimeName.optimizedText.includes('Node.js'), false, 'does not misclassify Node.js as a protected URL')
+assert.throws(
+  () => normalizeLlmResumeResult({
+    optimizedText: 'Alex Morgan\nSkills: TypeScript\nBackend developer',
+    suggestions: [],
+  }, 'Alex Morgan\nPortfolio: portfolio.dev\nSkills: TypeScript\nBackend developer', ''),
+  'still protects a real bare portfolio URL',
+)
 assert.throws(
   () => normalizeLlmResumeResult({ optimizedText: '', suggestions: [] }, 'Original', ''),
   'rejects an empty LLM result',
@@ -282,6 +294,8 @@ for (const phrase of [
   'Cut by signal',
   'interview backtrack test',
   'literal phrase that appears in the job description',
+  'estimateResumeOptimizationOutputTokens',
+  "thinkingLevel: 'low'",
 ]) {
   assert.ok(optimizerAi.includes(phrase), `keeps evidence-first resume tailoring rule: ${phrase}`)
 }
@@ -291,6 +305,11 @@ for (const key of [
   'resume.analysisComplete',
   'resume.analysisError',
   'resume.analysisTimeout',
+  'resume.analysisTruncated',
+  'resume.analysisInvalidResponse',
+  'resume.analysisIncomplete',
+  'resume.analysisFactConflict',
+  'resume.analysisMissingKey',
   'resume.factReviewConfirm',
   'resume.factReviewRequired',
   'resume.includedInDraft',
