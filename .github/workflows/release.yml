@@ -24,7 +24,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${GH_TOKEN:-}" || { echo "PUBLIC_DISTRIBUTION_TOKEN is required" >&2; exit 1; }
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "PUBLIC_DISTRIBUTION_TOKEN is not set; skipping public draft release."
+            exit 0
+          fi
           if gh release view "$GITHUB_REF_NAME" -R "$PUBLIC_REPO" >/dev/null 2>&1; then
             echo "Public release $GITHUB_REF_NAME already exists; assets will be replaced."
           else
@@ -219,7 +222,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${GH_TOKEN:-}" || { echo "PUBLIC_DISTRIBUTION_TOKEN is required" >&2; exit 1; }
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "PUBLIC_DISTRIBUTION_TOKEN is not set; skipping public repository publish."
+            exit 0
+          fi
           gh release upload "$GITHUB_REF_NAME" dist-release/* -R "$PUBLIC_REPO" --clobber
           gh release edit "$GITHUB_REF_NAME" \
             -R "$PUBLIC_REPO" \
@@ -237,6 +243,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "PUBLIC_DISTRIBUTION_TOKEN is not set; skipping public Pages publish."
+            exit 0
+          fi
           gh auth setup-git
           gh repo clone "$PUBLIC_REPO" public-distribution -- --branch main --single-branch
           rsync -a --delete dist-marketing/ public-distribution/docs/
