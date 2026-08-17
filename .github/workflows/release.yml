@@ -168,7 +168,7 @@ jobs:
       - build
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -215,6 +215,31 @@ jobs:
         run: |
           npm run verify:marketing
           npm run build:marketing
+
+      - name: Upload and publish source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Source release $GITHUB_REF_NAME already exists; assets will be replaced."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --target "$GITHUB_SHA" \
+              --draft \
+              --title "Rabbit Interview $GITHUB_REF_NAME 测试版" \
+              --notes "构建完成。安装包与校验文件见本 Release。"
+          fi
+          gh release upload "$GITHUB_REF_NAME" dist-release/* --clobber
+          gh release edit "$GITHUB_REF_NAME" \
+            --draft=false \
+            --title "Rabbit Interview $GITHUB_REF_NAME 测试版" \
+            --notes $'测试版。\n\n当前 macOS 包没有 Developer ID 与公证，Windows 包没有 Authenticode 签名，安装时可能出现系统安全警告。请从本 Release 下载，并核对 SHA256SUMS.txt。\n\n使用实时语音需要 Deepgram API Key，回答建议需要任一受支持的模型 API Key。仅在面试或测评规则允许辅助工具时使用。'
+          ASSETS="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')"
+          for required in RabbitInterview-macOS-universal.dmg RabbitInterview-Windows-x64.exe latest.json SHA256SUMS.txt; do
+            grep -Fxq "$required" <<<"$ASSETS" || { echo "Missing source release asset: $required" >&2; exit 1; }
+          done
 
       - name: Upload and publish public release
         env:

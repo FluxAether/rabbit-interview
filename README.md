@@ -107,7 +107,7 @@ Entitlements are in `src-tauri/entitlements.plist`; `Info.plist` declares microp
 
 1. Optional: add `PUBLIC_DISTRIBUTION_TOKEN`, a fine-grained token with Contents read/write access only to `thomas92118/rabbit-interview-downloads`.
 2. Tag a version: `git tag v0.6.0 && git push origin v0.6.0`.
-3. GitHub Actions builds macOS and Windows in parallel. If the token is set, it also publishes installers, updater artifacts, `latest.json`, `SHA256SUMS.txt`, and the Pages site to the public repository. If the token is missing, public publishing is skipped.
+3. GitHub Actions builds macOS and Windows in parallel, then always publishes installers, updater artifacts, `latest.json`, and `SHA256SUMS.txt` to this repository's Release. If the token is set, it also publishes those assets and the Pages site to the public repository.
 4. `.github/workflows/marketing.yml` republishes `main/docs` only when the token is set and all four fixed public download assets exist.
 
 Public distribution lives at `https://github.com/thomas92118/rabbit-interview-downloads`. The application source remains in this private repository.
