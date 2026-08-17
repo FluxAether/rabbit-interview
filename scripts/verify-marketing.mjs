@@ -6,7 +6,7 @@ const root = path.resolve(import.meta.dirname, '..')
 const html = fs.readFileSync(path.join(root, 'marketing/index.html'), 'utf8')
 const tauri = JSON.parse(fs.readFileSync(path.join(root, 'src-tauri/tauri.conf.json'), 'utf8'))
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
-const expectedVersion = '0.6.0'
+const expectedVersion = '0.7.0'
 const publicRelease = 'https://github.com/thomas92118/rabbit-interview-downloads/releases'
 
 for (const file of [
@@ -31,7 +31,7 @@ for (const required of [
 
 if (/[—–]/u.test(html)) throw new Error('Marketing copy contains a visible long dash')
 if (packageJson.version !== expectedVersion || tauri.version !== expectedVersion) {
-  throw new Error('Node and Tauri versions must match v0.6.0')
+  throw new Error('Node and Tauri versions must match v0.7.0')
 }
 if (tauri.plugins.updater.endpoints[0] !== `${publicRelease}/latest/download/latest.json`) {
   throw new Error('Updater endpoint is not the public distribution repository')
