@@ -106,7 +106,7 @@ Entitlements are in `src-tauri/entitlements.plist`; `Info.plist` declares microp
 ### Automated Releases (Recommended)
 
 1. Add `PUBLIC_DISTRIBUTION_TOKEN`, a fine-grained token with Contents read/write access only to `thomas92118/rabbit-interview-downloads`.
-2. Tag a version: `git tag v0.5.2 && git push origin v0.5.2`.
+2. Tag a version: `git tag v0.6.0 && git push origin v0.6.0`.
 3. GitHub Actions creates a public draft Release, builds macOS and Windows in parallel, then publishes installers, updater artifacts, `latest.json`, `SHA256SUMS.txt`, and the Pages site.
 4. `.github/workflows/marketing.yml` republishes `main/docs` only when all four fixed public download assets exist.
 
