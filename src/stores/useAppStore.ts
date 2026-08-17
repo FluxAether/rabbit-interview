@@ -4,7 +4,10 @@ import { createInitialSnapshot, type CopilotSnapshot } from '../lib/copilotSessi
 import {
   createEmptyResumeWorkspace,
   mergeResumeWorkspace,
+  type ResumeAnalysisContext,
   type ResumeAnalysisResult,
+  type ResumeAnalysisSource,
+  type ResumeRequirement,
   type ResumeSuggestion,
   type ResumeWorkspace,
 } from '../lib/resumeOptimizer'
@@ -51,14 +54,18 @@ export interface AppState {
   jobDescription: string
   resumeSuggestions: ResumeSuggestion[]
   resumeSourceFileName: string
+  resumeRequirements: ResumeRequirement[]
   resumeTargetKeywords: string[]
   resumeMatchedKeywords: string[]
   resumeMissingKeywords: string[]
+  resumeAnalysisOriginalFingerprint: string
+  resumeAnalysisJobDescriptionFingerprint: string
+  resumeAnalysisSource: ResumeAnalysisSource
   resumeHydrated: boolean
   resumePersistenceError: boolean
   hydrateResumeWorkspace: (workspace: ResumeWorkspace) => void
   updateResumeWorkspace: (workspace: Partial<ResumeWorkspace>) => void
-  setResumeAnalysis: (result: ResumeAnalysisResult) => void
+  setResumeAnalysis: (result: ResumeAnalysisResult, context: ResumeAnalysisContext) => void
   clearResumeWorkspace: () => void
   setResumePersistenceError: (failed: boolean) => void
   
@@ -72,9 +79,13 @@ function resumeStateFromWorkspace(workspace: ResumeWorkspace) {
     jobDescription: workspace.jobDescription,
     resumeSuggestions: workspace.suggestions,
     resumeSourceFileName: workspace.sourceFileName,
+    resumeRequirements: workspace.requirements,
     resumeTargetKeywords: workspace.targetKeywords,
     resumeMatchedKeywords: workspace.matchedKeywords,
     resumeMissingKeywords: workspace.missingKeywords,
+    resumeAnalysisOriginalFingerprint: workspace.analysisOriginalFingerprint,
+    resumeAnalysisJobDescriptionFingerprint: workspace.analysisJobDescriptionFingerprint,
+    resumeAnalysisSource: workspace.analysisSource,
   }
 }
 
@@ -85,9 +96,13 @@ export function selectResumeWorkspace(state: AppState): ResumeWorkspace {
     jobDescription: state.jobDescription,
     suggestions: state.resumeSuggestions,
     sourceFileName: state.resumeSourceFileName,
+    requirements: state.resumeRequirements,
     targetKeywords: state.resumeTargetKeywords,
     matchedKeywords: state.resumeMatchedKeywords,
     missingKeywords: state.resumeMissingKeywords,
+    analysisOriginalFingerprint: state.resumeAnalysisOriginalFingerprint,
+    analysisJobDescriptionFingerprint: state.resumeAnalysisJobDescriptionFingerprint,
+    analysisSource: state.resumeAnalysisSource,
   }
 }
 
@@ -125,20 +140,28 @@ export const useAppStore = create<AppState>((set) => ({
   jobDescription: '',
   resumeSuggestions: [],
   resumeSourceFileName: '',
+  resumeRequirements: [],
   resumeTargetKeywords: [],
   resumeMatchedKeywords: [],
   resumeMissingKeywords: [],
+  resumeAnalysisOriginalFingerprint: '',
+  resumeAnalysisJobDescriptionFingerprint: '',
+  resumeAnalysisSource: '',
   resumeHydrated: false,
   resumePersistenceError: false,
   hydrateResumeWorkspace: (workspace) => set({ ...resumeStateFromWorkspace(workspace), resumeHydrated: true }),
   updateResumeWorkspace: (workspace) => set((state) => resumeStateFromWorkspace(
     mergeResumeWorkspace(selectResumeWorkspace(state), workspace),
   )),
-  setResumeAnalysis: (result) => set((state) => resumeStateFromWorkspace(
+  setResumeAnalysis: (result, context) => set((state) => resumeStateFromWorkspace(
     mergeResumeWorkspace(selectResumeWorkspace(state), {
       optimized: result.optimizedText,
       suggestions: result.suggestions,
+      requirements: result.requirements,
       targetKeywords: result.targetKeywords,
+      analysisOriginalFingerprint: context.originalFingerprint,
+      analysisJobDescriptionFingerprint: context.jobDescriptionFingerprint,
+      analysisSource: context.source,
     }),
   )),
   clearResumeWorkspace: () => {

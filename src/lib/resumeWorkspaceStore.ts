@@ -8,6 +8,7 @@ import { encryptSecret } from './secretCrypto'
 import {
   createEmptyResumeWorkspace,
   matchResumeKeywords,
+  type ResumeRequirement,
   type ResumeSuggestion,
   type ResumeWorkspace,
 } from './resumeOptimizer.ts'
@@ -24,6 +25,15 @@ const enqueueWrite = createResumeWriteQueue()
 
 async function ensureMigrated(): Promise<void> {
   await migrateLegacyJsonStoresIfNeeded(encryptSecret)
+}
+
+function isRequirement(value: unknown): value is ResumeRequirement {
+  if (!value || typeof value !== 'object') return false
+  const requirement = value as Partial<ResumeRequirement>
+  return typeof requirement.keyword === 'string'
+    && ['required', 'preferred'].includes(String(requirement.priority))
+    && ['supported', 'unsupported'].includes(String(requirement.status))
+    && typeof requirement.evidence === 'string'
 }
 
 function isSuggestion(value: unknown): value is ResumeSuggestion {
@@ -59,13 +69,20 @@ export function normalizeResumeWorkspace(value: unknown): ResumeWorkspace {
     ? saved.targetKeywords.filter((keyword): keyword is string => typeof keyword === 'string' && Boolean(keyword.trim())).slice(0, 12)
     : []
   const keywordMatch = matchResumeKeywords(optimized || original, jobDescription, targetKeywords)
+  const analysisSource = saved.analysisSource === 'original' || saved.analysisSource === 'optimized'
+    ? saved.analysisSource
+    : ''
   return {
     original,
     optimized,
     jobDescription,
     suggestions: Array.isArray(saved.suggestions) ? saved.suggestions.filter(isSuggestion) : [],
     sourceFileName: typeof saved.sourceFileName === 'string' ? saved.sourceFileName : '',
+    requirements: Array.isArray(saved.requirements) ? saved.requirements.filter(isRequirement).slice(0, 12) : [],
     targetKeywords,
+    analysisOriginalFingerprint: typeof saved.analysisOriginalFingerprint === 'string' ? saved.analysisOriginalFingerprint : '',
+    analysisJobDescriptionFingerprint: typeof saved.analysisJobDescriptionFingerprint === 'string' ? saved.analysisJobDescriptionFingerprint : '',
+    analysisSource,
     ...keywordMatch,
   }
 }
@@ -77,7 +94,11 @@ export function toPersistedResumeWorkspace(workspace: ResumeWorkspace): Omit<Res
     jobDescription: workspace.jobDescription,
     suggestions: workspace.suggestions,
     sourceFileName: workspace.sourceFileName,
+    requirements: workspace.requirements,
     targetKeywords: workspace.targetKeywords,
+    analysisOriginalFingerprint: workspace.analysisOriginalFingerprint,
+    analysisJobDescriptionFingerprint: workspace.analysisJobDescriptionFingerprint,
+    analysisSource: workspace.analysisSource,
   }
 }
 

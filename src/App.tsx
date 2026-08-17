@@ -246,6 +246,11 @@ export default function App() {
         && state.jobDescription === previous.jobDescription
         && state.resumeSuggestions === previous.resumeSuggestions
         && state.resumeSourceFileName === previous.resumeSourceFileName
+        && state.resumeRequirements === previous.resumeRequirements
+        && state.resumeTargetKeywords === previous.resumeTargetKeywords
+        && state.resumeAnalysisOriginalFingerprint === previous.resumeAnalysisOriginalFingerprint
+        && state.resumeAnalysisJobDescriptionFingerprint === previous.resumeAnalysisJobDescriptionFingerprint
+        && state.resumeAnalysisSource === previous.resumeAnalysisSource
       ) return
       schedulePersistence()
     })

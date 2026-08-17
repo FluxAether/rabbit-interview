@@ -9,6 +9,7 @@ import {
   matchResumeKeywords,
   normalizeLlmResumeResult,
   normalizeResumeText,
+  resumeTextFingerprint,
 } from '../src/lib/resumeOptimizer.ts'
 import { buildResumeDocxBlob, sanitizeResumeFilename } from '../src/lib/resumeDocuments.ts'
 import {
@@ -34,7 +35,8 @@ assert.equal(normalizeResumeText(unformatted), normalized, 'normalizes whitespac
 assert.equal(normalizeResumeText(normalized), normalized, 'normalization is idempotent')
 
 const editedWorkspace = mergeResumeWorkspace({
-  original: 'React', optimized: 'React', jobDescription: 'React Rust', suggestions: [],
+  ...createEmptyResumeWorkspace(),
+  original: 'React', optimized: 'React', jobDescription: 'React Rust',
   sourceFileName: 'resume.docx', matchedKeywords: ['React'], missingKeywords: ['Rust'],
 }, { optimized: 'React Rust' })
 assert.deepEqual(editedWorkspace.missingKeywords, [], 'recomputes keyword gaps after resume edits')
@@ -102,6 +104,7 @@ assert.equal(llmAnalysis.optimizedText, 'Alex Morgan\n• Led product design', '
 assert.equal(llmAnalysis.suggestions[0]?.title, 'Improved formatting', 'keeps LLM copy separate from translation keys')
 assert.equal(llmAnalysis.suggestions[0]?.applied, true, 'marks changes already included by the LLM as applied')
 assert.equal(llmAnalysis.suggestions[1]?.applied, false, 'leaves factual gaps for manual input')
+assert.deepEqual(llmAnalysis.requirements.map((requirement) => requirement.keyword), ['Product design', 'TypeScript'], 'returns the validated requirement-evidence matrix for the UI')
 assert.deepEqual(llmAnalysis.targetKeywords, ['Product design', 'TypeScript'], 'keeps the analyzed job requirements as stable ATS targets')
 assert.deepEqual(llmAnalysis.matchedKeywords, ['Product design'], 'uses evidence-backed requirement phrases for ATS matching')
 assert.deepEqual(llmAnalysis.missingKeywords, ['TypeScript'], 'keeps unsupported job requirements visible as gaps')
@@ -113,7 +116,17 @@ const editedTargetedWorkspace = mergeResumeWorkspace(targetedWorkspace, { optimi
 assert.deepEqual(editedTargetedWorkspace.targetKeywords, llmAnalysis.targetKeywords, 'keeps analyzed ATS targets while the user edits the resume')
 assert.deepEqual(editedTargetedWorkspace.missingKeywords, ['TypeScript'], 'recomputes the same analyzed ATS targets after a resume edit')
 const retargetedWorkspace = mergeResumeWorkspace(editedTargetedWorkspace, { jobDescription: 'Rust' })
-assert.deepEqual(retargetedWorkspace.targetKeywords, [], 'clears analyzed ATS targets when the job description changes')
+assert.deepEqual(retargetedWorkspace.targetKeywords, [], 'clears fallback ATS targets when the job description changes before an analysis context exists')
+const analyzedTargetedWorkspace = mergeResumeWorkspace(editedTargetedWorkspace, {
+  requirements: llmAnalysis.requirements,
+  analysisOriginalFingerprint: resumeTextFingerprint('Product design'),
+  analysisJobDescriptionFingerprint: resumeTextFingerprint('Product design TypeScript'),
+  analysisSource: 'original',
+})
+const staleTargetedWorkspace = mergeResumeWorkspace(analyzedTargetedWorkspace, { jobDescription: 'Rust' })
+assert.deepEqual(staleTargetedWorkspace.targetKeywords, llmAnalysis.targetKeywords, 'keeps prior analyzed targets bound to the stale result instead of silently rebinding them to a new JD')
+assert.equal(resumeTextFingerprint(' Product design  '), resumeTextFingerprint('Product design'), 'fingerprints normalized resume text consistently')
+assert.notEqual(resumeTextFingerprint('Product design'), resumeTextFingerprint('Product design TypeScript'), 'fingerprints detect meaningful input changes')
 const faithfulRewrite = normalizeLlmResumeResult({
   optimizedText: 'Contributed to product onboarding',
   suggestions: [],
@@ -231,12 +244,19 @@ assert.match(rendered.value, /<h1>工作经历<\/h1>/, 'styles known Chinese sec
 assert.doesNotMatch(rendered.value, /<h1>负责产品设计与用户研究。<\/h1>/, 'keeps ordinary Chinese text as a paragraph')
 
 const persisted = toPersistedResumeWorkspace({
+  ...createEmptyResumeWorkspace(),
   original: 'original', optimized: 'optimized', jobDescription: 'jd', suggestions: [],
-  sourceFileName: 'resume.docx', targetKeywords: ['Rust'], matchedKeywords: ['saved?'], missingKeywords: ['saved?'],
+  sourceFileName: 'resume.docx', requirements: llmAnalysis.requirements, targetKeywords: ['Rust'],
+  matchedKeywords: ['saved?'], missingKeywords: ['saved?'],
+  analysisOriginalFingerprint: resumeTextFingerprint('original'),
+  analysisJobDescriptionFingerprint: resumeTextFingerprint('jd'),
+  analysisSource: 'original',
 })
 assert.equal('matchedKeywords' in persisted, false, 'does not persist derived matched keywords')
 assert.equal('missingKeywords' in persisted, false, 'does not persist derived missing keywords')
 assert.deepEqual(persisted.targetKeywords, ['Rust'], 'persists the analyzed ATS target list for stable recomputation')
+assert.deepEqual(persisted.requirements, llmAnalysis.requirements, 'persists the requirement-evidence matrix')
+assert.equal(persisted.analysisSource, 'original', 'persists which resume version produced the analysis')
 assert.equal(hasResumeWorkspaceContent(createEmptyResumeWorkspace()), false, 'clears persistence for an empty workspace')
 assert.equal(hasResumeWorkspaceContent({ ...createEmptyResumeWorkspace(), jobDescription: 'React' }), true, 'persists a workspace containing only a job description')
 const restored = normalizeResumeWorkspace({
@@ -275,6 +295,11 @@ for (const key of [
   'resume.factReviewRequired',
   'resume.includedInDraft',
   'resume.textTooLong',
+  'resume.analysisStaleTitle',
+  'resume.viewRequirements',
+  'resume.reviewAndExport',
+  'resume.requirementMatrix',
+  'resume.suggestionStatusSummary',
 ]) {
   assert.equal(translations.split(`'${key}'`).length - 1, 3, `translates ${key} in all supported UI languages`)
 }
@@ -285,3 +310,9 @@ const resumePage = fs.readFileSync('src/pages/ResumeOptimizer.tsx', 'utf8')
 assert.equal(resumePage.includes('suggestion.description || suggestion.title'), false, 'manual suggestions are not auto-appended')
 assert.match(resumePage, /if \(!suggestion.replacement\) return/, 'apply requires a replacement')
 assert.match(resumePage, /resume.startFactReview/, 'fact review starts review instead of auto-confirming')
+assert.equal(resumePage.includes('document.querySelector<HTMLTextAreaElement>'), false, 'manual suggestion focus no longer targets the first textarea by selector')
+assert.match(resumePage, /ref=\{optimizedEditorRef\}/, 'manual suggestions have an explicit optimized-draft editor target')
+assert.match(resumePage, /analysisStale/, 'the UI explicitly handles analysis results that no longer match the current inputs')
+assert.match(resumePage, /resume\.viewRequirements/, 'the UI exposes the requirement-evidence matrix')
+assert.match(resumePage, /resume\.reoptimizeFromOriginal/, 're-optimization can explicitly restart from the original resume')
+assert.match(resumePage, /resume\.reoptimizeCurrentDraft/, 're-optimization can explicitly continue from the current draft')

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Download, FileText, LoaderCircle, Trash2, Upload, Sparkles, AlertCircle } from "lucide-react"
 import { useDropzone, type FileRejection } from "react-dropzone"
 import { useCurrentLanguage, useTranslation } from "../i18n"
@@ -12,6 +12,7 @@ import {
 import {
   countResumeWords,
   createResumeAnalysisRequestCoordinator,
+  resumeTextFingerprint,
   type ResumeSuggestion,
   type ResumeSuggestionCategory,
 } from "../lib/resumeOptimizer"
@@ -40,8 +41,11 @@ export default function ResumeOptimizer() {
     jobDescription,
     resumeSuggestions,
     resumeSourceFileName,
+    resumeRequirements,
     resumeMatchedKeywords,
-    resumeMissingKeywords,
+    resumeAnalysisOriginalFingerprint,
+    resumeAnalysisJobDescriptionFingerprint,
+    resumeAnalysisSource,
     resumeHydrated,
     resumePersistenceError,
     updateResumeWorkspace,
@@ -55,8 +59,12 @@ export default function ResumeOptimizer() {
   const [isExporting, setIsExporting] = useState(false)
   const [status, setStatus] = useState<PageStatus>(null)
   const [reviewedOptimizedText, setReviewedOptimizedText] = useState("")
-  const [viewMode, setViewMode] = useState<"split" | "diff">("split")
-  const analysisRequests = useRef(createResumeAnalysisRequestCoordinator())
+  const [viewMode, setViewMode] = useState<"split" | "diff" | "requirements">("split")
+  const [activeDiffChange, setActiveDiffChange] = useState(0)
+  const analysisRequests = useRef(createResumeAnalysisRequestCoordinator(120_000))
+  const optimizedEditorRef = useRef<HTMLTextAreaElement>(null)
+  const reviewSectionRef = useRef<HTMLDivElement>(null)
+  const diffContainerRef = useRef<HTMLDivElement>(null)
   const isMounted = useRef(true)
 
   useEffect(() => {
@@ -77,6 +85,7 @@ export default function ResumeOptimizer() {
       setStatus({ kind: "error", text: validationMessage(validationError) })
       return
     }
+    if ((resumeOptimized.trim() || resumeSuggestions.length > 0) && !window.confirm(t("resume.replaceConfirm"))) return
 
     analysisRequests.current.cancel()
     setIsAnalyzing(false)
@@ -90,10 +99,17 @@ export default function ResumeOptimizer() {
         optimized: "",
         suggestions: [],
         sourceFileName: file.name,
+        requirements: [],
+        targetKeywords: [],
         matchedKeywords: [],
         missingKeywords: [],
+        analysisOriginalFingerprint: "",
+        analysisJobDescriptionFingerprint: "",
+        analysisSource: "",
       })
       setReviewedOptimizedText("")
+      setViewMode("split")
+      setActiveDiffChange(0)
       setStatus({
         kind: result.warnings.length ? "warning" : "success",
         text: result.warnings.length
@@ -137,19 +153,27 @@ export default function ResumeOptimizer() {
     disabled: isParsing || isAnalyzing || isExporting || !resumeHydrated,
   })
 
-  const runAnalysis = async (source: string) => {
+  const runAnalysis = async (source: string, sourceKind: "original" | "optimized") => {
     if (!source.trim()) {
       setStatus({ kind: "error", text: t("resume.missingResume") })
       return
     }
     const request = analysisRequests.current.start()
+    const originalFingerprint = resumeTextFingerprint(resumeOriginal)
+    const jobDescriptionFingerprint = resumeTextFingerprint(jobDescription)
     setIsAnalyzing(true)
     setReviewedOptimizedText("")
     setStatus(null)
     try {
       const result = await optimizeResumeWithLlm(source, jobDescription, language, request.signal)
       if (!request.isLatest() || !isMounted.current) return
-      setResumeAnalysis(result)
+      setResumeAnalysis(result, {
+        source: sourceKind,
+        originalFingerprint,
+        jobDescriptionFingerprint,
+      })
+      setViewMode("diff")
+      setActiveDiffChange(0)
       setStatus({ kind: "success", text: t("resume.analysisComplete") })
     } catch (error) {
       if (!request.isLatest() || !isMounted.current) return
@@ -167,9 +191,19 @@ export default function ResumeOptimizer() {
     }
   }
 
+  const handleCancelAnalysis = () => {
+    analysisRequests.current.cancel()
+    setIsAnalyzing(false)
+    setStatus({ kind: "warning", text: t("resume.analysisCancelled") })
+  }
+
   const handleExport = async () => {
     if (!resumeOptimized.trim()) {
       setStatus({ kind: "error", text: t("resume.missingOptimized") })
+      return
+    }
+    if (analysisStale) {
+      setStatus({ kind: "error", text: t("resume.analysisStaleExport") })
       return
     }
     if (reviewedOptimizedText !== resumeOptimized) {
@@ -194,6 +228,8 @@ export default function ResumeOptimizer() {
   const handleClear = async () => {
     if (!window.confirm(t("resume.clearConfirm"))) return
     setReviewedOptimizedText("")
+    setViewMode("split")
+    setActiveDiffChange(0)
     clearResumeWorkspace()
     try {
       await clearSavedResumeWorkspace()
@@ -206,29 +242,38 @@ export default function ResumeOptimizer() {
   }
 
   const useSample = () => {
+    if ((resumeOptimized.trim() || resumeSuggestions.length > 0) && !window.confirm(t("resume.replaceConfirm"))) return
     updateResumeWorkspace({
       original: SAMPLE_RESUME,
       optimized: "",
       suggestions: [],
       sourceFileName: "sample-resume.docx",
+      requirements: [],
+      targetKeywords: [],
       matchedKeywords: [],
       missingKeywords: [],
+      analysisOriginalFingerprint: "",
+      analysisJobDescriptionFingerprint: "",
+      analysisSource: "",
     })
     setReviewedOptimizedText("")
+    setViewMode("split")
+    setActiveDiffChange(0)
     setStatus({ kind: "success", text: t("resume.sampleLoaded") })
   }
 
   const handleApplySuggestion = (suggestion: ResumeSuggestion) => {
     if (!suggestion.replacement) return
-    let newOptimized = resumeOptimized
-    if (newOptimized.includes(suggestion.replacement.before)) {
-      newOptimized = newOptimized.replace(suggestion.replacement.before, suggestion.replacement.after)
-    } else {
-      newOptimized = newOptimized ? `${newOptimized}\n• ${suggestion.replacement.after}` : suggestion.replacement.after
+    if (!resumeOptimized.includes(suggestion.replacement.before)) {
+      setStatus({ kind: "warning", text: t("resume.suggestionNoLongerApplies") })
+      return
     }
+    const newOptimized = resumeOptimized.replace(suggestion.replacement.before, suggestion.replacement.after)
     const updatedSuggestions = resumeSuggestions.map((s) =>
       s.id === suggestion.id ? { ...s, applied: true } : s
     )
+    setReviewedOptimizedText("")
+    setActiveDiffChange(0)
     updateResumeWorkspace({
       optimized: newOptimized,
       suggestions: updatedSuggestions,
@@ -237,9 +282,21 @@ export default function ResumeOptimizer() {
 
   const handleManualSuggestion = () => {
     setViewMode("split")
-    const editor = document.querySelector<HTMLTextAreaElement>('textarea[aria-label]')
-    editor?.focus()
-    editor?.scrollIntoView({ block: "center" })
+    window.requestAnimationFrame(() => {
+      optimizedEditorRef.current?.focus()
+      optimizedEditorRef.current?.scrollIntoView({ block: "center" })
+    })
+  }
+
+  const handleStartFactReview = () => {
+    setViewMode("diff")
+    window.requestAnimationFrame(() => diffContainerRef.current?.scrollIntoView({ block: "start" }))
+  }
+
+  const handleJobDescriptionChange = (value: string) => {
+    setReviewedOptimizedText("")
+    if (viewMode === "requirements") setViewMode("split")
+    updateResumeWorkspace({ jobDescription: value })
   }
 
 
@@ -277,17 +334,55 @@ export default function ResumeOptimizer() {
     return result
   }
 
+  const diffLines = useMemo(() => computeLineDiff(resumeOriginal, resumeOptimized), [resumeOriginal, resumeOptimized])
+  const changedDiffIndices = useMemo(
+    () => diffLines.flatMap((line, index) => line.type === "same" ? [] : [index]),
+    [diffLines],
+  )
+  const sensitiveDiffCount = useMemo(
+    () => diffLines.filter((line) => line.type !== "same" && /\d|@|(?:https?:\/\/|www\.)/i.test(line.text)).length,
+    [diffLines],
+  )
+  const analysisStale = Boolean(resumeOptimized.trim()) && (
+    !resumeAnalysisOriginalFingerprint
+    || !resumeAnalysisJobDescriptionFingerprint
+    || resumeTextFingerprint(resumeOriginal) !== resumeAnalysisOriginalFingerprint
+    || resumeTextFingerprint(jobDescription) !== resumeAnalysisJobDescriptionFingerprint
+  )
+  const supportedRequirements = resumeRequirements.filter((requirement) => requirement.status === "supported")
+  const unsupportedRequirements = resumeRequirements.filter((requirement) => requirement.status === "unsupported")
+  const matchedKeywordSet = new Set(resumeMatchedKeywords.map((keyword) => keyword.toLocaleLowerCase()))
+  const coveredRequirements = resumeRequirements.filter((requirement) => matchedKeywordSet.has(requirement.keyword.toLocaleLowerCase()))
+
+  const jumpToDiffChange = (direction: -1 | 1) => {
+    if (changedDiffIndices.length === 0) return
+    const next = (activeDiffChange + direction + changedDiffIndices.length) % changedDiffIndices.length
+    setActiveDiffChange(next)
+    const diffIndex = changedDiffIndices[next]
+    window.requestAnimationFrame(() => {
+      diffContainerRef.current
+        ?.querySelector<HTMLElement>(`[data-diff-index="${diffIndex}"]`)
+        ?.scrollIntoView({ block: "center" })
+    })
+  }
+
   const categoryLabel = (category: ResumeSuggestionCategory) => t(`resume.category.${category}`)
   const busy = !resumeHydrated || isParsing || isAnalyzing || isExporting
-  const factsReviewed = Boolean(resumeOptimized.trim()) && reviewedOptimizedText === resumeOptimized
+  const factsReviewed = Boolean(resumeOptimized.trim()) && !analysisStale && reviewedOptimizedText === resumeOptimized
+  const canExport = !busy && factsReviewed
 
   return (
     <div className="w-full bg-[var(--bg-app)] px-5 py-6 text-[var(--text-main)] lg:px-8">
       <div className="mx-auto max-w-6xl">
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-2">
-          <h1 className="text-xl font-semibold tracking-tight">{t("resume.title")}</h1>
-          <span className="border-l border-[var(--border-color)] pl-2 text-xs text-[var(--text-muted)]">{t("resume.badge")}</span>
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold tracking-tight">{t("resume.title")}</h1>
+            <span className="border-l border-[var(--border-color)] pl-2 text-xs text-[var(--text-muted)]">{t("resume.badge")}</span>
+          </div>
+          <div className={`mt-1 text-xs ${resumePersistenceError ? "text-[var(--danger)]" : "text-[var(--text-muted)]"}`}>
+            {resumePersistenceError ? t("resume.persistenceError") : t("resume.localAutosave")}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" onClick={handleClear} disabled={busy} className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-sm transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50">
@@ -297,15 +392,15 @@ export default function ResumeOptimizer() {
             <button
               type="button"
               onClick={handleExport}
-              disabled={busy || !factsReviewed}
+              disabled={!canExport}
               className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-4 py-1.5 text-sm transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isExporting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} {t("resume.export")}
             </button>
-            {!factsReviewed && resumeOptimized.trim() && (
-              <div className="absolute right-0 top-full z-10 mt-2 w-64 rounded-md border border-[var(--warning)] bg-[var(--bg-surface)] p-3 text-xs text-[var(--warning)]">
+            {!canExport && resumeOptimized.trim() && (
+              <div className="pointer-events-none invisible absolute right-0 top-full z-10 mt-2 w-72 rounded-md border border-[var(--warning)] bg-[var(--bg-surface)] p-3 text-xs text-[var(--warning)] opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100">
                 <div className="mb-1 flex items-center gap-1 font-semibold"><AlertCircle className="h-3.5 w-3.5" /> {t("resume.exportLocked")}</div>
-                {t("resume.factReviewRequired")}
+                {analysisStale ? t("resume.analysisStaleExport") : t("resume.factReviewRequired")}
               </div>
             )}
           </div>
@@ -327,7 +422,27 @@ export default function ResumeOptimizer() {
         </div>
       )}
 
-      {resumeOptimized.trim() && !factsReviewed && (
+      {analysisStale && resumeOptimized.trim() && (
+        <div className="mb-4 flex flex-col gap-3 rounded-md border border-[var(--warning)] bg-[var(--bg-subtle)] p-4 text-sm text-[var(--warning)] lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 shrink-0" />
+            <div>
+              <div className="font-semibold">{t("resume.analysisStaleTitle")}</div>
+              <div className="mt-0.5 text-xs">{t("resume.analysisStaleDescription")}</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => runAnalysis(resumeOriginal, "original")}
+            disabled={busy || !resumeOriginal.trim()}
+            className="shrink-0 self-start rounded-md bg-[var(--action)] px-3 py-1.5 text-xs font-medium text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-50 lg:self-auto"
+          >
+            {t("resume.reanalyzeCurrentInputs")}
+          </button>
+        </div>
+      )}
+
+      {resumeOptimized.trim() && !analysisStale && !factsReviewed && (
         <div className="mb-4 flex flex-col gap-3 rounded-md border border-[var(--warning)] bg-[var(--bg-subtle)] p-4 text-sm text-[var(--warning)] lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <AlertCircle className="h-5 w-5 shrink-0" />
@@ -338,7 +453,7 @@ export default function ResumeOptimizer() {
           </div>
           <button
             type="button"
-            onClick={handleManualSuggestion}
+            onClick={handleStartFactReview}
             className="shrink-0 self-start rounded-md border border-[var(--warning)] px-3 py-1 text-xs font-medium transition-colors hover:bg-[var(--bg-hover)] lg:self-auto"
           >
             {t("resume.startFactReview")}
@@ -368,16 +483,61 @@ export default function ResumeOptimizer() {
             maxLength={5000}
             disabled={busy}
             aria-label={t("resume.jd.title")}
-            onChange={(event) => updateResumeWorkspace({ jobDescription: event.target.value })}
+            onChange={(event) => handleJobDescriptionChange(event.target.value)}
             className="h-36 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm outline-none transition-colors focus:border-[var(--action)] disabled:opacity-60"
             placeholder={t("resume.jd.placeholder")}
           />
-          <button type="button" onClick={() => runAnalysis(resumeOriginal)} disabled={busy || !resumeOriginal.trim()} className="mt-4 flex w-full items-center justify-center gap-2 rounded-md bg-[var(--action)] py-2 text-sm text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-50">
-            {isAnalyzing && <LoaderCircle className="h-4 w-4 animate-spin" />}
-            {isAnalyzing ? t("common.analyzing") : t("common.analyze")}
-          </button>
+          <div className="mt-4 flex gap-2">
+            <button type="button" onClick={() => runAnalysis(resumeOriginal, "original")} disabled={busy || !resumeOriginal.trim()} className="flex flex-1 items-center justify-center gap-2 rounded-md bg-[var(--action)] py-2 text-sm text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-50">
+              {isAnalyzing && <LoaderCircle className="h-4 w-4 animate-spin" />}
+              {isAnalyzing
+                ? t("common.analyzing")
+                : t(jobDescription.trim() ? "resume.analyzeForJob" : "resume.analyzeGeneral")}
+            </button>
+            {isAnalyzing && (
+              <button type="button" onClick={handleCancelAnalysis} className="rounded-md border border-[var(--border-color)] px-3 py-2 text-xs transition-colors hover:bg-[var(--bg-hover)]">
+                {t("resume.cancelAnalysis")}
+              </button>
+            )}
+          </div>
+          {isAnalyzing && (
+            <div className="mt-2 text-xs text-[var(--text-muted)]">{t("resume.analysisInProgress")}</div>
+          )}
         </section>
       </div>
+
+      {resumeOptimized.trim() && !analysisStale && (
+        <section className="mb-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="font-medium">{t("resume.resultOverview")}</div>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">
+                {t(resumeAnalysisSource === "optimized" ? "resume.basedOnCurrentDraft" : "resume.basedOnOriginal")}
+              </div>
+            </div>
+            {jobDescription.trim() && resumeRequirements.length > 0 && (
+              <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+                <div className="rounded-md bg-[var(--bg-subtle)] px-3 py-2">
+                  <div className="text-base font-semibold">{resumeRequirements.length}</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">{t("resume.requirementTotal")}</div>
+                </div>
+                <div className="rounded-md bg-[var(--bg-subtle)] px-3 py-2">
+                  <div className="text-base font-semibold text-[var(--success)]">{supportedRequirements.length}</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">{t("resume.requirementSupported")}</div>
+                </div>
+                <div className="rounded-md bg-[var(--bg-subtle)] px-3 py-2">
+                  <div className="text-base font-semibold text-[var(--action)]">{coveredRequirements.length}</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">{t("resume.requirementCoveredCount")}</div>
+                </div>
+                <div className="rounded-md bg-[var(--bg-subtle)] px-3 py-2">
+                  <div className="text-base font-semibold text-[var(--warning)]">{unsupportedRequirements.length}</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">{t("resume.requirementGapCount")}</div>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-1 border-b border-[var(--border-color)]">
@@ -400,18 +560,42 @@ export default function ResumeOptimizer() {
               viewMode === "diff"
                 ? "border-[var(--action)] text-[var(--text-main)]"
                 : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-main)]"
-            }`}
+            } disabled:opacity-40`}
           >
             {t("resume.viewDiff")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("requirements")}
+            disabled={!resumeOptimized.trim() || analysisStale || !jobDescription.trim() || resumeRequirements.length === 0}
+            className={`border-b-2 px-3 py-1.5 text-xs font-medium transition-colors ${
+              viewMode === "requirements"
+                ? "border-[var(--action)] text-[var(--text-main)]"
+                : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            } disabled:opacity-40`}
+          >
+            {t("resume.viewRequirements")}
           </button>
         </div>
       </div>
 
       {viewMode === "diff" ? (
         <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
-          <div className="mb-3 flex items-center justify-between text-sm">
-            <div className="font-medium">{t("resume.diffTitle")}</div>
-            <div className="flex items-center gap-4 text-xs">
+          <div className="mb-3 flex flex-col gap-3 text-sm lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="font-medium">{t("resume.diffTitle")}</div>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">
+                {t("resume.diffSummary", { changes: changedDiffIndices.length, sensitive: sensitiveDiffCount })}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <div className="flex items-center gap-1">
+                <button type="button" onClick={() => jumpToDiffChange(-1)} disabled={changedDiffIndices.length === 0} className="rounded border border-[var(--border-color)] px-2 py-1 transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40">{t("resume.diffPrevious")}</button>
+                <span className="min-w-12 text-center text-[var(--text-muted)]">
+                  {changedDiffIndices.length === 0 ? "0/0" : `${Math.min(activeDiffChange + 1, changedDiffIndices.length)}/${changedDiffIndices.length}`}
+                </span>
+                <button type="button" onClick={() => jumpToDiffChange(1)} disabled={changedDiffIndices.length === 0} className="rounded border border-[var(--border-color)] px-2 py-1 transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40">{t("resume.diffNext")}</button>
+              </div>
               <span className="flex items-center gap-1 text-[var(--danger)]">
                 <span className="h-2 w-2 bg-[var(--danger)]" /> {t("resume.diffRemoved")}
               </span>
@@ -420,11 +604,16 @@ export default function ResumeOptimizer() {
               </span>
             </div>
           </div>
-          <div className="max-h-[400px] min-h-[260px] overflow-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm font-mono leading-relaxed">
-            {computeLineDiff(resumeOriginal, resumeOptimized).map((line, idx) => (
+          <div ref={diffContainerRef} className="max-h-[560px] min-h-[320px] overflow-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm font-mono leading-relaxed">
+            {diffLines.map((line, idx) => (
               <div
                 key={idx}
-                className={`px-2 py-0.5 whitespace-pre-wrap ${
+                data-diff-index={idx}
+                className={`px-2 py-0.5 whitespace-pre-wrap transition-shadow ${
+                  line.type !== "same" && /\d|@|(?:https?:\/\/|www\.)/i.test(line.text)
+                    ? "border-l-2 border-[var(--warning)]"
+                    : ""
+                } ${changedDiffIndices[activeDiffChange] === idx ? "ring-1 ring-[var(--action)]" : ""} ${
                   line.type === "removed"
                     ? "bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] text-[var(--danger)] line-through"
                     : line.type === "added"
@@ -438,6 +627,48 @@ export default function ResumeOptimizer() {
             ))}
           </div>
         </section>
+      ) : viewMode === "requirements" ? (
+        <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+          <div className="mb-4">
+            <div className="font-medium">{t("resume.requirementMatrix")}</div>
+            <div className="mt-1 text-xs text-[var(--text-muted)]">{t("resume.requirementMatrixDescription")}</div>
+          </div>
+          <div className="divide-y divide-[var(--border-color)] border-y border-[var(--border-color)]">
+            {resumeRequirements.map((requirement) => {
+              const covered = matchedKeywordSet.has(requirement.keyword.toLocaleLowerCase())
+              return (
+                <article key={`${requirement.priority}-${requirement.keyword}`} className="py-4">
+                  <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium">{requirement.keyword}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] ${requirement.priority === "required" ? "bg-[color-mix(in_srgb,var(--warning)_14%,transparent)] text-[var(--warning)]" : "bg-[var(--bg-subtle)] text-[var(--text-muted)]"}`}>
+                          {t(requirement.priority === "required" ? "resume.requirementRequired" : "resume.requirementPreferred")}
+                        </span>
+                      </div>
+                      {requirement.status === "supported" && requirement.evidence && (
+                        <div className="mt-2 rounded-md bg-[var(--bg-subtle)] px-3 py-2 text-xs text-[var(--text-muted)]">
+                          <span className="font-medium text-[var(--text-main)]">{t("resume.requirementEvidence")}: </span>
+                          {requirement.evidence}
+                        </div>
+                      )}
+                    </div>
+                    <div className={`shrink-0 text-xs ${requirement.status === "unsupported" ? "text-[var(--warning)]" : covered ? "text-[var(--success)]" : "text-[var(--action)]"}`}>
+                      {requirement.status === "unsupported"
+                        ? t("resume.requirementGap")
+                        : covered
+                          ? t("resume.requirementCovered")
+                          : t("resume.requirementEvidenceOnly")}
+                    </div>
+                  </div>
+                  {requirement.status === "unsupported" && (
+                    <p className="mt-2 text-xs text-[var(--text-muted)]">{t("resume.requirementGapHint")}</p>
+                  )}
+                </article>
+              )
+            })}
+          </div>
+        </section>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
@@ -445,7 +676,7 @@ export default function ResumeOptimizer() {
               <div>{t("resume.original")} <span className="border-l border-[var(--border-color)] pl-1.5 text-xs text-[var(--text-muted)]">v1</span></div>
               <div className="text-[var(--text-muted)]">{t("resume.wordCount")}: {countResumeWords(resumeOriginal)}</div>
             </div>
-            <div className="max-h-[360px] min-h-[260px] overflow-auto whitespace-pre-wrap rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm leading-relaxed">
+            <div className="max-h-[560px] min-h-[360px] overflow-auto whitespace-pre-wrap rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm leading-relaxed">
               {resumeOriginal || t("resume.originalPlaceholder")}
             </div>
           </section>
@@ -453,43 +684,67 @@ export default function ResumeOptimizer() {
           <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
             <div className="mb-2 flex flex-wrap justify-between gap-2 text-sm">
               <div>{t("resume.optimized")} <span className="border-l border-[var(--border-color)] pl-1.5 text-xs text-[var(--action)]">v2</span></div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <span className="text-[var(--text-muted)]">{t("resume.wordCount")}: {countResumeWords(resumeOptimized)}</span>
-                <button type="button" onClick={() => runAnalysis(resumeOptimized || resumeOriginal)} disabled={busy || !(resumeOptimized || resumeOriginal).trim()} className="text-xs text-[var(--action)] hover:underline disabled:opacity-40">{t("common.reoptimize")}</button>
+                {resumeOptimized.trim() && (
+                  <>
+                    <button type="button" onClick={() => runAnalysis(resumeOriginal, "original")} disabled={busy || !resumeOriginal.trim()} className="text-xs text-[var(--action)] hover:underline disabled:opacity-40">{t("resume.reoptimizeFromOriginal")}</button>
+                    <span className="text-[var(--border-color)]">·</span>
+                    <button type="button" onClick={() => runAnalysis(resumeOptimized, "optimized")} disabled={busy} className="text-xs text-[var(--action)] hover:underline disabled:opacity-40">{t("resume.reoptimizeCurrentDraft")}</button>
+                  </>
+                )}
               </div>
             </div>
             <textarea
+              ref={optimizedEditorRef}
               value={resumeOptimized}
               disabled={busy}
-              onChange={(event) => updateResumeWorkspace({ optimized: event.target.value })}
-              className="min-h-[260px] w-full resize-y rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 text-sm leading-relaxed outline-none transition-colors focus:border-[var(--action)] disabled:opacity-60"
+              onChange={(event) => {
+                setReviewedOptimizedText("")
+                setActiveDiffChange(0)
+                updateResumeWorkspace({ optimized: event.target.value })
+              }}
+              className="min-h-[360px] max-h-[640px] w-full resize-y rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 text-sm leading-relaxed outline-none transition-colors focus:border-[var(--action)] disabled:opacity-60"
               placeholder={t("resume.optimizedPlaceholder")}
               aria-label={t("resume.optimized")}
             />
-            <div
-              className={`mt-3 rounded-md border bg-[var(--bg-subtle)] p-3 transition-colors ${
-                !factsReviewed && resumeOptimized.trim()
-                  ? "border-[var(--warning)] text-[var(--warning)]"
-                  : "border-[var(--border-color)]"
-              }`}
-            >
-              <label className="flex items-start gap-2.5 text-xs leading-relaxed cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={factsReviewed}
-                  disabled={busy || !resumeOptimized.trim()}
-                  onChange={(event) => setReviewedOptimizedText(event.target.checked ? resumeOptimized : "")}
-                  className="mt-0.5 h-4 w-4 rounded border-[var(--border-color)] text-[var(--action)] focus:ring-[var(--action)]"
-                />
-                <div>
-                  <span className="font-medium">
-                    {!factsReviewed && resumeOptimized.trim() ? t("resume.factReviewConfirmWarning") : t("resume.factReviewConfirmLabel")}
-                  </span>
-                  <p className="mt-0.5 text-[11px] opacity-90">{t("resume.factReviewConfirm")}</p>
-                </div>
-              </label>
-            </div>
           </section>
+        </div>
+      )}
+
+      {resumeOptimized.trim() && (
+        <div
+          ref={reviewSectionRef}
+          className={`mt-4 rounded-lg border bg-[var(--bg-surface)] p-5 ${
+            analysisStale || !factsReviewed ? "border-[var(--warning)]" : "border-[var(--success)]"
+          }`}
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="font-medium">{t("resume.reviewAndExport")}</div>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">
+                {t("resume.reviewSummary", { changes: changedDiffIndices.length, sensitive: sensitiveDiffCount })}
+              </div>
+              {analysisStale && (
+                <div className="mt-2 text-xs text-[var(--warning)]">{t("resume.analysisStaleExport")}</div>
+              )}
+            </div>
+            <label className={`flex max-w-xl items-start gap-2.5 text-xs leading-relaxed ${analysisStale ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+              <input
+                type="checkbox"
+                checked={factsReviewed}
+                disabled={busy || analysisStale}
+                onChange={(event) => setReviewedOptimizedText(event.target.checked ? resumeOptimized : "")}
+                className="mt-0.5 h-4 w-4 rounded border-[var(--border-color)] text-[var(--action)] focus:ring-[var(--action)]"
+              />
+              <div>
+                <span className={`font-medium ${!factsReviewed && !analysisStale ? "text-[var(--warning)]" : ""}`}>
+                  {!factsReviewed && !analysisStale ? t("resume.factReviewConfirmWarning") : t("resume.factReviewConfirmLabel")}
+                </span>
+                <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">{t("resume.factReviewConfirm")}</p>
+              </div>
+            </label>
+          </div>
         </div>
       )}
 
@@ -497,17 +752,19 @@ export default function ResumeOptimizer() {
         <div>
           <div>
             <div className="font-medium">{t("resume.suggestions")}</div>
-            {jobDescription.trim() && (
+            {resumeOptimized.trim() && !analysisStale && (
               <div className="mt-1 text-xs text-[var(--text-muted)]">
-                {t("resume.keywordMatch")}: {resumeMatchedKeywords.length} · {t("resume.keywordMissing")}: {resumeMissingKeywords.length}
-                {resumeMissingKeywords.length > 0 && (
-                  <div className="mt-1">{resumeMissingKeywords.slice(0, 8).join(" · ")}</div>
-                )}
+                {t("resume.suggestionStatusSummary", {
+                  completed: resumeSuggestions.filter((suggestion) => suggestion.applied).length,
+                  manual: resumeSuggestions.filter((suggestion) => !suggestion.applied).length,
+                })}
               </div>
             )}
           </div>
         </div>
-        {resumeSuggestions.length === 0 ? (
+        {analysisStale && resumeOptimized.trim() ? (
+          <p className="mt-4 text-sm text-[var(--warning)]">{t("resume.suggestionsStale")}</p>
+        ) : resumeSuggestions.length === 0 ? (
           <p className="mt-4 text-sm text-[var(--text-muted)]">{t("resume.noSuggestions")}</p>
         ) : (
           <div className="mt-4 divide-y divide-[var(--border-color)] border-y border-[var(--border-color)]">
@@ -520,26 +777,27 @@ export default function ResumeOptimizer() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span className={`text-xs ${suggestion.applied ? "text-[var(--success)]" : "text-[var(--warning)]"}`}>
-                      {t(suggestion.applied ? "resume.includedInDraft" : "resume.manualRequired")}
+                      {t(suggestion.applied ? "resume.aiCompleted" : "resume.needsYourInput")}
                     </span>
-                    {suggestion.replacement ? (
+                    {!suggestion.applied && suggestion.replacement && (
                       <button
                         type="button"
                         onClick={() => handleApplySuggestion(suggestion)}
-                        disabled={busy || suggestion.applied}
+                        disabled={busy}
                         className="flex items-center gap-1 rounded-md bg-[var(--action)] px-2.5 py-1 text-xs text-[var(--action-text)] transition-opacity hover:opacity-90 disabled:opacity-40"
                       >
                         <Sparkles className="h-3 w-3" />
-                        {suggestion.applied ? t("resume.applied") : t("resume.applyOneClick")}
+                        {t("resume.applyOneClick")}
                       </button>
-                    ) : (
+                    )}
+                    {!suggestion.applied && !suggestion.replacement && (
                       <button
                         type="button"
                         onClick={handleManualSuggestion}
-                        disabled={busy || suggestion.applied}
+                        disabled={busy}
                         className="flex items-center gap-1 rounded-md border border-[var(--border-color)] px-2.5 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40"
                       >
-                        {t("resume.manualFill")}
+                        {t("resume.goToDraft")}
                       </button>
                     )}
                   </div>

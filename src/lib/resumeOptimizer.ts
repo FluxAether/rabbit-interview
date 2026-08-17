@@ -20,6 +20,7 @@ export interface ResumeSuggestion {
 export interface ResumeAnalysisResult {
   optimizedText: string
   suggestions: ResumeSuggestion[]
+  requirements: ResumeRequirement[]
   targetKeywords: string[]
   matchedKeywords: string[]
   missingKeywords: string[]
@@ -27,12 +28,19 @@ export interface ResumeAnalysisResult {
 
 export type ResumeRequirementPriority = 'required' | 'preferred'
 export type ResumeRequirementStatus = 'supported' | 'unsupported'
+export type ResumeAnalysisSource = 'original' | 'optimized' | ''
 
-interface ResumeRequirement {
+export interface ResumeRequirement {
   keyword: string
   priority: ResumeRequirementPriority
   status: ResumeRequirementStatus
   evidence: string
+}
+
+export interface ResumeAnalysisContext {
+  source: Exclude<ResumeAnalysisSource, ''>
+  originalFingerprint: string
+  jobDescriptionFingerprint: string
 }
 
 export interface ResumeWorkspace {
@@ -41,9 +49,13 @@ export interface ResumeWorkspace {
   jobDescription: string
   suggestions: ResumeSuggestion[]
   sourceFileName: string
+  requirements: ResumeRequirement[]
   targetKeywords: string[]
   matchedKeywords: string[]
   missingKeywords: string[]
+  analysisOriginalFingerprint: string
+  analysisJobDescriptionFingerprint: string
+  analysisSource: ResumeAnalysisSource
 }
 
 const RESUME_SUGGESTION_CATEGORIES: ResumeSuggestionCategory[] = ['format', 'clarity', 'impact', 'keywords']
@@ -188,7 +200,7 @@ export function normalizeLlmResumeResult(
       }
     })
 
-  return { optimizedText, suggestions, targetKeywords, ...keywordMatch }
+  return { optimizedText, suggestions, requirements, targetKeywords, ...keywordMatch }
 }
 
 const ENGLISH_STOPWORDS = new Set([
@@ -206,9 +218,13 @@ export function createEmptyResumeWorkspace(): ResumeWorkspace {
     jobDescription: '',
     suggestions: [],
     sourceFileName: '',
+    requirements: [],
     targetKeywords: [],
     matchedKeywords: [],
     missingKeywords: [],
+    analysisOriginalFingerprint: '',
+    analysisJobDescriptionFingerprint: '',
+    analysisSource: '',
   }
 }
 
@@ -217,7 +233,8 @@ export function mergeResumeWorkspace(
   update: Partial<ResumeWorkspace>,
 ): ResumeWorkspace {
   const jobDescriptionChanged = update.jobDescription !== undefined && update.jobDescription !== current.jobDescription
-  const targetKeywords = jobDescriptionChanged && update.targetKeywords === undefined
+  const hasAnalysisContext = Boolean(current.analysisOriginalFingerprint || current.analysisJobDescriptionFingerprint)
+  const targetKeywords = jobDescriptionChanged && update.targetKeywords === undefined && !hasAnalysisContext
     ? []
     : update.targetKeywords ?? current.targetKeywords
   const next = { ...current, ...update, targetKeywords }
@@ -266,6 +283,16 @@ export function countResumeWords(text: string): number {
     .replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu, ' ')
     .match(/[\p{L}\p{N}]+(?:['’.-][\p{L}\p{N}]+)*/gu)?.length ?? 0
   return cjk + words
+}
+
+export function resumeTextFingerprint(text: string): string {
+  const normalized = normalizeResumeText(text)
+  let hash = 2166136261
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash ^= normalized.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `${normalized.length}:${(hash >>> 0).toString(16)}`
 }
 
 export function normalizeResumeText(text: string): string {
