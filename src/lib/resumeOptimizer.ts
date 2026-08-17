@@ -86,7 +86,7 @@ function protectedFactCounts(text: string): Map<string, number> {
   const facts = [
     ...numbers,
     ...(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []).map((value) => `email:${value.toLocaleLowerCase()}`),
-    ...(text.match(/(?:(?:https?:\/\/|www\.)\S+|(?:[a-z0-9-]+\.)+[a-z]{2,24}(?:[/?#]\S*)?)/gi) ?? [])
+    ...(text.match(/(?:(?:https?:\/\/|www\.)\S+|(?:[a-z0-9-]+\.)+(?:com|org|io|dev|ai|me|co|app|tech|site|xyz|edu|gov)(?:[/?#]\S*)?)/gi) ?? [])
       .map((value) => `url:${value.replace(/[)\],.;:!?，。]+$/, '').toLocaleLowerCase()}`),
   ]
   const counts = new Map<string, number>()

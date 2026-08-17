@@ -50,6 +50,10 @@ Input JSON:
 ${JSON.stringify({ resume: sourceText, jobDescription })}`
 }
 
+export function estimateResumeOptimizationOutputTokens(sourceText: string): number {
+  return Math.min(64_000, Math.max(8_000, Math.ceil(sourceText.length * 1.25) + 4_000))
+}
+
 export async function optimizeResumeWithLlm(
   sourceText: string,
   jobDescription: string,
@@ -65,7 +69,8 @@ export async function optimizeResumeWithLlm(
     signal,
     {
       allowProviderFallback: false,
-      maxOutputTokens: 8_000,
+      maxOutputTokens: estimateResumeOptimizationOutputTokens(sourceText),
+      thinkingLevel: 'low',
     },
   )
 

@@ -34,6 +34,20 @@ Product design • Figma • User research`
 
 type PageStatus = { kind: "error" | "success" | "warning"; text: string } | null
 
+function resumeAnalysisErrorKey(error: unknown, aborted: boolean): string {
+  if (aborted) return "resume.analysisTimeout"
+  if (!(error instanceof Error)) return "resume.analysisError"
+  if (error.message === "resume-text-too-long") return "resume.textTooLong"
+  if (error.message === "llm-output-truncated") return "resume.analysisTruncated"
+  if (error.message === "The LLM returned invalid JSON. Please retry." || error.message === "The LLM returned an empty response.") {
+    return "resume.analysisInvalidResponse"
+  }
+  if (error.message === "The LLM returned an incomplete optimized resume.") return "resume.analysisIncomplete"
+  if (error.message === "The LLM changed protected factual content.") return "resume.analysisFactConflict"
+  if (error.message.startsWith("No LLM API key is configured")) return "resume.analysisMissingKey"
+  return "resume.analysisError"
+}
+
 export default function ResumeOptimizer() {
   const {
     resumeOriginal,
@@ -178,12 +192,7 @@ export default function ResumeOptimizer() {
     } catch (error) {
       if (!request.isLatest() || !isMounted.current) return
       console.warn("Failed to optimize resume with LLM", error)
-      const key = request.signal.aborted
-        ? "resume.analysisTimeout"
-        : error instanceof Error && error.message === "resume-text-too-long"
-          ? "resume.textTooLong"
-          : "resume.analysisError"
-      setStatus({ kind: "error", text: t(key) })
+      setStatus({ kind: "error", text: t(resumeAnalysisErrorKey(error, request.signal.aborted)) })
     } finally {
       const latest = request.isLatest()
       request.finish()

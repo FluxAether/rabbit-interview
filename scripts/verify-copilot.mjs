@@ -652,9 +652,9 @@ class FakeWebSocket {
   }
 }
 
-const { startDeepgramStream, testDeepgramConnection, sendAudioChunk } = loadTypeScriptModule(
+const { startDeepgramStream, testDeepgramConnection, sendAudioChunk, closeDeepgramStream } = loadTypeScriptModule(
   'src/lib/llm.ts',
-  ['startDeepgramStream', 'testDeepgramConnection', 'sendAudioChunk'],
+  ['startDeepgramStream', 'testDeepgramConnection', 'sendAudioChunk', 'closeDeepgramStream'],
   {
     loadApiKeys: async () => ({ deepgram: 'test-key' }),
     getLlmApiKey: async () => null,
@@ -707,6 +707,25 @@ check(latestSocket.sent.length === 0, 'Deepgram audio is dropped when websocket 
 latestSocket.bufferedAmount = 0
 sendAudioChunk(latestSocket, new Float32Array([0.5]))
 check(latestSocket.sent.length === 1, 'Deepgram audio resumes when websocket backpressure clears')
+closeDeepgramStream(latestSocket)
+
+const customOpening = startDeepgramStream(
+  () => {},
+  undefined,
+  48_000,
+  undefined,
+  { language: 'en-US', endpointingMs: 450, utteranceEndMs: 1_300 },
+)
+await new Promise((resolve) => setImmediate(resolve))
+check(
+  latestSocket?.url.includes('sample_rate=48000')
+    && latestSocket.url.includes('language=en-US')
+    && latestSocket.url.includes('endpointing=450')
+    && latestSocket.url.includes('utterance_end_ms=1300'),
+  'Deepgram per-session options override global STT language and endpoint timing',
+)
+latestSocket?.open()
+closeDeepgramStream(await customOpening)
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)
 if (failed > 0) process.exit(1)

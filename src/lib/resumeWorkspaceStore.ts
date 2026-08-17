@@ -3,8 +3,8 @@ import {
   loadResumeWorkspaceJson,
   migrateLegacyJsonStoresIfNeeded,
   saveResumeWorkspaceJson,
-} from './db'
-import { encryptSecret } from './secretCrypto'
+} from './db.ts'
+import { encryptSecret } from './secretCrypto.ts'
 import {
   createEmptyResumeWorkspace,
   matchResumeKeywords,
