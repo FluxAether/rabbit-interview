@@ -195,6 +195,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'mock.voice.phase.paused': 'Waiting for the next question…',
     'mock.voice.phase.stopping': 'Stopping microphone…',
     'mock.voice.phase.error': 'Voice connection error',
+    'mock.limit.reached': 'This interview reached the 2-hour recording limit and was saved automatically.',
 
     // History
     'history.title': 'History',
@@ -427,6 +428,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.archive.sessionSaved': 'Session saved automatically. No recording was available.',
     'copilot.archive.savedScored': 'Session, recording, and score saved automatically.',
     'copilot.archive.sessionSavedScored': 'Session and score saved automatically. No recording was available.',
+    'copilot.archive.limitReached': 'Recording reached the 2-hour limit. The session was stopped and saved automatically.',
     'copilot.archive.autoSaveHint': 'Stopping capture automatically saves the session and recording.',
     'copilot.audioMode': 'Audio mode',
     'copilot.audioMode.idle': 'Idle',
@@ -674,6 +676,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'mock.voice.phase.paused': '正在等待下一题…',
     'mock.voice.phase.stopping': '正在关闭麦克风…',
     'mock.voice.phase.error': '语音连接异常',
+    'mock.limit.reached': '本场面试已达到 2 小时录音上限，已自动停止并保存。',
 
     // History
     'history.title': '历史记录',
@@ -906,6 +909,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.archive.sessionSaved': '会话已自动保存，但本次没有可用录音。',
     'copilot.archive.savedScored': '会话、录音和评分已自动保存。',
     'copilot.archive.sessionSavedScored': '会话和评分已自动保存，但本次没有可用录音。',
+    'copilot.archive.limitReached': '录音已达到 2 小时上限，会话已自动停止并保存。',
     'copilot.archive.autoSaveHint': '停止捕获后会自动保存会话记录和录音。',
     'copilot.audioMode': '音频模式',
     'copilot.audioMode.idle': '空闲',
@@ -1154,6 +1158,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'mock.voice.phase.paused': '正在等待下一題…',
     'mock.voice.phase.stopping': '正在關閉麥克風…',
     'mock.voice.phase.error': '語音連線異常',
+    'mock.limit.reached': '本場面試已達到 2 小時錄音上限，已自動停止並儲存。',
 
     'history.title': '歷史記錄',
     'history.subtitle': '檢視和管理過去的面試記錄',
@@ -1382,6 +1387,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.archive.sessionSaved': '會話已自動儲存，但本次沒有可用錄音。',
     'copilot.archive.savedScored': '會話、錄音和評分已自動儲存。',
     'copilot.archive.sessionSavedScored': '會話和評分已自動儲存，但本次沒有可用錄音。',
+    'copilot.archive.limitReached': '錄音已達到 2 小時上限，會話已自動停止並儲存。',
     'copilot.archive.autoSaveHint': '停止擷取後會自動儲存會話記錄和錄音。',
     'copilot.audioMode': '音訊模式',
     'copilot.audioMode.idle': '閒置',

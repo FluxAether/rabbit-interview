@@ -58,6 +58,7 @@ export type MockInterviewVoiceEvent =
       endedAt: number
       reason: 'utterance-end' | 'speech-final' | 'manual'
     }
+  | { type: 'limit-reached' }
   | { type: 'error'; error: string }
 
 type VoiceListener = (event: MockInterviewVoiceEvent) => void
@@ -301,6 +302,10 @@ export class MockInterviewVoiceSession {
       listen<string>('audio-error', event => {
         if (runtimeGeneration !== this.runtimeGeneration) return
         this.fail(event.payload)
+      }),
+      listen('audio-recording-limit', () => {
+        if (runtimeGeneration !== this.runtimeGeneration) return
+        this.emit({ type: 'limit-reached' })
       }),
     ])
 

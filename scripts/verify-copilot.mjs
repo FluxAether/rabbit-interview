@@ -147,6 +147,25 @@ check(llm.includes('without Markdown headings'), 'AI answers are requested as sp
 check(llm.includes('MAX_DEEPGRAM_BUFFERED_BYTES') && llm.includes('ws.bufferedAmount'), 'STT websocket backpressure bounds queued audio memory')
 check(llm.includes('KeepAlive') && llm.includes('scheduleDeepgramReconnect') && llm.includes('onSocketChange'), 'Deepgram streams keep alive and reconnect after disconnects')
 check(rustAudio.includes('120 * 60') && rustAudio.includes('begin_live_recording'), 'native live recording starts with the session and caps at 120 minutes')
+check(
+  rustAudio.includes('notify_recording_limit')
+    && rustAudio.includes('"audio-recording-limit"')
+    && rustAudio.includes('limit_notified'),
+  'native live recording emits a one-shot limit event at the 120-minute cap',
+)
+check(
+  source('src/lib/recordingLimits.ts').includes('export const MAX_RECORDING_SECONDS = 120 * 60')
+    && session.includes("from './recordingLimits'")
+    && session.includes("listen('audio-recording-limit'")
+    && session.includes("void this.stop({ reason: 'limit' })")
+    && session.includes('scheduleLimitStop(sessionId)')
+    && session.includes("'copilot.archive.limitReached'"),
+  'Copilot auto-stops and archives when the recording limit is reached',
+)
+check(
+  (source('src/i18n/translations.ts').split("'copilot.archive.limitReached'").length - 1) === 3,
+  'copilot.archive.limitReached is translated in all locales',
+)
 check(sessionState.includes('createdAt: number') && sessionState.includes('startedAt: number | null'), 'chat messages and sessions track timestamps')
 check(panel.includes('formatClock') && panel.includes('formatElapsed') && panel.includes('copilot.sessionDuration'), 'chat UI shows message times and interview duration')
 

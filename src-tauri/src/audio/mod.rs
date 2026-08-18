@@ -64,6 +64,7 @@ struct LiveRecording {
     writer: BufWriter<File>,
     sample_count: u64,
     samples_since_flush: u64,
+    limit_notified: bool,
 }
 
 struct AudioCapture {
@@ -421,6 +422,7 @@ fn begin_live_recording(app: &AppHandle) -> Result<(), String> {
         writer,
         sample_count: 0,
         samples_since_flush: 0,
+        limit_notified: false,
     });
     Ok(())
 }
@@ -435,6 +437,7 @@ fn append_live_recording(app: &AppHandle, samples: &[f32]) {
     };
     let max_samples = (TARGET_SAMPLE_RATE as u64).saturating_mul(MAX_RECORDING_SECONDS as u64);
     if live.sample_count >= max_samples {
+        notify_recording_limit(app, live);
         return;
     }
     let remaining = (max_samples - live.sample_count) as usize;
@@ -464,6 +467,18 @@ fn append_live_recording(app: &AppHandle, samples: &[f32]) {
         let _ = live.writer.flush();
         live.samples_since_flush = 0;
     }
+    if live.sample_count >= max_samples {
+        notify_recording_limit(app, live);
+    }
+}
+
+fn notify_recording_limit(app: &AppHandle, live: &mut LiveRecording) {
+    if live.limit_notified {
+        return;
+    }
+    live.limit_notified = true;
+    let _ = live.writer.flush();
+    let _ = app.emit("audio-recording-limit", MAX_RECORDING_SECONDS as u64);
 }
 
 fn finalize_live_recording(final_path: &Path) -> Result<Option<SavedRecording>, String> {

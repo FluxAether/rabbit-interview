@@ -25,6 +25,7 @@ import {
   mockInterviewVoiceSession,
   type MockInterviewVoiceSnapshot,
 } from '../lib/mockInterviewVoiceSession'
+import { MAX_RECORDING_SECONDS } from '../lib/recordingLimits'
 
 interface SubmitAnswerInput {
   text?: string
@@ -52,11 +53,13 @@ export default function MockInterview() {
     return initial
   })
   const [voiceSnapshot, setVoiceSnapshot] = useState<MockInterviewVoiceSnapshot>(() => createMockInterviewVoiceSnapshot())
+  const [endedByLimit, setEndedByLimit] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const finishingRef = useRef(false)
   const submittingQuestionIdRef = useRef<string | null>(null)
   const failedAnswerRef = useRef<SubmitAnswerInput | null>(null)
   const submitAnswerRef = useRef<((input?: SubmitAnswerInput) => Promise<void>) | null>(null)
+  const finishInterviewRef = useRef<((turns?: MockInterviewSnapshot['turns'], coverage?: MockInterviewSnapshot['coverage'], completedNormally?: boolean) => Promise<void>) | null>(null)
   const sessionRef = useRef(session)
   sessionRef.current = session
 
@@ -65,6 +68,20 @@ export default function MockInterview() {
     const timer = window.setInterval(() => setSession(current => ({ ...current, elapsedSeconds: Math.floor((Date.now() - (current.startedAt || Date.now())) / 1000) })), 1000)
     return () => window.clearInterval(timer)
   }, [session.startedAt, session.phase])
+
+  useEffect(() => {
+    if (
+      !session.startedAt
+      || !session.config.voiceInputEnabled
+      || ['completed', 'setup', 'generating-report', 'saving', 'error'].includes(session.phase)
+    ) return
+    const remainingMs = Math.max(0, MAX_RECORDING_SECONDS * 1000 - (Date.now() - session.startedAt))
+    const timer = window.setTimeout(() => {
+      setEndedByLimit(true)
+      void finishInterviewRef.current?.()
+    }, remainingMs)
+    return () => window.clearTimeout(timer)
+  }, [session.startedAt, session.phase, session.config.voiceInputEnabled])
 
   useEffect(() => {
     const unsubscribe = mockInterviewVoiceSession.subscribe(event => {
@@ -91,6 +108,11 @@ export default function MockInterview() {
           startedAt: event.startedAt,
           submittedAt: event.endedAt,
         })
+        return
+      }
+      if (event.type === 'limit-reached') {
+        setEndedByLimit(true)
+        void finishInterviewRef.current?.()
         return
       }
       setSession(current => current.config.voiceInputEnabled && current.phase !== 'completed'
@@ -152,6 +174,7 @@ export default function MockInterview() {
     const controller = new AbortController()
     abortRef.current = controller
     finishingRef.current = false
+    setEndedByLimit(false)
     submittingQuestionIdRef.current = null
     failedAnswerRef.current = null
     const brief = buildEvidenceBrief(session.config.resumeContext, session.config.jobDescription, workspaceHint())
@@ -311,8 +334,11 @@ export default function MockInterview() {
     }
   }
 
+  finishInterviewRef.current = finishInterview
+
   const reset = () => {
     finishingRef.current = false
+    setEndedByLimit(false)
     submittingQuestionIdRef.current = null
     failedAnswerRef.current = null
     abortRef.current?.abort()
@@ -452,6 +478,9 @@ export default function MockInterview() {
     <div className="w-full bg-[var(--bg-app)] px-5 py-6 text-[var(--text-main)] lg:px-8">
       <section className="mx-auto max-w-5xl rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5 lg:p-7">
       <div className="flex items-start justify-between gap-4"><div><h1 className="text-xl font-semibold tracking-tight">面试报告</h1><p className="mt-1 text-sm text-[var(--text-muted)]">{session.config.role} · {session.config.company || '未指定'}</p></div><div className="tabular-nums text-3xl font-semibold text-[var(--action)]">{session.report.overallScore}</div></div>
+      {endedByLimit && (
+        <p className="mt-4 rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm text-[var(--text-muted)]">{t('mock.limit.reached')}</p>
+      )}
       <p className="mt-5 border-l-2 border-[var(--action)] bg-[var(--bg-subtle)] p-4">{session.report.summary}</p>
       {session.report.coverageSummary.length > 0 && (
         <section className="mt-5 rounded-md border border-[var(--border-color)] p-4">

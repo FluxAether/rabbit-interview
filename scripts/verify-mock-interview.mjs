@@ -52,6 +52,8 @@ const checks = [
   [page.includes('if (!nextSlot) throw new Error') && !page.includes('currentSlot || plan.slots[0]') && !page.includes('slotById(plan, action.slotId) || plan.slots[0]'), 'missing slots fail instead of falling back to intro'],
   [page.includes('const reportController = new AbortController()') && page.includes('generateMockReport(current.config, current.plan, coverage, turns, completedNormally, reportController.signal)'), 'report generation uses a fresh abort signal'],
   [voice.includes("reason: 'utterance-end' | 'speech-final' | 'manual'") && voice.includes('finalizedAnswerGeneration'), 'voice runtime finalizes each answer at most once'],
+  [voice.includes("type: 'limit-reached'") && voice.includes("listen('audio-recording-limit'"), 'voice runtime forwards the native recording-limit event'],
+  [page.includes('MAX_RECORDING_SECONDS') && page.includes("event.type === 'limit-reached'") && page.includes('finishInterviewRef.current'), 'mock interview auto-finishes at the 2-hour recording limit'],
   [llm.includes('DeepgramStreamOptions') && llm.includes('__deepgramOptions') && llm.includes('options.language'), 'Deepgram stream options survive reconnects'],
   [state.includes('voiceInputEnabled: true'), 'voice interview is the default mode'],
 ]
@@ -71,6 +73,7 @@ for (const key of [
   'mock.coverage.weak',
   'mock.voice.finishAnswer',
   'mock.voice.phase.listening',
+  'mock.limit.reached',
 ]) {
   const count = i18n.split(`'${key}'`).length - 1
   if (count === 3) console.log(`✓ ${key} translated`)

@@ -26,6 +26,7 @@ import {
   getInterviewerCommitDelay,
   shouldInterruptForInterviewerContinuation,
 } from './interviewerTurnDetector'
+import { MAX_RECORDING_SECONDS } from './recordingLimits'
 
 const COMMAND_EVENT = 'copilot-session-command'
 const SNAPSHOT_EVENT = 'copilot-session-snapshot'
@@ -125,6 +126,8 @@ class CopilotSessionHost {
   private pendingInterviewerQuestion = ''
   private interviewerQuestionTimer: ReturnType<typeof globalThis.setTimeout> | null = null
   private stopPromise: Promise<void> | null = null
+  private limitTimer: ReturnType<typeof globalThis.setTimeout> | null = null
+  private limitReached = false
   private persistenceSessionId: string | null = null
   private previousTurn = ''
   private lastRequestType: SuggestionRequestType = 'interviewer-question'
@@ -214,9 +217,11 @@ class CopilotSessionHost {
       } else {
         this.transition({
           type: 'archive-saved',
-          notice: recording
-            ? (score ? 'copilot.archive.savedScored' : 'copilot.archive.saved')
-            : (score ? 'copilot.archive.sessionSavedScored' : 'copilot.archive.sessionSaved'),
+          notice: this.limitReached
+            ? 'copilot.archive.limitReached'
+            : recording
+              ? (score ? 'copilot.archive.savedScored' : 'copilot.archive.saved')
+              : (score ? 'copilot.archive.sessionSavedScored' : 'copilot.archive.sessionSaved'),
         })
       }
       console.info('[Copilot] Session archived', {
@@ -407,6 +412,8 @@ class CopilotSessionHost {
     this.recentAssistantAt = 0
     this.recentMicrophoneText = ''
     this.recentMicrophoneAt = 0
+    this.limitReached = false
+    this.clearLimitTimer()
 
     try {
       const [settings, capabilities] = await Promise.all([
@@ -464,6 +471,7 @@ class CopilotSessionHost {
       }
       this.sampleRate = audioConfig.sample_rate || 16_000
       this.transition({ type: 'started', sessionId, mode: audioConfig.mode })
+      this.scheduleLimitStop(sessionId)
     } catch (error) {
       if (!this.isCurrent(sessionId)) return
       await invoke('stop_audio_capture').catch(() => {})
@@ -476,11 +484,13 @@ class CopilotSessionHost {
     }
   }
 
-  private async stop(): Promise<void> {
+  private async stop(options: { reason?: 'limit' } = {}): Promise<void> {
     if (this.snapshot.phase === 'idle') return
     if (this.stopPromise) return this.stopPromise
 
+    if (options.reason === 'limit') this.limitReached = true
     const sessionId = this.snapshot.sessionId
+    this.clearLimitTimer()
     this.clearPendingInterviewerQuestion()
     this.cancelActiveAnswer(sessionId)
     const archiveSnapshot = this.snapshot
@@ -500,9 +510,29 @@ class CopilotSessionHost {
   }
 
   private async cleanupRuntime(): Promise<void> {
+    this.clearLimitTimer()
     this.closeDeepgrams()
     this.enabledSources = []
     this.unlisteners.splice(0).forEach((unlisten) => unlisten())
+  }
+
+  private clearLimitTimer(): void {
+    if (this.limitTimer == null) return
+    globalThis.clearTimeout(this.limitTimer)
+    this.limitTimer = null
+  }
+
+  private scheduleLimitStop(sessionId: number): void {
+    this.clearLimitTimer()
+    const startedAt = this.snapshot.startedAt
+    if (startedAt == null) return
+    const remainingMs = Math.max(0, MAX_RECORDING_SECONDS * 1000 - (Date.now() - startedAt))
+    this.limitTimer = globalThis.setTimeout(() => {
+      this.limitTimer = null
+      if (!this.isCurrent(sessionId)) return
+      void this.stop({ reason: 'limit' })
+    }, remainingMs)
+    ;(this.limitTimer as { unref?: () => void }).unref?.()
   }
 
   private closeDeepgrams(): void {
@@ -541,6 +571,10 @@ class CopilotSessionHost {
       listen<string>('audio-error', (event) => {
         if (!this.isCurrent(sessionId)) return
         void this.fail(sessionId, event.payload)
+      }),
+      listen('audio-recording-limit', () => {
+        if (!this.isCurrent(sessionId)) return
+        void this.stop({ reason: 'limit' })
       }),
     ])
 
@@ -777,6 +811,7 @@ class CopilotSessionHost {
 
   private async fail(sessionId: number, error: string): Promise<void> {
     if (!this.isCurrent(sessionId)) return
+    this.clearLimitTimer()
     this.clearPendingInterviewerQuestion()
     this.cancelActiveAnswer(sessionId)
     const archiveSnapshot = this.snapshot
