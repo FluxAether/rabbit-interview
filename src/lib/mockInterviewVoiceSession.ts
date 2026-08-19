@@ -71,6 +71,7 @@ interface AudioChunk {
 interface AudioConfig {
   sample_rate: number
   mode: string
+  capture_id: number
 }
 
 export function createMockInterviewVoiceSnapshot(): MockInterviewVoiceSnapshot {
@@ -91,6 +92,7 @@ export class MockInterviewVoiceSession {
   private socket: WebSocket | null = null
   private unlisteners: UnlistenFn[] = []
   private sampleRate = 16_000
+  private captureId: number | null = null
   private recordingSessionId = crypto.randomUUID()
   private recordingAvailable = false
   private acceptingAudio = false
@@ -223,9 +225,11 @@ export class MockInterviewVoiceSession {
         useSystemAudio: false,
         useMicrophone: true,
         deviceName: config.microphoneDevice,
+        captureOwner: 'mock-interview',
       })
+      this.captureId = audioConfig.capture_id
       if (runtimeGeneration !== this.runtimeGeneration) {
-        await invoke('stop_audio_capture').catch(() => {})
+        await this.stopOwnedCapture()
         return
       }
 
@@ -235,7 +239,7 @@ export class MockInterviewVoiceSession {
       if (runtimeGeneration !== this.runtimeGeneration) {
         closeDeepgramStream(this.socket)
         this.socket = null
-        await invoke('stop_audio_capture').catch(() => {})
+        await this.stopOwnedCapture()
         return
       }
 
@@ -443,9 +447,16 @@ export class MockInterviewVoiceSession {
     this.socket = null
     this.removeAudioListeners()
     if (stopCapture || this.snapshot.captureActive) {
-      await invoke('stop_audio_capture').catch(() => {})
+      await this.stopOwnedCapture()
     }
     this.updateSnapshot({ captureActive: false, amplitude: 0 })
+  }
+
+  private async stopOwnedCapture(): Promise<void> {
+    if (this.captureId === null) return
+    const captureId = this.captureId
+    this.captureId = null
+    await invoke('stop_audio_capture', { captureId }).catch(() => {})
   }
 
   private removeAudioListeners(): void {

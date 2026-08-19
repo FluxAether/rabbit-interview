@@ -73,6 +73,17 @@ check(
     && session.includes("listen<number>('audio-amplitude'"),
   'session host owns STT and lightweight audio events',
 )
+check(
+  session.includes('private captureId: number | null = null')
+    && session.includes("captureOwner: 'copilot'"),
+  'Copilot tracks its native audio capture lease',
+)
+check(
+  session.includes('if (this.captureId === null) return')
+    && session.includes("invoke('stop_audio_capture', { captureId })")
+    && !session.includes("invoke('stop_audio_capture').catch"),
+  'Copilot can only stop the native capture it owns',
+)
 check(rustAudio.includes('"audio-source-chunk"') && session.includes("listen<AudioSourceChunk>('audio-source-chunk'"), 'system and microphone audio retain their source through transcription')
 check(sessionState.includes("'system-stt' | 'microphone-stt' | 'follow-up' | 'llm'"), 'chat messages retain their exact source')
 check(!db.includes('upsertCopilotMessage') && !db.includes('copilot_messages'), 'write-only copilot_messages path is removed')

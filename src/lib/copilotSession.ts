@@ -122,6 +122,7 @@ class CopilotSessionHost {
   private unlisteners: UnlistenFn[] = []
   private commandUnlisten: UnlistenFn | null = null
   private sampleRate = 16_000
+  private captureId: number | null = null
   private activeAnswer: ActiveAnswer | null = null
   private pendingInterviewerQuestion = ''
   private interviewerQuestionTimer: ReturnType<typeof globalThis.setTimeout> | null = null
@@ -459,13 +460,15 @@ class CopilotSessionHost {
         return
       }
 
-      const audioConfig = await invoke<{ sample_rate: number; mode: string }>('start_audio_capture', {
+      const audioConfig = await invoke<{ sample_rate: number; mode: string; capture_id: number }>('start_audio_capture', {
         useSystemAudio,
         useMicrophone,
         deviceName: config.deviceName ?? settings.micDevice ?? null,
+        captureOwner: 'copilot',
       })
+      this.captureId = audioConfig.capture_id
       if (!this.isCurrent(sessionId)) {
-        await invoke('stop_audio_capture').catch(() => {})
+        await this.stopOwnedCapture()
         await this.cleanupRuntime()
         return
       }
@@ -474,7 +477,7 @@ class CopilotSessionHost {
       this.scheduleLimitStop(sessionId)
     } catch (error) {
       if (!this.isCurrent(sessionId)) return
-      await invoke('stop_audio_capture').catch(() => {})
+      await this.stopOwnedCapture()
       await this.cleanupRuntime()
       this.transition({
         type: 'error',
@@ -498,7 +501,7 @@ class CopilotSessionHost {
     this.transition({ type: 'stop' })
     this.stopPromise = (async () => {
       this.closeDeepgrams()
-      await invoke('stop_audio_capture').catch(() => {})
+      await this.stopOwnedCapture()
       await this.cleanupRuntime()
       await this.archiveSession(archiveSnapshot, persistenceSessionId)
       this.transition({ type: 'stopped' })
@@ -514,6 +517,13 @@ class CopilotSessionHost {
     this.closeDeepgrams()
     this.enabledSources = []
     this.unlisteners.splice(0).forEach((unlisten) => unlisten())
+  }
+
+  private async stopOwnedCapture(): Promise<void> {
+    if (this.captureId === null) return
+    const captureId = this.captureId
+    this.captureId = null
+    await invoke('stop_audio_capture', { captureId }).catch(() => {})
   }
 
   private clearLimitTimer(): void {
@@ -816,7 +826,7 @@ class CopilotSessionHost {
     this.cancelActiveAnswer(sessionId)
     const archiveSnapshot = this.snapshot
     const persistenceSessionId = this.persistenceSessionId
-    await invoke('stop_audio_capture').catch(() => {})
+    await this.stopOwnedCapture()
     await this.cleanupRuntime()
     await this.archiveSession(archiveSnapshot, persistenceSessionId)
     this.persistenceSessionId = null

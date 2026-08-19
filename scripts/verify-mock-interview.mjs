@@ -25,6 +25,7 @@ const ai = fs.readFileSync('src/lib/mockInterviewAi.ts', 'utf8')
 const db = fs.readFileSync('src/lib/db.ts', 'utf8')
 const speech = fs.readFileSync('src-tauri/src/speech.rs', 'utf8')
 const voice = fs.readFileSync('src/lib/mockInterviewVoiceSession.ts', 'utf8')
+const rustAudio = fs.readFileSync('src-tauri/src/audio/mod.rs', 'utf8')
 const llm = fs.readFileSync('src/lib/llm.ts', 'utf8')
 const i18n = fs.readFileSync('src/i18n/translations.ts', 'utf8')
 
@@ -53,6 +54,10 @@ const checks = [
   [page.includes('const reportController = new AbortController()') && page.includes('generateMockReport(current.config, current.plan, coverage, turns, completedNormally, reportController.signal)'), 'report generation uses a fresh abort signal'],
   [voice.includes("reason: 'utterance-end' | 'speech-final' | 'manual'") && voice.includes('finalizedAnswerGeneration'), 'voice runtime finalizes each answer at most once'],
   [voice.includes("type: 'limit-reached'") && voice.includes("listen('audio-recording-limit'"), 'voice runtime forwards the native recording-limit event'],
+  [voice.includes('private captureId: number | null = null') && voice.includes("captureOwner: 'mock-interview'"), 'mock voice runtime tracks its native capture lease'],
+  [voice.includes('if (this.captureId === null) return') && voice.includes("invoke('stop_audio_capture', { captureId })"), 'inactive mock voice cleanup cannot stop another session capture'],
+  [rustAudio.includes('capture_id: u64') && rustAudio.includes('captureOwner: String') && rustAudio.includes('captureId: u64'), 'native audio commands carry capture ownership tokens'],
+  [rustAudio.includes('Audio capture is already in use by') && !rustAudio.includes('    stop_audio_capture_and_wait();\n    discard_live_recording();'), 'starting a second audio session refuses to steal the active capture'],
   [page.includes('MAX_RECORDING_SECONDS') && page.includes("event.type === 'limit-reached'") && page.includes('finishInterviewRef.current'), 'mock interview auto-finishes at the 2-hour recording limit'],
   [llm.includes('DeepgramStreamOptions') && llm.includes('__deepgramOptions') && llm.includes('options.language'), 'Deepgram stream options survive reconnects'],
   [state.includes('voiceInputEnabled: true'), 'voice interview is the default mode'],

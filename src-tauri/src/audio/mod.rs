@@ -39,6 +39,7 @@ pub struct AudioConfigPayload {
     pub sample_rate: u32,
     pub device: String,
     pub mode: String,
+    pub capture_id: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,9 +68,67 @@ struct LiveRecording {
     limit_notified: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveAudioCaptureLease {
+    id: u64,
+    owner: String,
+}
+
+#[derive(Debug)]
+struct AudioCaptureLease {
+    next_id: u64,
+    active: Option<ActiveAudioCaptureLease>,
+}
+
+impl Default for AudioCaptureLease {
+    fn default() -> Self {
+        Self {
+            next_id: 1,
+            active: None,
+        }
+    }
+}
+
+impl AudioCaptureLease {
+    fn acquire(&mut self, owner: &str) -> Result<u64, String> {
+        if let Some(active) = &self.active {
+            return Err(format!(
+                "Audio capture is already in use by {}",
+                active.owner
+            ));
+        }
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1).max(1);
+        self.active = Some(ActiveAudioCaptureLease {
+            id,
+            owner: owner.to_string(),
+        });
+        Ok(id)
+    }
+
+    fn is_current(&self, capture_id: u64) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.id == capture_id)
+    }
+
+    fn release_current(&mut self, capture_id: u64) -> bool {
+        if !self.is_current(capture_id) {
+            return false;
+        }
+        self.active = None;
+        true
+    }
+
+    fn clear(&mut self) {
+        self.active = None;
+    }
+}
+
 struct AudioCapture {
     handle: Mutex<Option<thread::JoinHandle<()>>>,
     tx: Mutex<Option<mpsc::Sender<AudioCommand>>>,
+    lease: Mutex<AudioCaptureLease>,
     current_mode: Mutex<String>,
     failure_reason: Mutex<Option<String>>,
     live_recording: Mutex<Option<LiveRecording>>,
@@ -82,6 +141,7 @@ impl Default for AudioCapture {
         Self {
             handle: Mutex::new(None),
             tx: Mutex::new(None),
+            lease: Mutex::new(AudioCaptureLease::default()),
             current_mode: Mutex::new(String::new()),
             failure_reason: Mutex::new(None),
             live_recording: Mutex::new(None),
@@ -685,7 +745,7 @@ fn preferred_loopback_config(device: &cpal::Device) -> Result<cpal::SupportedStr
         .map_err(|error| format!("No supported WASAPI loopback configuration: {error}"))
 }
 
-pub(crate) fn stop_audio_capture_sync() {
+fn stop_audio_capture_sync_inner() {
     if let Some(tx) = AUDIO_STATE.tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
         let _ = tx.send(AudioCommand::Stop);
     }
@@ -697,7 +757,7 @@ pub(crate) fn stop_audio_capture_sync() {
     *AUDIO_STATE.current_mode.lock().unwrap_or_else(|e| e.into_inner()) = "idle".into();
 }
 
-pub(crate) fn stop_audio_capture_and_wait() {
+fn stop_audio_capture_and_wait_inner() {
     if let Some(tx) = AUDIO_STATE.tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
         let _ = tx.send(AudioCommand::Stop);
     }
@@ -705,6 +765,27 @@ pub(crate) fn stop_audio_capture_and_wait() {
         let _ = handle.join();
     }
     *AUDIO_STATE.current_mode.lock().unwrap_or_else(|e| e.into_inner()) = "idle".into();
+}
+
+pub(crate) fn stop_audio_capture_sync() {
+    let mut lease = AUDIO_STATE.lease.lock().unwrap_or_else(|e| e.into_inner());
+    stop_audio_capture_sync_inner();
+    lease.clear();
+}
+
+pub(crate) fn stop_audio_capture_and_wait() {
+    let mut lease = AUDIO_STATE.lease.lock().unwrap_or_else(|e| e.into_inner());
+    stop_audio_capture_and_wait_inner();
+    lease.clear();
+}
+
+fn stop_audio_capture_if_current_and_wait(capture_id: u64) -> bool {
+    let mut lease = AUDIO_STATE.lease.lock().unwrap_or_else(|e| e.into_inner());
+    if !lease.is_current(capture_id) {
+        return false;
+    }
+    stop_audio_capture_and_wait_inner();
+    lease.release_current(capture_id)
 }
 
 #[cfg(target_os = "macos")]
@@ -752,6 +833,7 @@ pub async fn start_audio_capture(
     useSystemAudio: bool,
     useMicrophone: bool,
     deviceName: Option<String>,
+    captureOwner: String,
 ) -> Result<AudioConfigPayload, String> {
     if !useSystemAudio && !useMicrophone {
         let error = "Select system audio, microphone, or both".to_string();
@@ -765,11 +847,25 @@ pub async fn start_audio_capture(
         }
     }
 
-    stop_audio_capture_and_wait();
+    let capture_owner = captureOwner.trim();
+    if capture_owner.is_empty() {
+        return Err("Audio capture owner is required".into());
+    }
+    let capture_id = AUDIO_STATE
+        .lease
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .acquire(capture_owner)?;
+
     discard_live_recording();
     *AUDIO_STATE.last_recording.lock().unwrap_or_else(|e| e.into_inner()) = None;
     remember_audio_state("starting", None);
     if let Err(error) = begin_live_recording(&app) {
+        AUDIO_STATE
+            .lease
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .release_current(capture_id);
         remember_audio_failure(error.clone());
         return Err(error);
     }
@@ -1058,6 +1154,7 @@ pub async fn start_audio_capture(
                 .or(system_device_name)
                 .unwrap_or_else(|| "Default system output".into()),
             mode: mode.into(),
+            capture_id,
         };
         let _ = thread_app.emit("audio-config", payload.clone());
         if startup_tx.send(Ok(payload)).is_err() {
@@ -1098,11 +1195,17 @@ pub async fn start_audio_capture(
 }
 
 #[tauri::command]
-pub async fn stop_audio_capture() -> Result<String, String> {
-    tokio::task::spawn_blocking(stop_audio_capture_and_wait)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok("Capture stopped".into())
+#[allow(non_snake_case)]
+pub async fn stop_audio_capture(captureId: u64) -> Result<String, String> {
+    let stopped =
+        tokio::task::spawn_blocking(move || stop_audio_capture_if_current_and_wait(captureId))
+            .await
+            .map_err(|error| error.to_string())?;
+    Ok(if stopped {
+        "Capture stopped".into()
+    } else {
+        "Capture already inactive or owned by another session".into()
+    })
 }
 
 #[tauri::command]
@@ -1214,7 +1317,7 @@ mod tests {
     use super::{
         admit_realtime_samples, capture_origin_frame, clear_audio_recordings_in_dir,
         convert_samples, process_output_audio, recording_storage_usage_in_dir,
-        stop_audio_capture_and_wait, write_pcm16_wav, AtomicU64, MonoResampler,
+        stop_audio_capture_and_wait, write_pcm16_wav, AtomicU64, AudioCaptureLease, MonoResampler,
     };
     use std::time::Instant;
 
@@ -1297,6 +1400,24 @@ mod tests {
     fn repeated_stop_is_idempotent_when_capture_is_idle() {
         stop_audio_capture_and_wait();
         stop_audio_capture_and_wait();
+    }
+
+    #[test]
+    fn capture_lease_rejects_foreign_start_and_stale_stop() {
+        let mut lease = AudioCaptureLease::default();
+        let copilot_id = lease.acquire("copilot").unwrap();
+
+        assert_eq!(
+            lease.acquire("mock-interview").unwrap_err(),
+            "Audio capture is already in use by copilot"
+        );
+        assert!(!lease.release_current(copilot_id + 1));
+        assert!(lease.is_current(copilot_id));
+        assert!(lease.release_current(copilot_id));
+
+        let mock_id = lease.acquire("mock-interview").unwrap();
+        assert_ne!(mock_id, copilot_id);
+        assert!(lease.is_current(mock_id));
     }
 
     #[test]
