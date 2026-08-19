@@ -40,10 +40,10 @@ async function getKeys(forceReload = false) {
  *   "groq-llama-3.1", "groq-llama-3.3-70b"
  *   "gpt-4o", "gpt-4o-mini", "openai-gpt-4o"
  *   "claude-3.5", "claude-3.5-sonnet"
- *   "gemini-3.5-flash", "gemini-3.6-flash"
+ *   "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.7-flash"
  */
 const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
-const SUPPORTED_GEMINI_MODELS = new Set(['gemini-3.5-flash', 'gemini-3.6-flash']);
+const SUPPORTED_GEMINI_MODELS = new Set(['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash']);
 
 function resolveProviderAndModel(aiModel: string): { provider: LlmProvider; model: string } {
   const configured = aiModel || 'llama-3.1-8b-instant';
