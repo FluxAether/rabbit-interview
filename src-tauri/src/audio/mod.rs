@@ -20,7 +20,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
 const TARGET_SAMPLE_RATE: u32 = AUDIOTEE_SAMPLE_RATE;
-const MAX_RECORDING_SECONDS: usize = 120 * 60;
+const MAX_RECORDING_SECONDS: usize = 24 * 60 * 60;
 // Sleep/wake can deliver multi-second audio backlog in one callback. Bound work per push.
 const MAX_SOURCE_CHUNK_SAMPLES: usize = TARGET_SAMPLE_RATE as usize; // 1s
 const MAX_RECORDING_WRITE_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 2; // 2s
