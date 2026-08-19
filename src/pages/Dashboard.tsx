@@ -1,4 +1,5 @@
 import { ArrowDown, ArrowUp, Users, TrendingUp, ClipboardCheck, Rocket, Settings as SettingsIcon } from 'lucide-react'
+import { FileText, Mic, ChevronRight } from 'lucide-react'
 import { useMemo } from 'react'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
@@ -8,6 +9,8 @@ interface DashboardProps {
   onLaunchCopilot: () => void
   onViewHistory: () => void
   onNavigateToSettings?: () => void
+  onNavigateToMock?: () => void
+  onNavigateToResume?: () => void
 }
 
 function formatSigned(value: number, unit: string) {
@@ -17,7 +20,7 @@ function formatSigned(value: number, unit: string) {
 
 function DeltaBadge({ value, unit }: { value: number | null; unit: string }) {
   if (value == null) {
-    return <div className="text-[10px] text-[var(--text-muted)]">—</div>
+    return <div className="text-[10px] text-[var(--text-muted)]">-</div>
   }
 
   if (value === 0) {
@@ -44,7 +47,7 @@ function DeltaBadge({ value, unit }: { value: number | null; unit: string }) {
   )
 }
 
-export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateToSettings }: DashboardProps) {
+export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateToSettings, onNavigateToMock, onNavigateToResume }: DashboardProps) {
   const history = useAppStore((state) => state.history)
   const historyStatus = useAppStore((state) => state.historyStatus)
   const t = useTranslation()
@@ -52,7 +55,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
     () => historyStatus === 'ready' ? computeDashboardStats(history) : null,
     [history, historyStatus],
   )
-  const unavailableMetric = historyStatus === 'loading' ? '…' : '—'
+  const unavailableMetric = historyStatus === 'loading' ? '…' : '-'
 
   const launch = () => {
     onLaunchCopilot()
@@ -101,7 +104,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
                   <TrendingUp className="h-4 w-4" /> {t('dashboard.stat.score')}
                 </div>
                 <div className="mt-3 text-3xl font-semibold leading-none tabular-nums">
-                  {stats ? (stats.averageScore ?? '—') : unavailableMetric}
+                  {stats ? (stats.averageScore ?? '-') : unavailableMetric}
                 </div>
                 <div className="mt-1 text-[10px] text-[var(--text-muted)]">{stats?.averageScore != null ? '/100 · ' : ''}{t('dashboard.stat.total')}</div>
               </div>
@@ -129,25 +132,97 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
           </div>
         </section>
 
-        <section className="mb-8 flex items-center justify-between gap-5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-5 py-4">
-          <div className="flex min-w-0 items-center gap-4">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[var(--bg-subtle)] text-[var(--text-main)]">
-              <Rocket className="h-4 w-4" />
+        {/* 3-Station Quick Launch Workspace */}
+        <div className="mb-8">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold">{t('dashboard.quickLaunch.title')}</h2>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            {/* Station 1: Stealth Copilot */}
+            <div className="flex flex-col justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 transition-all hover:border-[var(--text-muted)]">
+              <div>
+                <div className="flex items-center justify-between">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--bg-subtle)] text-[var(--action)]">
+                    <Rocket className="h-4 w-4" />
+                  </div>
+                  <span className="rounded bg-[var(--bg-subtle)] px-1.5 py-0.5 text-[10px] font-semibold tracking-wider uppercase text-[var(--text-muted)]">
+                    {t('dashboard.launch.badge')}
+                  </span>
+                </div>
+                <h3 className="mt-3 text-sm font-semibold text-[var(--text-main)]">
+                  {t('dashboard.station.copilot.title')}
+                </h3>
+                <p className="mt-1 text-xs text-[var(--text-muted)] leading-relaxed">
+                  {t('dashboard.station.copilot.desc')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={launch}
+                className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-md bg-[var(--action)] py-2 text-xs font-medium text-[var(--action-text)] transition-opacity hover:opacity-90"
+              >
+                <span>{t('common.launch')}</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
             </div>
-            <div className="min-w-0">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">{t('dashboard.launch.badge')}</div>
-              <h2 className="mt-0.5 text-base font-semibold">{t('dashboard.launch.title')}</h2>
-              <p className="mt-0.5 truncate text-sm text-[var(--text-muted)]">{t('dashboard.launch.subtitle')}</p>
+
+            {/* Station 2: Mock Interview */}
+            <div className="flex flex-col justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 transition-all hover:border-[var(--text-muted)]">
+              <div>
+                <div className="flex items-center justify-between">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--bg-subtle)] text-[var(--action)]">
+                    <Mic className="h-4 w-4" />
+                  </div>
+                  <span className="rounded bg-[var(--bg-subtle)] px-1.5 py-0.5 text-[10px] font-semibold tracking-wider uppercase text-[var(--text-muted)]">
+                    AI SIMULATION
+                  </span>
+                </div>
+                <h3 className="mt-3 text-sm font-semibold text-[var(--text-main)]">
+                  {t('dashboard.station.mock.title')}
+                </h3>
+                <p className="mt-1 text-xs text-[var(--text-muted)] leading-relaxed">
+                  {t('dashboard.station.mock.desc')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onNavigateToMock || launch}
+                className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] py-2 text-xs font-medium text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+              >
+                <span>{t('common.start')}</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Station 3: Resume Optimizer */}
+            <div className="flex flex-col justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 transition-all hover:border-[var(--text-muted)]">
+              <div>
+                <div className="flex items-center justify-between">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--bg-subtle)] text-[var(--action)]">
+                    <FileText className="h-4 w-4" />
+                  </div>
+                  <span className="rounded bg-[var(--bg-subtle)] px-1.5 py-0.5 text-[10px] font-semibold tracking-wider uppercase text-[var(--text-muted)]">
+                    ATS TARGETING
+                  </span>
+                </div>
+                <h3 className="mt-3 text-sm font-semibold text-[var(--text-main)]">
+                  {t('dashboard.station.resume.title')}
+                </h3>
+                <p className="mt-1 text-xs text-[var(--text-muted)] leading-relaxed">
+                  {t('dashboard.station.resume.desc')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onNavigateToResume || launch}
+                className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] py-2 text-xs font-medium text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+              >
+                <span>{t('common.analyze')}</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={launch}
-            className="shrink-0 rounded-md bg-[var(--action)] px-4 py-2 text-sm font-medium text-[var(--action-text)] transition-opacity hover:opacity-90"
-          >
-            {t('common.launch')}
-          </button>
-        </section>
+        </div>
 
         <section>
           <div className="mb-3 flex items-center justify-between">
@@ -172,16 +247,40 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
               <div key={item.id ?? idx} className="flex items-center gap-4 px-4 py-3 text-sm hover:bg-[var(--bg-hover)]">
                 <div className="w-32 shrink-0 text-xs tabular-nums text-[var(--text-muted)]">{item.date}</div>
                 <div className="min-w-0 flex-1 truncate font-medium">{item.role}</div>
-                <div className="w-10 text-right font-semibold tabular-nums">{item.score ?? '—'}</div>
+                <div className="w-10 text-right font-semibold tabular-nums">{item.score ?? '-'}</div>
               </div>
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-8 text-center text-sm text-[var(--text-muted)]">
-            <p>{t('dashboard.noActivity')}</p>
-            <button type="button" onClick={launch} className="mt-3 text-sm font-medium text-[var(--text-main)] underline underline-offset-2">
-              {t('common.launch')}
-            </button>
+          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-6">
+            <div className="mb-3 font-semibold text-sm text-[var(--text-main)]">{t('dashboard.onboarding.title')}</div>
+            <p className="mb-4 text-xs text-[var(--text-muted)]">{t('dashboard.onboarding.subtitle')}</p>
+            <div className="space-y-2.5 text-xs">
+              <button
+                type="button"
+                onClick={onNavigateToSettings}
+                className="flex w-full items-center justify-between rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-2 text-left hover:bg-[var(--bg-hover)] transition-colors"
+              >
+                <span>{t('dashboard.onboarding.step1')}</span>
+                <ChevronRight className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+              </button>
+              <button
+                type="button"
+                onClick={onNavigateToResume || launch}
+                className="flex w-full items-center justify-between rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-2 text-left hover:bg-[var(--bg-hover)] transition-colors"
+              >
+                <span>{t('dashboard.onboarding.step2')}</span>
+                <ChevronRight className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+              </button>
+              <button
+                type="button"
+                onClick={onNavigateToMock || launch}
+                className="flex w-full items-center justify-between rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-2 text-left hover:bg-[var(--bg-hover)] transition-colors"
+              >
+                <span>{t('dashboard.onboarding.step3')}</span>
+                <ChevronRight className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+              </button>
+            </div>
           </div>
           )}
         </section>

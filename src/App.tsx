@@ -52,6 +52,8 @@ function Sidebar({
   onToggleCollapse: () => void
 }) {
   const t = useTranslation()
+  const settings = useAppStore((state) => state.settings)
+  const activeModel = settings.aiModel || 'gpt-5.6-luna'
   return (
     <aside
       className={`flex h-[100dvh] shrink-0 flex-col border-r border-[var(--border-color)] bg-[var(--bg-sidebar)] p-3 transition-[width] duration-200 ${
@@ -96,7 +98,7 @@ function Sidebar({
 
       {/* Nav List */}
       <nav className="w-full space-y-1">
-        {navItems.map((item) => {
+        {navItems.map((item, idx) => {
           const Icon = item.icon
           const active = item.id === currentPage
           return (
@@ -104,23 +106,56 @@ function Sidebar({
               key={item.id}
               type="button"
               onClick={() => onNavigate(item.id)}
-              title={collapsed ? t(item.labelKey) : undefined}
+              title={collapsed ? `${t(item.labelKey)} (⌘${idx + 1})` : undefined}
               aria-current={active ? 'page' : undefined}
-              className={`sidebar-item relative flex w-full items-center py-2.5 ${
+              className={`sidebar-item relative flex w-full items-center py-2.5 transition-all ${
                 collapsed ? 'justify-center px-0' : 'gap-3 px-3 text-left'
               } ${
                 active
-                  ? 'active bg-[var(--bg-hover)] font-semibold text-[var(--text-main)]'
-                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
+                  ? 'active bg-[var(--bg-surface)] font-medium text-[var(--text-main)] shadow-sm border border-[var(--border-color)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] font-medium'
               }`}
             >
+              {active && (
+                <span className="absolute left-0 top-1/2 h-4 w-1 -translate-y-1/2 rounded-r-full bg-[var(--action)]" />
+              )}
               <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.8} />
-              {!collapsed && <span className="truncate text-[13.5px]">{t(item.labelKey)}</span>}
+              {!collapsed && (
+                <>
+                  <span className="truncate text-[13.5px]">{t(item.labelKey)}</span>
+                  <span className="ml-auto font-mono text-[10px] text-[var(--text-muted)] opacity-50">⌘{idx + 1}</span>
+                </>
+              )}
             </button>
           )
         })}
       </nav>
 
+      {/* Sidebar Footer Status */}
+      <div className="mt-auto w-full pt-3 border-t border-[var(--border-color)]">
+        {!collapsed ? (
+          <button
+            type="button"
+            onClick={() => onNavigate('settings')}
+            className="flex w-full items-center justify-between gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-2 text-left text-xs transition-colors hover:bg-[var(--bg-hover)]"
+          >
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase font-semibold tracking-wider text-[var(--text-muted)]">AI Engine</div>
+              <div className="truncate font-mono text-[11px] text-[var(--text-main)]">{activeModel}</div>
+            </div>
+            <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--success)]" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onNavigate('settings')}
+            title={`AI Engine: ${activeModel}`}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
+          >
+            <span className="h-2 w-2 rounded-full bg-[var(--success)]" />
+          </button>
+        )}
+      </div>
     </aside>
   )
 }
@@ -135,6 +170,21 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 960px)').matches)
   const [userCollapsed, setUserCollapsed] = useState(false)
   const [windowStatus, setWindowStatus] = useState<CopilotWindowStatus | null>(null)
+  useEffect(() => {
+    if (floating) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+        const num = parseInt(e.key, 10)
+        if (num >= 1 && num <= navItems.length) {
+          e.preventDefault()
+          const target = navItems[num - 1]
+          if (target) setCurrentPage(target.id)
+        }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [floating])
   useEffect(() => {
     const media = window.matchMedia('(max-width: 960px)')
     const sync = () => {
@@ -308,7 +358,15 @@ export default function App() {
       case 'resume': return <ResumeOptimizer />
       case 'history': return <History />
       case 'settings': return <Settings />
-      default: return <Dashboard onLaunchCopilot={() => setCurrentPage('copilot')} onViewHistory={() => setCurrentPage('history')} onNavigateToSettings={() => setCurrentPage('settings')} />
+      default: return (
+        <Dashboard
+          onLaunchCopilot={() => setCurrentPage('copilot')}
+          onNavigateToMock={() => setCurrentPage('mock')}
+          onNavigateToResume={() => setCurrentPage('resume')}
+          onViewHistory={() => setCurrentPage('history')}
+          onNavigateToSettings={() => setCurrentPage('settings')}
+        />
+      )
     }
   }
 

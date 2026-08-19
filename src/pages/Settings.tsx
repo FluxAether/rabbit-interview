@@ -9,6 +9,8 @@ import {
   Mic,
   Shield,
   Sun,
+  Moon,
+  Laptop,
   Eye,
   EyeOff,
   Check,
@@ -820,22 +822,34 @@ export default function Settings() {
                           <div className="text-xs text-[var(--text-muted)]">{t('settings.themeDesc')}</div>
                         </div>
                       </div>
-                      <select
-                        value={theme}
-                        onChange={(e) => {
-                          const val = e.target.value as 'Light' | 'Dark' | 'System'
-                          setTheme(val)
-                          useAppStore.setState((s) => ({ settings: { ...s.settings, theme: val } }))
-                          void persistToDisk({ theme: val }).then(() =>
-                            emit('app-theme-changed', val).catch((error) => console.warn('Theme sync failed:', error))
-                          )
-                        }}
-                        className="rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
-                      >
-                        <option value="Light">{t('settings.theme.light')}</option>
-                        <option value="Dark">{t('settings.theme.dark')}</option>
-                        <option value="System">{t('settings.theme.system')}</option>
-                      </select>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 pt-1">
+                      {[
+                        { id: 'Light', label: t('settings.theme.light'), icon: Sun },
+                        { id: 'Dark', label: t('settings.theme.dark'), icon: Moon },
+                        { id: 'System', label: t('settings.theme.system'), icon: Laptop },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            const val = opt.id as 'Light' | 'Dark' | 'System'
+                            setTheme(val)
+                            useAppStore.setState((s) => ({ settings: { ...s.settings, theme: val } }))
+                            void persistToDisk({ theme: val }).then(() =>
+                              emit('app-theme-changed', val).catch((error) => console.warn('Theme sync failed:', error))
+                            )
+                          }}
+                          className={`flex flex-col items-center gap-2 rounded-lg border p-3.5 text-center transition-all ${
+                            theme === opt.id
+                              ? 'border-[var(--action)] bg-[var(--bg-subtle)] font-medium text-[var(--text-main)] shadow-sm'
+                              : 'border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
+                          }`}
+                        >
+                          <opt.icon className="h-5 w-5" />
+                          <span className="text-xs font-semibold">{opt.label}</span>
+                        </button>
+                      ))}
                     </div>
 
                   </div>

@@ -414,6 +414,32 @@ export default function MockInterview() {
       <section className="mx-auto max-w-4xl rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5 lg:p-7">
       <h1 className="text-xl font-semibold tracking-tight">{copy.title}</h1>
       <p className="mt-1 text-sm text-[var(--text-muted)]">{t('mock.setup.subtitle')}</p>
+
+      {/* Quick Preset Chips */}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className="text-xs text-[var(--text-muted)]">快捷预设:</span>
+        <button
+          type="button"
+          onClick={() => updateConfig({ role: session.config.role || '资深技术专家 / Tech Lead', interviewType: 'technical', difficulty: 'senior', questionCount: 8 })}
+          className="rounded-full border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-1 text-xs font-medium text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+        >
+          {t('mock.preset.tech')}
+        </button>
+        <button
+          type="button"
+          onClick={() => updateConfig({ role: session.config.role || '产品经理 / Product Manager', interviewType: 'behavioral', difficulty: 'mid', questionCount: 5 })}
+          className="rounded-full border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-1 text-xs font-medium text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+        >
+          {t('mock.preset.behavioral')}
+        </button>
+        <button
+          type="button"
+          onClick={() => updateConfig({ interviewType: 'mixed', difficulty: 'mid', questionCount: 5 })}
+          className="rounded-full border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-1 text-xs font-medium text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+        >
+          {t('mock.preset.general')}
+        </button>
+      </div>
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <label className="text-sm">{copy.role}<input className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)]" value={session.config.role} onChange={e => updateConfig({ role: e.target.value })} placeholder="例如: Senior Product Manager / 资深前端工程师" /></label>
         <label className="text-sm">{copy.company}<input className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-2.5 outline-none transition-colors focus:border-[var(--action)]" value={session.config.company} onChange={e => updateConfig({ company: e.target.value })} placeholder="例如: ByteDance / Tencent" /></label>
@@ -537,7 +563,7 @@ export default function MockInterview() {
           {lastFeedback ? (
             <div className="mt-3 space-y-3">
               <div className="flex items-baseline gap-2">
-                <span className="tabular-nums text-3xl font-semibold text-[var(--action)]">{lastFeedback.overallScore}</span>
+                <span className={`tabular-nums text-3xl font-semibold ${lastFeedback.overallScore >= 80 ? 'text-[var(--success)]' : lastFeedback.overallScore >= 60 ? 'text-[var(--warning)]' : 'text-[var(--danger)]'}`}>{lastFeedback.overallScore}</span>
                 <span className="text-xs text-[var(--text-muted)]">/ 100 综合得分</span>
               </div>
               
@@ -548,7 +574,7 @@ export default function MockInterview() {
                     <span className="font-medium">{lastFeedback.scores.structure || 0}%</span>
                   </div>
                   <div className="h-1.5 w-full overflow-hidden bg-[var(--bg-hover)]">
-                    <div className="h-full bg-[var(--action)] transition-all duration-500" style={{ width: `${lastFeedback.scores.structure || 0}%` }} />
+                    <div className={`h-full ${(lastFeedback.scores.structure || 0) >= 80 ? 'bg-[var(--success)]' : (lastFeedback.scores.structure || 0) >= 60 ? 'bg-[var(--action)]' : 'bg-[var(--danger)]'} transition-all duration-500`} style={{ width: `${lastFeedback.scores.structure || 0}%` }} />
                   </div>
                 </div>
 
@@ -558,7 +584,7 @@ export default function MockInterview() {
                     <span className="font-medium">{lastFeedback.scores.relevance || 0}%</span>
                   </div>
                   <div className="h-1.5 w-full overflow-hidden bg-[var(--bg-hover)]">
-                    <div className="h-full bg-[var(--success)] transition-all duration-500" style={{ width: `${lastFeedback.scores.relevance || 0}%` }} />
+                    <div className={`h-full ${(lastFeedback.scores.relevance || 0) >= 80 ? 'bg-[var(--success)]' : (lastFeedback.scores.relevance || 0) >= 60 ? 'bg-[var(--action)]' : 'bg-[var(--danger)]'} transition-all duration-500`} style={{ width: `${lastFeedback.scores.relevance || 0}%` }} />
                   </div>
                 </div>
 
@@ -568,7 +594,7 @@ export default function MockInterview() {
                     <span className="font-medium">{lastFeedback.scores.clarity || 0}%</span>
                   </div>
                   <div className="h-1.5 w-full overflow-hidden bg-[var(--bg-hover)]">
-                    <div className="h-full bg-[var(--action)] transition-all duration-500" style={{ width: `${lastFeedback.scores.clarity || 0}%` }} />
+                    <div className={`h-full ${(lastFeedback.scores.clarity || 0) >= 80 ? 'bg-[var(--success)]' : (lastFeedback.scores.clarity || 0) >= 60 ? 'bg-[var(--action)]' : 'bg-[var(--danger)]'} transition-all duration-500`} style={{ width: `${lastFeedback.scores.clarity || 0}%` }} />
                   </div>
                 </div>
 
@@ -578,7 +604,7 @@ export default function MockInterview() {
                     <span className="font-medium">{lastFeedback.scores.impact || 0}%</span>
                   </div>
                   <div className="h-1.5 w-full overflow-hidden bg-[var(--bg-hover)]">
-                    <div className="h-full bg-[var(--warning)] transition-all duration-500" style={{ width: `${lastFeedback.scores.impact || 0}%` }} />
+                    <div className={`h-full ${(lastFeedback.scores.impact || 0) >= 80 ? 'bg-[var(--success)]' : (lastFeedback.scores.impact || 0) >= 60 ? 'bg-[var(--action)]' : 'bg-[var(--danger)]'} transition-all duration-500`} style={{ width: `${lastFeedback.scores.impact || 0}%` }} />
                   </div>
                 </div>
               </div>

@@ -122,6 +122,7 @@ export default function History() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [audioReady, setAudioReady] = useState(false)
   const [audioError, setAudioError] = useState(false)
+  const [playbackRate, setPlaybackRate] = useState(1)
 
   const stopReplayAudio = () => {
     const wavesurfer = wavesurferRef.current
@@ -163,6 +164,7 @@ export default function History() {
       wavesurfer.on('ready', () => {
         if (cancelled) return
         wavesurfer?.setVolume(3)
+        wavesurfer?.setPlaybackRate(playbackRate)
         setAudioReady(true)
       })
       wavesurfer.on('finish', () => setIsPlaying(false))
@@ -342,10 +344,10 @@ export default function History() {
                 </div>
               </div>
 
-              <div className="flex shrink-0 items-center gap-4">
-                <div className="w-9 text-right text-base font-semibold tabular-nums">{item.score ?? '—'}</div>
+            <div className="flex shrink-0 items-center gap-4">
+              <div className="w-9 text-right text-base font-semibold tabular-nums">{item.score ?? '-'}</div>
 
-                <button
+              <button
                   type="button"
                   onClick={() => setSelected(item)}
                   className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--bg-subtle)]"
@@ -423,7 +425,7 @@ export default function History() {
             onClick={e => e.stopPropagation()}
           >
             <div id="history-replay-title" className="mb-1 text-lg font-semibold">
-              {t('history.replayModal.title')} — {selected.role} @ {selected.company}
+              {t('history.replayModal.title')} - {selected.role} @ {selected.company}
             </div>
             <div className="mb-3 text-sm text-[var(--text-muted)]">
               {t('misc.score')}: <span className="font-semibold text-[var(--text-main)]">{selected.score ?? t('history.notScored')}</span> • {t('history.replayModal.duration')}: {Math.floor(selected.duration/60)}:{String(selected.duration % 60).padStart(2, '0')}
@@ -475,6 +477,28 @@ export default function History() {
             {selected.recordingPath ? (
               <div>
                 <div ref={waveformRef} className="mb-3 min-h-[70px] w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-2" />
+                <div className="mb-3 flex items-center justify-between text-xs text-[var(--text-muted)]">
+                  <span>{t('history.speed')}:</span>
+                  <div className="flex items-center gap-1">
+                    {[1, 1.25, 1.5, 2].map((rate) => (
+                      <button
+                        key={rate}
+                        type="button"
+                        onClick={() => {
+                          setPlaybackRate(rate)
+                          wavesurferRef.current?.setPlaybackRate(rate)
+                        }}
+                        className={`rounded px-2 py-0.5 font-mono text-[11px] transition-colors ${
+                          playbackRate === rate
+                            ? 'bg-[var(--action)] font-bold text-[var(--action-text)]'
+                            : 'border border-[var(--border-color)] hover:bg-[var(--bg-hover)] text-[var(--text-main)]'
+                        }`}
+                      >
+                        {rate}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 {audioError && <div className="mb-3 text-xs text-[var(--danger)]">{t('history.recordingLoadError')}</div>}
               </div>
             ) : (

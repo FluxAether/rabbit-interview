@@ -265,25 +265,40 @@ export default function CopilotPanel({
 
           {floating && (
             <div
-              className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-2 py-1 text-xs"
-              title={t("copilot.opacity")}
+              className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-0.5 text-xs"
               data-no-drag
             >
-              <EyeOff className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
-              <input
-                type="range"
-                min={30}
-                max={100}
-                step={1}
-                value={opacity}
-                onChange={(event) => handleOpacityChange(Number(event.target.value))}
-                className="h-1.5 w-16 cursor-pointer appearance-none rounded-lg bg-[var(--bg-hover)] accent-[var(--action)]"
-                aria-label={t("copilot.opacity")}
-                data-no-drag
-              />
-              <span className="w-7 text-right font-mono text-[10px] font-medium text-[var(--text-muted)]">
-                {opacity}%
-              </span>
+              <div className="flex items-center gap-1 px-1.5 py-0.5" title={t("copilot.opacity")}>
+                <EyeOff className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                <input
+                  type="range"
+                  min={30}
+                  max={100}
+                  step={1}
+                  value={opacity}
+                  onChange={(event) => handleOpacityChange(Number(event.target.value))}
+                  className="h-1.5 w-12 cursor-pointer appearance-none rounded-lg bg-[var(--bg-hover)] accent-[var(--action)]"
+                  aria-label={t("copilot.opacity")}
+                  data-no-drag
+                />
+              </div>
+              <div className="flex items-center gap-0.5 border-l border-[var(--border-color)] pl-1 pr-0.5">
+                {[100, 70, 40].map((val) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => handleOpacityChange(val)}
+                    className={`rounded px-1 py-0.5 font-mono text-[9px] transition-colors ${
+                      opacity === val
+                        ? "bg-[var(--action)] font-bold text-[var(--action-text)]"
+                        : "text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
+                    }`}
+                    data-no-drag
+                  >
+                    {val}%
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

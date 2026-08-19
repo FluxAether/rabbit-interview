@@ -806,7 +806,7 @@ export default function ResumeOptimizer() {
                         disabled={busy}
                         className="flex items-center gap-1 rounded-md border border-[var(--border-color)] px-2.5 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40"
                       >
-                        {t("resume.goToDraft")}
+                        {t("resume.manualFill")}
                       </button>
                     )}
                   </div>
