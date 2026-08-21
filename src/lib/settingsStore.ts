@@ -6,7 +6,10 @@ import {
 import { encryptSecret } from './secretCrypto';
 
 export type SttLanguage = 'zh-CN' | 'zh-TW' | 'en-US' | 'multi';
+export type SttProvider = 'deepgram' | 'gemini';
 export type CopilotFontSize = 'sm' | 'base' | 'lg';
+
+export const GEMINI_LIVE_TRANSLATE_MODEL = 'gemini-3.5-live-translate-preview';
 
 export interface AppSettings {
   theme: 'Light' | 'Dark' | 'System';
@@ -18,7 +21,7 @@ export interface AppSettings {
   // Per-provider last selected models (so UI remembers choices)
   aiModels?: Record<string, string>;
   // STT
-  sttProvider: string;
+  sttProvider: SttProvider;
   sttModel: string;
   sttLanguage: SttLanguage;
   // Stealth Copilot capture mode (persisted so floating window + restarts respect choice)
@@ -70,7 +73,15 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
   if (aiModel.startsWith('gemini') && !['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash'].includes(aiModel)) {
     aiModel = 'gemini-3.6-flash';
   }
-  const sttModel = saved?.sttModel === 'nova-2' ? 'nova-3' : (saved?.sttModel || DEFAULT_SETTINGS.sttModel);
+  const savedSttProvider = saved?.sttProvider as string | undefined;
+  const sttProvider: SttProvider = savedSttProvider === 'gemini' ? 'gemini' : 'deepgram';
+  const sttModel = sttProvider === 'gemini'
+    ? GEMINI_LIVE_TRANSLATE_MODEL
+    : savedSttProvider !== undefined && savedSttProvider !== 'deepgram'
+      ? DEFAULT_SETTINGS.sttModel
+      : saved?.sttModel === 'nova-2'
+        ? 'nova-3'
+        : (saved?.sttModel || DEFAULT_SETTINGS.sttModel);
   const copilotFontSize: CopilotFontSize =
     saved?.copilotFontSize === 'sm' || saved?.copilotFontSize === 'base' || saved?.copilotFontSize === 'lg'
       ? saved.copilotFontSize
@@ -80,6 +91,7 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
     ...saved,
     aiModel,
     aiModels,
+    sttProvider,
     sttModel,
     copilotFontSize,
   } as AppSettings;

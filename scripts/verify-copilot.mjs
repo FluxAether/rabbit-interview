@@ -31,7 +31,8 @@ function loadTypeScriptModule(relativePath, exports, dependencies = {}) {
     },
   }).outputText
   const script = output
-    .replace(/^import .*$/gm, '')
+    .replace(/^import[\s\S]*?from ['"][^'"]+['"];?\s*$/gm, '')
+    .replace(/^import ['"][^'"]+['"];?\s*$/gm, '')
     .replace(/^export /gm, '')
   return new Function(...Object.keys(dependencies), `${script}\nreturn { ${exports.join(', ')} }`)(...Object.values(dependencies))
 }
@@ -41,6 +42,8 @@ console.log('=== Stealth Copilot refactor verification ===')
 const app = source('src/App.tsx')
 const page = source('src/pages/StealthCopilot.tsx')
 const settingsPage = source('src/pages/Settings.tsx')
+const settingsStore = source('src/lib/settingsStore.ts')
+const translations = source('src/i18n/translations.ts')
 const historyPage = source('src/pages/History.tsx')
 const panel = source('src/components/CopilotPanel.tsx')
 const session = source('src/lib/copilotSession.ts')
@@ -65,6 +68,27 @@ check(
   settingsPage.includes('testDeepgramConnection(targetKey)')
     && !settingsPage.includes("fetch('https://api.deepgram.com/v1/projects'"),
   'Deepgram connectivity uses the speech WebSocket instead of a CORS-blocked REST request',
+)
+check(
+  settingsPage.includes('Google AI Studio')
+    && settingsPage.includes('GEMINI_LIVE_TRANSLATE_MODEL')
+    && settingsPage.includes("updateSttConfig('gemini'")
+    && /testGeminiLiveConnection\(\s*targetKey,\s*sttLanguage,\s*language\s*\)/.test(settingsPage),
+  'STT settings expose Google AI Studio and test its Live API handshake',
+)
+check(
+  (translations.match(/'settings\.stt\.(?:desc|help)': .*Google/g) || []).length >= 3
+    && (translations.match(/'settings\.stt\.sourceOnly'/g) || []).length === 3
+    && (translations.match(/'settings\.stt\.inputLanguage'/g) || []).length === 3
+    && !translations.includes('currently powered by Deepgram')
+    && !translations.includes('隐形助手的实时转写，目前由 Deepgram 提供。')
+    && !translations.includes('隱形助手的即時轉寫，目前由 Deepgram 提供。'),
+  'STT provider guidance covers Google in all locales without claiming Deepgram exclusivity',
+)
+check(
+  settingsStore.includes("export type SttProvider = 'deepgram' | 'gemini'")
+    && !llm.match(/SUPPORTED_GEMINI_MODELS[^;]+;/s)?.[0].includes('gemini-3.5-live-translate-preview'),
+  'Gemini Live Translate is typed as STT-only and is not offered as a regular LLM',
 )
 check(!app.includes("listen<number[]>('audio-chunk'") && !page.includes("listen<number[]>('audio-chunk'"), 'views do not own audio listeners')
 check(
@@ -157,15 +181,15 @@ check(!llm.includes('STAR') && !llm.includes('interview suggestions'), 'AI answe
 check(llm.includes('without Markdown headings'), 'AI answers are requested as speakable plain paragraphs rather than raw Markdown headings')
 check(llm.includes('MAX_DEEPGRAM_BUFFERED_BYTES') && llm.includes('ws.bufferedAmount'), 'STT websocket backpressure bounds queued audio memory')
 check(llm.includes('KeepAlive') && llm.includes('scheduleDeepgramReconnect') && llm.includes('onSocketChange'), 'Deepgram streams keep alive and reconnect after disconnects')
-check(rustAudio.includes('120 * 60') && rustAudio.includes('begin_live_recording'), 'native live recording starts with the session and caps at 120 minutes')
+check(rustAudio.includes('24 * 60 * 60') && rustAudio.includes('begin_live_recording'), 'native live recording starts with the session and caps at 24 hours')
 check(
   rustAudio.includes('notify_recording_limit')
     && rustAudio.includes('"audio-recording-limit"')
     && rustAudio.includes('limit_notified'),
-  'native live recording emits a one-shot limit event at the 120-minute cap',
+  'native live recording emits a one-shot limit event at the 24-hour cap',
 )
 check(
-  source('src/lib/recordingLimits.ts').includes('export const MAX_RECORDING_SECONDS = 120 * 60')
+  source('src/lib/recordingLimits.ts').includes('export const MAX_RECORDING_SECONDS = 24 * 60 * 60')
     && session.includes("from './recordingLimits'")
     && session.includes("listen('audio-recording-limit'")
     && session.includes("void this.stop({ reason: 'limit' })")
@@ -197,6 +221,40 @@ check(!cargo.includes('screencapturekit') && !cargo.includes('macos-system-audio
 check(!rustAudio.includes('start_macos_capture') && !rustAudio.includes('stop_macos_capture'), 'platform-specific ScreenCaptureKit commands are removed')
 check(source('src-tauri/src/audio/audiotee.rs').includes('--sample-rate') && source('src-tauri/src/audio/audiotee.rs').includes('16000'), 'AudioTee adapter is fixed to 16 kHz PCM')
 check(source('src-tauri/Info.plist').includes('NSAudioCaptureUsageDescription') && !source('src-tauri/Info.plist').includes('NSScreenCaptureUsageDescription'), 'macOS declares audio capture rather than screen capture permission')
+
+let storedSettings = JSON.stringify({ sttProvider: 'gemini', sttModel: 'not-a-live-model' })
+let savedSettings = ''
+const { DEFAULT_SETTINGS, loadAppSettings, saveAppSettings } = loadTypeScriptModule(
+  'src/lib/settingsStore.ts',
+  ['DEFAULT_SETTINGS', 'loadAppSettings', 'saveAppSettings'],
+  {
+    loadAppSettingsJson: async () => storedSettings,
+    migrateLegacyJsonStoresIfNeeded: async () => {},
+    saveAppSettingsJson: async (value) => { savedSettings = value },
+    encryptSecret: async (value) => value,
+  },
+)
+const normalizedGeminiSettings = await loadAppSettings()
+check(
+  normalizedGeminiSettings.sttProvider === 'gemini'
+    && normalizedGeminiSettings.sttModel === 'gemini-3.5-live-translate-preview',
+  'Gemini STT settings normalize to the only supported Live Translate model',
+)
+storedSettings = JSON.stringify({ sttProvider: 'unknown', sttModel: 'unknown' })
+const normalizedUnknownSettings = await loadAppSettings()
+check(
+  normalizedUnknownSettings.sttProvider === 'deepgram'
+    && normalizedUnknownSettings.sttModel === 'nova-3',
+  'unknown STT settings fall back to Deepgram nova-3',
+)
+await saveAppSettings({ sttProvider: 'gemini', sttModel: 'gemini-3.5-live-translate-preview' })
+check(
+  JSON.parse(savedSettings).sttProvider === 'gemini'
+    && JSON.parse(savedSettings).sttModel === 'gemini-3.5-live-translate-preview'
+    && DEFAULT_SETTINGS.sttProvider === 'deepgram'
+    && DEFAULT_SETTINGS.sttModel === 'nova-3',
+  'Google STT selection persists without changing the Deepgram default',
+)
 
 if (sessionState) {
   const { createInitialSnapshot, reduceCopilotSnapshot } = loadTypeScriptModule(
@@ -654,6 +712,7 @@ check(
 )
 
 let latestSocket = null
+const fakeSockets = []
 class FakeWebSocket {
   static CONNECTING = 0
   static OPEN = 1
@@ -665,6 +724,7 @@ class FakeWebSocket {
     this.readyState = FakeWebSocket.CONNECTING
     this.bufferedAmount = 0
     this.sent = []
+    fakeSockets.push(this)
     latestSocket = this
   }
 
@@ -677,9 +737,69 @@ class FakeWebSocket {
     this.sent.push(data)
   }
 
-  close() {
-    this.readyState = FakeWebSocket.CLOSED
+  receive(data) {
+    this.onmessage?.({ data: JSON.stringify(data) })
   }
+
+  close(code = 1000) {
+    if (this.readyState === FakeWebSocket.CLOSED) return
+    this.readyState = FakeWebSocket.CLOSED
+    this.onclose?.({ code, wasClean: code === 1000 })
+  }
+
+  disconnect() {
+    this.close(1006)
+  }
+}
+
+const flushTasks = () => new Promise((resolve) => setImmediate(resolve))
+
+function createFakeTimers() {
+  const timers = []
+  const schedule = (type) => (callback, delay = 0) => {
+    const timer = { type, callback, delay, cleared: false, unref() {} }
+    timers.push(timer)
+    return timer
+  }
+  const clear = (timer) => {
+    if (timer) timer.cleared = true
+  }
+  return {
+    global: {
+      setTimeout: schedule('timeout'),
+      clearTimeout: clear,
+      setInterval: schedule('interval'),
+      clearInterval: clear,
+    },
+    pending(delay) {
+      return timers.filter((timer) => timer.type === 'timeout' && !timer.cleared && timer.delay === delay)
+    },
+    async runTimeout(delay) {
+      const timer = this.pending(delay)[0]
+      if (!timer) return false
+      timer.cleared = true
+      timer.callback()
+      await flushTasks()
+      return true
+    },
+  }
+}
+
+function createGeminiSttHarness(settings, keys = { gemini: 'stored-google-key' }) {
+  const timers = createFakeTimers()
+  const api = loadTypeScriptModule(
+    'src/lib/llm.ts',
+    ['startDeepgramStream', 'testGeminiLiveConnection', 'sendAudioChunk', 'closeDeepgramStream'],
+    {
+      loadApiKeys: async () => keys,
+      getLlmApiKey: async () => null,
+      useAppStore: { getState: () => ({ settings }) },
+      WebSocket: FakeWebSocket,
+      GEMINI_LIVE_TRANSLATE_MODEL: 'gemini-3.5-live-translate-preview',
+      globalThis: timers.global,
+    },
+  )
+  return { api, timers }
 }
 
 const { startDeepgramStream, testDeepgramConnection, sendAudioChunk, closeDeepgramStream } = loadTypeScriptModule(
@@ -756,6 +876,212 @@ check(
 )
 latestSocket?.open()
 closeDeepgramStream(await customOpening)
+
+const missingSocketCount = fakeSockets.length
+const missingGemini = createGeminiSttHarness({
+  sttProvider: 'gemini',
+  sttModel: 'gemini-3.5-live-translate-preview',
+  sttLanguage: 'zh-CN',
+  language: 'zh-CN',
+}, {})
+let missingGeminiError = null
+try {
+  await missingGemini.api.startDeepgramStream(() => {})
+} catch (error) {
+  missingGeminiError = error
+}
+check(
+  missingGeminiError?.message.includes('No Gemini API key') && fakeSockets.length === missingSocketCount,
+  'Gemini STT fails before opening a socket when its reused AI Studio key is missing',
+)
+
+const deniedGemini = createGeminiSttHarness({ sttProvider: 'gemini', sttLanguage: 'multi', language: 'en-US' })
+const deniedOpening = deniedGemini.api.testGeminiLiveConnection('denied-key').then(
+  () => null,
+  (error) => error,
+)
+await flushTasks()
+const deniedSocket = latestSocket
+deniedSocket.open()
+deniedSocket.receive({ error: { message: 'Model access denied' } })
+const deniedError = await deniedOpening
+check(deniedError?.message === 'Model access denied', 'Gemini Live model-access errors fail the connection test')
+deniedGemini.api.closeDeepgramStream(deniedSocket)
+
+const liveTestGemini = createGeminiSttHarness({ sttProvider: 'gemini', sttLanguage: 'multi', language: 'en-US' })
+let liveTestReady = false
+const liveTestOpening = liveTestGemini.api
+  .testGeminiLiveConnection('unsaved google/key', 'multi', 'en-US')
+  .then(() => { liveTestReady = true })
+await flushTasks()
+const liveTestSocket = latestSocket
+check(
+  liveTestSocket.url === 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=unsaved%20google%2Fkey',
+  'Gemini connectivity uses the entered key with the exact v1beta Live endpoint',
+)
+liveTestSocket.open()
+const liveTestSetup = JSON.parse(liveTestSocket.sent[0])
+check(
+  JSON.stringify(liveTestSetup) === JSON.stringify({
+    setup: {
+      model: 'models/gemini-3.5-live-translate-preview',
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        translationConfig: { targetLanguageCode: 'en', echoTargetLanguage: true },
+      },
+      inputAudioTranscription: {},
+    },
+  }) && !liveTestReady,
+  'Gemini Live sends the exact source-transcription setup and waits for setupComplete',
+)
+liveTestSocket.receive({ setupComplete: {} })
+await liveTestOpening
+check(
+  liveTestReady && liveTestSocket.readyState === FakeWebSocket.CLOSED,
+  'Gemini connectivity succeeds only after setupComplete and closes its test socket',
+)
+
+const geminiEvents = []
+const geminiSocketChanges = []
+const gemini = createGeminiSttHarness({
+  sttProvider: 'gemini',
+  sttModel: 'gemini-3.5-live-translate-preview',
+  sttLanguage: 'zh-CN',
+  language: 'zh-CN',
+})
+let geminiReady = false
+const geminiOpening = gemini.api.startDeepgramStream(
+  (event) => geminiEvents.push(event),
+  undefined,
+  16_000,
+  (socket) => geminiSocketChanges.push(socket),
+).then((socket) => {
+  geminiReady = true
+  return socket
+})
+await flushTasks()
+const geminiSocket = latestSocket
+geminiSocket.open()
+const fixedLanguageSetup = JSON.parse(geminiSocket.sent[0])
+const sentBeforeSetup = geminiSocket.sent.length
+gemini.api.sendAudioChunk(geminiSocket, new Float32Array([0.5]))
+check(
+  !geminiReady
+    && geminiSocket.sent.length === sentBeforeSetup
+    && fixedLanguageSetup.setup.generationConfig.translationConfig.targetLanguageCode === 'zh-Hans'
+    && fixedLanguageSetup.setup.inputAudioTranscription.languageCodes?.join(',') === 'zh-CN'
+    && !('systemInstruction' in fixedLanguageSetup.setup),
+  'Gemini capture applies the fixed input-language hint and gates audio until setupComplete',
+)
+geminiSocket.receive({ setupComplete: {} })
+check(await geminiOpening === geminiSocket, 'Gemini startup resolves with the setup-complete socket through the existing STT facade')
+
+gemini.api.sendAudioChunk(geminiSocket, new Float32Array([-1, 0, 0.5, 1]))
+const realtimeAudio = JSON.parse(geminiSocket.sent.at(-1))
+check(
+  JSON.stringify(realtimeAudio) === JSON.stringify({
+    realtimeInput: {
+      audio: { data: 'AIAAAP8//38=', mimeType: 'audio/pcm;rate=16000' },
+    },
+  }),
+  'Gemini audio uses little-endian PCM16 base64 in realtimeInput.audio',
+)
+const sentBeforeBackpressure = geminiSocket.sent.length
+geminiSocket.bufferedAmount = 512 * 1024
+gemini.api.sendAudioChunk(geminiSocket, new Float32Array([0.25]))
+check(geminiSocket.sent.length === sentBeforeBackpressure, 'Gemini audio obeys the shared websocket backpressure limit')
+geminiSocket.bufferedAmount = 0
+
+geminiSocket.receive({ serverContent: { interimInputTranscription: { text: '请介绍' } } })
+const eventsBeforeTranslatedOutput = geminiEvents.length
+geminiSocket.receive({
+  serverContent: {
+    outputTranscription: { text: 'Translated output' },
+    modelTurn: { parts: [{ inlineData: { mimeType: 'audio/pcm;rate=24000', data: 'ignored' } }] },
+  },
+})
+check(geminiEvents.length === eventsBeforeTranslatedOutput, 'Gemini translated text and generated audio are ignored')
+geminiSocket.receive({ serverContent: { inputTranscription: { text: '请介绍一下你自己' } } })
+geminiSocket.receive({ serverContent: { turnComplete: true } })
+check(
+  geminiEvents.map((event) => event.boundary).join(',') === 'interim,final,utterance-end'
+    && geminiEvents[1]?.text === '请介绍一下你自己',
+  'Gemini source transcription maps interim/final and emits one utterance-end after final-first completion',
+)
+geminiSocket.receive({ serverContent: { turnComplete: true } })
+geminiSocket.receive({ serverContent: { inputTranscription: { text: '第二个问题' } } })
+check(
+  geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'final,utterance-end'
+    && geminiEvents.at(-2)?.text === '第二个问题',
+  'Gemini handles a later no-interim utterance when turnComplete arrives before final',
+)
+
+const socketsBeforeGoAway = fakeSockets.length
+geminiSocket.receive({ goAway: { timeLeft: '5s' } })
+await flushTasks()
+const rotatedSocket = fakeSockets[socketsBeforeGoAway]
+check(
+  rotatedSocket
+    && geminiSocket.readyState === FakeWebSocket.OPEN
+    && geminiSocketChanges.at(-1) === geminiSocket,
+  'Gemini goAway keeps the active socket until its replacement is ready',
+)
+rotatedSocket.open()
+check(
+  geminiSocket.readyState === FakeWebSocket.OPEN && geminiSocketChanges.at(-1) === geminiSocket,
+  'Gemini goAway does not swap after only the replacement transport opens',
+)
+rotatedSocket.receive({ setupComplete: {} })
+await flushTasks()
+check(
+  geminiSocket.readyState === FakeWebSocket.CLOSED
+    && geminiSocketChanges.at(-1) === rotatedSocket,
+  'Gemini goAway atomically swaps after replacement setupComplete, then closes the old socket',
+)
+
+const reconnectChanges = []
+const reconnectGemini = createGeminiSttHarness({
+  sttProvider: 'gemini',
+  sttLanguage: 'multi',
+  language: 'zh-TW',
+})
+const reconnectOpening = reconnectGemini.api.startDeepgramStream(
+  () => {},
+  undefined,
+  16_000,
+  (socket) => reconnectChanges.push(socket),
+)
+await flushTasks()
+const disconnectedSocket = latestSocket
+disconnectedSocket.open()
+disconnectedSocket.receive({ setupComplete: {} })
+await reconnectOpening
+disconnectedSocket.disconnect()
+check(
+  reconnectGemini.timers.pending(1_000).length === 1,
+  'an unexpected Gemini close schedules the existing exponential reconnect path',
+)
+const socketsBeforeReconnect = fakeSockets.length
+await reconnectGemini.timers.runTimeout(1_000)
+const reconnectedSocket = fakeSockets[socketsBeforeReconnect]
+reconnectedSocket.open()
+const reconnectSetup = JSON.parse(reconnectedSocket.sent[0])
+check(
+  reconnectSetup.setup.generationConfig.translationConfig.targetLanguageCode === 'zh-Hant'
+    && !('systemInstruction' in reconnectSetup.setup)
+    && reconnectChanges.at(-1) === disconnectedSocket,
+  'Gemini reconnect preserves app target language and multi-language auto-detect without swapping early',
+)
+reconnectedSocket.receive({ setupComplete: {} })
+await flushTasks()
+check(reconnectChanges.at(-1) === reconnectedSocket, 'Gemini reconnect swaps the caller socket after setupComplete')
+const socketsBeforeClientClose = fakeSockets.length
+reconnectGemini.api.closeDeepgramStream(reconnectedSocket)
+const clientCloseRetried = await reconnectGemini.timers.runTimeout(1_000)
+check(
+  !clientCloseRetried && fakeSockets.length === socketsBeforeClientClose,
+  'client-initiated Gemini close does not reconnect',
+)
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)
 if (failed > 0) process.exit(1)

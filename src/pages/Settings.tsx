@@ -27,7 +27,13 @@ import {
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
 import { LANGUAGE_OPTIONS, SupportedLanguage, DEFAULT_LANGUAGE } from '../i18n/types'
-import { saveAppSettings, type AppSettings as PersistedSettings, type SttLanguage } from '../lib/settingsStore'
+import {
+  GEMINI_LIVE_TRANSLATE_MODEL,
+  saveAppSettings,
+  type AppSettings as PersistedSettings,
+  type SttLanguage,
+  type SttProvider,
+} from '../lib/settingsStore'
 
 type TabType = 'general' | 'ai' | 'stt' | 'shortcuts_privacy' | 'storage'
 
@@ -122,7 +128,7 @@ export default function Settings() {
   })
 
   // STT configuration
-  const [sttProvider, setSttProvider] = useState<'deepgram'>('deepgram')
+  const [sttProvider, setSttProvider] = useState<SttProvider>('deepgram')
   const [sttModel, setSttModel] = useState('nova-3')
   const [sttLanguage, setSttLanguage] = useState<SttLanguage>('zh-CN')
 
@@ -349,7 +355,7 @@ export default function Settings() {
       setActiveProvider('groq')
     }
 
-    if (settings.sttProvider) setSttProvider(settings.sttProvider as 'deepgram')
+    if (settings.sttProvider) setSttProvider(settings.sttProvider as SttProvider)
     if (settings.sttModel) setSttModel(settings.sttModel as string)
     if (settings.sttLanguage) setSttLanguage(settings.sttLanguage as SttLanguage)
   }, [settings])
@@ -474,7 +480,7 @@ export default function Settings() {
     }
   }
 
-  const updateSttConfig = (provider: 'deepgram', model: string) => {
+  const updateSttConfig = (provider: SttProvider, model: string) => {
     setSttProvider(provider)
     setSttModel(model)
 
@@ -488,7 +494,7 @@ export default function Settings() {
   }
 
   // --- API Connectivity Testing ---
-  const testConnection = async (provider: ProviderKeyType) => {
+  const testConnection = async (provider: ProviderKeyType, useGeminiLive = false) => {
     setTestResults((prev) => ({ ...prev, [provider]: { loading: true } }))
 
     const { getApiKey } = await import('../lib/keyStore')
@@ -517,7 +523,10 @@ export default function Settings() {
     const start = performance.now()
     try {
       let res: Response | undefined
-      if (provider === 'deepgram') {
+      if (provider === 'gemini' && useGeminiLive) {
+        const { testGeminiLiveConnection } = await import('../lib/llm')
+        await testGeminiLiveConnection(targetKey, sttLanguage, language)
+      } else if (provider === 'deepgram') {
         const { testDeepgramConnection } = await import('../lib/llm')
         await testDeepgramConnection(targetKey)
       } else if (provider === 'groq') {
@@ -596,6 +605,7 @@ export default function Settings() {
   const renderKeyInputRow = (
     provider: ProviderKeyType,
     placeholderName: string,
+    useGeminiLive = false,
   ) => {
     const isConfigured = keyStatus[provider]
     const testResult = testResults[provider]
@@ -642,7 +652,7 @@ export default function Settings() {
           )}
           <button
             type="button"
-            onClick={() => void testConnection(provider)}
+            onClick={() => void testConnection(provider, useGeminiLive)}
             disabled={testResult.loading}
             className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-50"
           >
@@ -1196,7 +1206,13 @@ export default function Settings() {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="rounded-md border border-[var(--text-muted)] bg-[var(--bg-subtle)] p-4">
+                  <div
+                    className={`rounded-md border p-4 transition-colors ${
+                      sttProvider === 'deepgram'
+                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
+                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
+                    }`}
+                  >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">Deepgram</span>
@@ -1204,16 +1220,26 @@ export default function Settings() {
                           {t('settings.stt.badge')}
                         </span>
                       </div>
-                      <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
-                        {t('settings.active')}
-                      </span>
+                      {sttProvider === 'deepgram' ? (
+                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
+                          {t('settings.active')}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => updateSttConfig('deepgram', 'nova-3')}
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          {t('settings.useProvider', { name: 'Deepgram' })}
+                        </button>
+                      )}
                     </div>
 
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center gap-2">
                         <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
                         <select
-                          value={sttModel}
+                          value={sttProvider === 'deepgram' ? sttModel : 'nova-3'}
                           onChange={(e) => updateSttConfig('deepgram', e.target.value)}
                           className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                         >
@@ -1225,24 +1251,69 @@ export default function Settings() {
                         </select>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.language')}</span>
-                        <select
-                          aria-label="Deepgram language"
-                          value={sttLanguage}
-                          onChange={(e) => setSttLanguage(e.target.value as SttLanguage)}
-                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
-                        >
-                          <option value="zh-CN">简体中文</option>
-                          <option value="zh-TW">繁體中文</option>
-                          <option value="en-US">English</option>
-                          <option value="multi">{t('settings.stt.langMulti')}</option>
-                        </select>
-                      </div>
-
                       {renderKeyInputRow('deepgram', 'DEEPGRAM_API_KEY')}
                     </div>
                   </div>
+
+                  <div
+                    className={`rounded-md border p-4 transition-colors ${
+                      sttProvider === 'gemini'
+                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
+                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">Google AI Studio</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                          {t('settings.stt.sourceOnly')}
+                        </span>
+                      </div>
+                      {sttProvider === 'gemini' ? (
+                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
+                          {t('settings.active')}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => updateSttConfig('gemini', GEMINI_LIVE_TRANSLATE_MODEL)}
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          {t('settings.useProvider', { name: 'Google AI Studio' })}
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
+                        <select
+                          value={GEMINI_LIVE_TRANSLATE_MODEL}
+                          disabled
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm disabled:opacity-100"
+                        >
+                          <option value={GEMINI_LIVE_TRANSLATE_MODEL}>{GEMINI_LIVE_TRANSLATE_MODEL}</option>
+                        </select>
+                      </div>
+
+                      {renderKeyInputRow('gemini', 'GEMINI_API_KEY (Google AI Studio)', true)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex items-center gap-2 text-sm">
+                  <span className="w-24 text-xs font-medium text-[var(--text-muted)]">{t('settings.stt.inputLanguage')}</span>
+                  <select
+                    aria-label={t('settings.stt.inputLanguage')}
+                    value={sttLanguage}
+                    onChange={(e) => setSttLanguage(e.target.value as SttLanguage)}
+                    className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
+                  >
+                    <option value="zh-CN">简体中文</option>
+                    <option value="zh-TW">繁體中文</option>
+                    <option value="en-US">English</option>
+                    <option value="multi">{t('settings.stt.langMulti')}</option>
+                  </select>
                 </div>
 
                 <div className="mt-4 text-[11px] text-[var(--text-muted)]">

@@ -1,6 +1,7 @@
 // Real LLM + STT integration hooks using SQLite-backed encrypted key storage
 import { loadApiKeys, getLlmApiKey } from './keyStore';
 import { useAppStore } from '../stores/useAppStore';
+import { GEMINI_LIVE_TRANSLATE_MODEL } from './settingsStore';
 
 let cachedKeys: Awaited<ReturnType<typeof loadApiKeys>> | null = null;
 
@@ -336,8 +337,8 @@ const DEEPGRAM_CONNECT_TIMEOUT_MS = 10_000;
 const DEEPGRAM_KEEPALIVE_MS = 8_000;
 const DEEPGRAM_RECONNECT_BASE_MS = 1_000;
 const DEEPGRAM_RECONNECT_MAX_MS = 15_000;
-// Currently only Deepgram is implemented. The model is now configurable per-provider
-// via Settings (sttProvider + sttModel). The function name is kept for backward compat.
+const GEMINI_LIVE_ENDPOINT = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+// The Deepgram-named exports are kept as the shared STT facade for backward compatibility.
 
 /**
  * Converts Float32 audio (from cpal, range -1.0 to 1.0) to Int16 PCM (for Deepgram linear16)
@@ -380,6 +381,7 @@ export interface DeepgramStreamOptions {
 }
 
 export interface DeepgramStream extends WebSocket {
+  __sttProvider?: 'deepgram' | 'gemini';
   __deepgramManaged?: boolean;
   __deepgramClosedByClient?: boolean;
   __deepgramKeepAliveTimer?: ReturnType<typeof globalThis.setInterval> | null;
@@ -390,6 +392,15 @@ export interface DeepgramStream extends WebSocket {
   __deepgramOnTranscript?: (event: DeepgramTranscriptEvent) => void;
   __deepgramOnError?: (err: any) => void;
   __deepgramReplaceSocket?: (next: WebSocket) => void;
+  __geminiSetupComplete?: boolean;
+  __geminiSetupResolve?: () => void;
+  __geminiSetupReject?: (error: Error) => void;
+  __geminiInputLanguage?: string;
+  __geminiAppLanguage?: string;
+  __geminiFinalSeen?: boolean;
+  __geminiTurnCompleteSeen?: boolean;
+  __geminiUtteranceEnded?: boolean;
+  __geminiRotating?: boolean;
 }
 
 function clearDeepgramTimers(ws: DeepgramStream) {
@@ -507,6 +518,243 @@ async function reconnectDeepgramStream(ws: DeepgramStream): Promise<void> {
   console.log('[Deepgram] Reconnected');
 }
 
+function geminiTargetLanguage(appLanguage: string): 'zh-Hans' | 'zh-Hant' | 'en' {
+  if (appLanguage === 'zh-CN') return 'zh-Hans';
+  if (appLanguage === 'zh-TW') return 'zh-Hant';
+  return 'en';
+}
+
+function geminiSetup(inputLanguage: string, appLanguage: string) {
+  const setup: Record<string, unknown> = {
+    model: `models/${GEMINI_LIVE_TRANSLATE_MODEL}`,
+    generationConfig: {
+      responseModalities: ['AUDIO'],
+      translationConfig: {
+        targetLanguageCode: geminiTargetLanguage(appLanguage),
+        echoTargetLanguage: true,
+      },
+    },
+    inputAudioTranscription: inputLanguage === 'multi'
+      ? {}
+      : { languageCodes: [inputLanguage] },
+  };
+  return { setup };
+}
+
+function emitGeminiUtteranceEnd(ws: DeepgramStream) {
+  if (!ws.__geminiFinalSeen || !ws.__geminiTurnCompleteSeen || ws.__geminiUtteranceEnded) return;
+  ws.__geminiUtteranceEnded = true;
+  ws.__deepgramOnTranscript?.({ text: '', isFinal: true, boundary: 'utterance-end' });
+}
+
+function attachGeminiHandlers(ws: DeepgramStream) {
+  ws.onopen = () => {
+    try {
+      ws.send(JSON.stringify(geminiSetup(
+        ws.__geminiInputLanguage || 'multi',
+        ws.__geminiAppLanguage || 'en-US',
+      )));
+    } catch (error) {
+      ws.__geminiSetupReject?.(error instanceof Error ? error : new Error(String(error)));
+    }
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.error) {
+        const error = new Error(data.error.message || 'Gemini Live connection failed');
+        if (!ws.__geminiSetupComplete) ws.__geminiSetupReject?.(error);
+        else ws.__deepgramOnError?.(error);
+        return;
+      }
+      if ('setupComplete' in data) {
+        ws.__geminiSetupComplete = true;
+        ws.__geminiSetupResolve?.();
+        return;
+      }
+
+      const content = data.serverContent || data;
+      const interim = content.interimInputTranscription?.text?.trim();
+      const final = content.inputTranscription?.text?.trim();
+      const turnComplete = Boolean(content.turnComplete);
+      if ((interim || final || turnComplete) && ws.__geminiUtteranceEnded) {
+        ws.__geminiFinalSeen = false;
+        ws.__geminiTurnCompleteSeen = false;
+        ws.__geminiUtteranceEnded = false;
+      }
+      if (interim) {
+        ws.__deepgramOnTranscript?.({ text: interim, isFinal: false, boundary: 'interim' });
+      }
+
+      if (final) {
+        ws.__geminiFinalSeen = true;
+        ws.__deepgramOnTranscript?.({ text: final, isFinal: true, boundary: 'final' });
+      }
+      if (turnComplete) ws.__geminiTurnCompleteSeen = true;
+      emitGeminiUtteranceEnd(ws);
+
+      if (data.goAway && !ws.__geminiRotating) {
+        void rotateGeminiStream(ws);
+      }
+    } catch (error) {
+      ws.__deepgramOnError?.(error);
+    }
+  };
+
+  ws.onerror = () => {
+    console.error('[Gemini Live] WebSocket error');
+    if (!ws.__geminiSetupComplete) {
+      ws.__geminiSetupReject?.(new Error('Gemini Live connection failed'));
+    }
+  };
+
+  ws.onclose = () => {
+    clearDeepgramTimers(ws);
+    console.log('[Gemini Live] Connection closed');
+    if (!ws.__geminiSetupComplete) {
+      ws.__geminiSetupReject?.(new Error('Gemini Live connection closed before setup completed'));
+    }
+    if (!ws.__deepgramManaged || ws.__deepgramClosedByClient || ws.__geminiRotating) return;
+    scheduleGeminiReconnect(ws);
+  };
+}
+
+function scheduleGeminiReconnect(ws: DeepgramStream) {
+  if (ws.__deepgramClosedByClient || !ws.__deepgramManaged) return;
+  if (ws.__deepgramReconnectTimer != null) return;
+
+  const attempt = (ws.__deepgramReconnectAttempt ?? 0) + 1;
+  ws.__deepgramReconnectAttempt = attempt;
+  const delay = Math.min(
+    DEEPGRAM_RECONNECT_MAX_MS,
+    DEEPGRAM_RECONNECT_BASE_MS * (2 ** Math.min(attempt - 1, 4)),
+  );
+  console.warn(`[Gemini Live] Reconnecting in ${delay}ms (attempt ${attempt})`);
+
+  const timer = globalThis.setTimeout(() => {
+    ws.__deepgramReconnectTimer = null;
+    void reconnectGeminiStream(ws).catch((error) => {
+      console.error('[Gemini Live] Reconnect failed', error);
+      scheduleGeminiReconnect(ws);
+    });
+  }, delay);
+  (timer as { unref?: () => void }).unref?.();
+  ws.__deepgramReconnectTimer = timer;
+}
+
+function manageGeminiReplacement(previous: DeepgramStream, next: DeepgramStream) {
+  next.__deepgramManaged = true;
+  next.__deepgramClosedByClient = false;
+  next.__deepgramReconnectAttempt = 0;
+  next.__deepgramReplaceSocket = previous.__deepgramReplaceSocket;
+  previous.__deepgramManaged = false;
+  clearDeepgramTimers(previous);
+  previous.__deepgramReplaceSocket?.(next);
+}
+
+async function reconnectGeminiStream(ws: DeepgramStream): Promise<void> {
+  if (ws.__deepgramClosedByClient || !ws.__deepgramManaged) return;
+  const next = await openGeminiLiveSocket(
+    ws.__deepgramOnTranscript || (() => {}),
+    ws.__deepgramOnError,
+    true,
+    undefined,
+    ws.__deepgramOptions,
+    ws.__geminiInputLanguage,
+    ws.__geminiAppLanguage,
+  ) as DeepgramStream;
+  if (ws.__deepgramClosedByClient || !ws.__deepgramManaged) {
+    closeDeepgramStream(next);
+    return;
+  }
+  manageGeminiReplacement(ws, next);
+  console.log('[Gemini Live] Reconnected');
+}
+
+async function rotateGeminiStream(ws: DeepgramStream): Promise<void> {
+  if (ws.__deepgramClosedByClient || !ws.__deepgramManaged || ws.__geminiRotating) return;
+  ws.__geminiRotating = true;
+  try {
+    const next = await openGeminiLiveSocket(
+      ws.__deepgramOnTranscript || (() => {}),
+      ws.__deepgramOnError,
+      true,
+      undefined,
+      ws.__deepgramOptions,
+      ws.__geminiInputLanguage,
+      ws.__geminiAppLanguage,
+    ) as DeepgramStream;
+    if (ws.__deepgramClosedByClient || !ws.__deepgramManaged) {
+      closeDeepgramStream(next);
+      return;
+    }
+    manageGeminiReplacement(ws, next);
+    ws.close();
+    console.log('[Gemini Live] Rotated connection after goAway');
+  } catch (error) {
+    ws.__deepgramOnError?.(error);
+    if (ws.readyState === WebSocket.CLOSED) scheduleGeminiReconnect(ws);
+  } finally {
+    ws.__geminiRotating = false;
+  }
+}
+
+async function openGeminiLiveSocket(
+  onTranscript: (event: DeepgramTranscriptEvent) => void,
+  onError?: (err: any) => void,
+  isReconnect = false,
+  apiKey?: string,
+  options: DeepgramStreamOptions = {},
+  inputLanguage?: string,
+  appLanguage?: string,
+): Promise<WebSocket> {
+  const key = apiKey ?? (await getKeys(true)).gemini;
+  if (!key) {
+    throw new Error('No Gemini API key is configured. Add it in Settings before starting capture.');
+  }
+
+  const { settings } = useAppStore.getState();
+  const ws = new WebSocket(`${GEMINI_LIVE_ENDPOINT}?key=${encodeURIComponent(key)}`) as DeepgramStream;
+  ws.__sttProvider = 'gemini';
+  ws.__deepgramOptions = { ...options };
+  ws.__deepgramOnTranscript = onTranscript;
+  ws.__deepgramOnError = onError;
+  ws.__geminiInputLanguage = inputLanguage || options.language || (settings?.sttLanguage as string) || 'multi';
+  ws.__geminiAppLanguage = appLanguage || (settings?.language as string) || 'en-US';
+  ws.__geminiSetupComplete = false;
+  ws.__geminiFinalSeen = false;
+  ws.__geminiTurnCompleteSeen = false;
+  ws.__geminiUtteranceEnded = false;
+  attachGeminiHandlers(ws);
+
+  return new Promise<WebSocket>((resolve, reject) => {
+    let settled = false;
+    const timeout = globalThis.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      ws.close();
+      reject(new Error(isReconnect ? 'Gemini Live reconnect timed out' : 'Gemini Live connection timed out'));
+    }, DEEPGRAM_CONNECT_TIMEOUT_MS);
+    (timeout as { unref?: () => void }).unref?.();
+
+    ws.__geminiSetupResolve = () => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timeout);
+      console.log(isReconnect ? '[Gemini Live] Reconnected socket ready' : '[Gemini Live] Connected');
+      resolve(ws);
+    };
+    ws.__geminiSetupReject = (error) => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timeout);
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
+      reject(error);
+    };
+  });
+}
+
 async function openDeepgramSocket(
   sampleRate: number,
   onTranscript: (event: DeepgramTranscriptEvent) => void,
@@ -540,6 +788,7 @@ async function openDeepgramSocket(
 
   const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]) as DeepgramStream;
   ws.binaryType = 'arraybuffer';
+  ws.__sttProvider = 'deepgram';
   ws.__deepgramSampleRate = sampleRate;
   ws.__deepgramOptions = { ...options };
   ws.__deepgramOnTranscript = onTranscript;
@@ -590,7 +839,10 @@ export async function startDeepgramStream(
   onSocketChange?: (ws: WebSocket) => void,
   options: DeepgramStreamOptions = {},
 ): Promise<WebSocket> {
-  const ws = await openDeepgramSocket(sampleRate, onTranscript, onError, false, undefined, options) as DeepgramStream;
+  const provider = useAppStore.getState().settings?.sttProvider === 'gemini' ? 'gemini' : 'deepgram';
+  const ws = await (provider === 'gemini'
+    ? openGeminiLiveSocket(onTranscript, onError, false, undefined, options)
+    : openDeepgramSocket(sampleRate, onTranscript, onError, false, undefined, options)) as DeepgramStream;
   ws.__deepgramManaged = true;
   ws.__deepgramClosedByClient = false;
   ws.__deepgramReconnectAttempt = 0;
@@ -606,6 +858,29 @@ export async function testDeepgramConnection(apiKey: string): Promise<void> {
   closeDeepgramStream(ws);
 }
 
+export async function testGeminiLiveConnection(
+  apiKey: string,
+  inputLanguage = 'multi',
+  appLanguage = 'en-US',
+): Promise<void> {
+  const ws = await openGeminiLiveSocket(
+    () => {},
+    undefined,
+    false,
+    apiKey,
+    { language: inputLanguage },
+    inputLanguage,
+    appLanguage,
+  );
+  closeDeepgramStream(ws);
+}
+
+function pcm16ToBase64(pcm16: Int16Array): string {
+  let binary = '';
+  for (const byte of new Uint8Array(pcm16.buffer)) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
 /**
  * Send a Float32 chunk (from Rust cpal) to an active Deepgram WebSocket.
  * Automatically converts to Int16 PCM and sends as binary.
@@ -615,6 +890,19 @@ export function sendAudioChunk(ws: WebSocket | null, float32Chunk: Float32Array)
   if (ws.bufferedAmount >= MAX_DEEPGRAM_BUFFERED_BYTES) return;
 
   const pcm16 = float32ToInt16(float32Chunk);
+  const managed = ws as DeepgramStream;
+  if (managed.__sttProvider === 'gemini') {
+    if (!managed.__geminiSetupComplete) return;
+    ws.send(JSON.stringify({
+      realtimeInput: {
+        audio: {
+          data: pcm16ToBase64(pcm16),
+          mimeType: 'audio/pcm;rate=16000',
+        },
+      },
+    }));
+    return;
+  }
   ws.send(pcm16.buffer);
 }
 
@@ -687,7 +975,7 @@ export async function generateStructuredJson<T>(
   }
 }
 
-/** Gracefully close a Deepgram stream */
+/** Gracefully close an STT stream */
 export function closeDeepgramStream(ws: WebSocket | null) {
   if (!ws) return;
   const managed = ws as DeepgramStream;
