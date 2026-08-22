@@ -168,6 +168,10 @@ check(
     && session.includes("event.boundary === 'utterance-end'"),
   'Deepgram speech-final and utterance-end signals remain distinct through turn detection',
 )
+check(
+  session.includes("event.boundary !== 'speech-final' && event.boundary !== 'final' && event.boundary !== 'utterance-end'"),
+  'Copilot commits Gemini inputTranscription without waiting for a synthetic utterance-end',
+)
 check(session.includes('MAX_AUTO_CONTINUATIONS') && session.includes('continuationAttempt < MAX_AUTO_CONTINUATIONS'), 'token-limited answers are automatically continued with a bounded retry count')
 check(session.includes('textSimilarity') && session.includes('isLikelyEcho'), 'system-audio echo is filtered against recent AI and microphone text')
 check(session.includes("text.replace(/\\s/g, '').length < 12"), 'short interviewer acknowledgements are never discarded as echo')
@@ -930,6 +934,13 @@ check(
         translationConfig: { targetLanguageCode: 'en', echoTargetLanguage: true },
       },
       inputAudioTranscription: {},
+      realtimeInputConfig: {
+        automaticActivityDetection: {
+          disabled: false,
+          prefixPaddingMs: 20,
+          silenceDurationMs: 400,
+        },
+      },
     },
   }) && !liveTestReady,
   'Gemini Live sends the exact source-transcription setup and waits for setupComplete',
@@ -1023,37 +1034,37 @@ check(geminiEvents.length === eventsBeforeTranslatedOutput, 'Gemini translated t
 geminiSocket.receive({ serverContent: { turnComplete: true } })
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '乱序到达' } } })
 check(
-  geminiEvents.map((event) => event.boundary).join(',') === 'final,utterance-end'
-    && gemini.timers.pending(1_500).length === 0,
+  geminiEvents.map((event) => event.boundary).join(',') === 'speech-final,utterance-end'
+    && gemini.timers.pending(400).length === 0,
   'Gemini flushes immediately when turnComplete arrives before source transcription',
 )
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '请介绍一下' } } })
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '你自己' } } })
 check(
-  gemini.timers.pending(1_500).length === 1
-    && geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'final,final',
+  gemini.timers.pending(400).length === 1
+    && geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'speech-final,speech-final',
   'Gemini source transcription resets one silence timer while chunks keep arriving',
 )
-await gemini.timers.runTimeout(1_500)
+await gemini.timers.runTimeout(400)
 check(
-  geminiEvents.slice(-3).map((event) => event.boundary).join(',') === 'final,final,utterance-end',
+  geminiEvents.slice(-3).map((event) => event.boundary).join(',') === 'speech-final,speech-final,utterance-end',
   'Gemini commits source transcription after silence even when Live Translate omits turnComplete',
 )
 geminiSocket.receive({ serverContent: { turnComplete: true } })
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '迟到后的新问题' } } })
 check(
-  geminiEvents.at(-1)?.boundary === 'final' && gemini.timers.pending(1_500).length === 1,
+  geminiEvents.at(-1)?.boundary === 'speech-final' && gemini.timers.pending(400).length === 1,
   'a late turnComplete cannot prematurely end the next Gemini transcription',
 )
-await gemini.timers.runTimeout(1_500)
+await gemini.timers.runTimeout(400)
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '第二个问题' } } })
 geminiSocket.receive({ serverContent: { turnComplete: true } })
 check(
-  geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'final,utterance-end'
+  geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'speech-final,utterance-end'
     && geminiEvents.at(-2)?.text === '第二个问题',
   'Gemini turnComplete flushes immediately and cancels its pending silence timer',
 )
-check(gemini.timers.pending(1_500).length === 0, 'Gemini turnComplete leaves no stale silence timer')
+check(gemini.timers.pending(400).length === 0, 'Gemini turnComplete leaves no stale silence timer')
 
 const socketsBeforeGoAway = fakeSockets.length
 geminiSocket.receive({ goAway: { timeLeft: '5s' } })
@@ -1100,7 +1111,7 @@ disconnectedSocket.receive({ serverContent: { inputTranscription: { text: '换�
 disconnectedSocket.disconnect()
 check(
   reconnectGemini.timers.pending(1_000).length === 1
-    && reconnectGemini.timers.pending(1_500).length === 0,
+    && reconnectGemini.timers.pending(400).length === 0,
   'an unexpected Gemini close cancels the old silence timer and schedules reconnect',
 )
 const socketsBeforeReconnect = fakeSockets.length
@@ -1118,20 +1129,20 @@ reconnectedSocket.receive({ setupComplete: {} })
 await flushTasks()
 check(reconnectChanges.at(-1) === reconnectedSocket, 'Gemini reconnect swaps the caller socket after setupComplete')
 check(
-  reconnectGemini.timers.pending(1_500).length === 1,
+  reconnectGemini.timers.pending(400).length === 1,
   'Gemini reconnect transfers an unfinished transcription to the replacement socket',
 )
-await reconnectGemini.timers.runTimeout(1_500)
+await reconnectGemini.timers.runTimeout(400)
 check(
-  reconnectEvents.map((event) => event.boundary).join(',') === 'final,utterance-end',
+  reconnectEvents.map((event) => event.boundary).join(',') === 'speech-final,utterance-end',
   'Gemini reconnect commits the pending transcription without waiting for another chunk',
 )
 const socketsBeforeClientClose = fakeSockets.length
 reconnectedSocket.receive({ serverContent: { inputTranscription: { text: '关闭前转写' } } })
-check(reconnectGemini.timers.pending(1_500).length === 1, 'Gemini close cleanup has a pending silence timer to cancel')
+check(reconnectGemini.timers.pending(400).length === 1, 'Gemini close cleanup has a pending silence timer to cancel')
 reconnectGemini.api.closeDeepgramStream(reconnectedSocket)
 const clientCloseRetried = await reconnectGemini.timers.runTimeout(1_000)
-const clientCloseCommitted = await reconnectGemini.timers.runTimeout(1_500)
+const clientCloseCommitted = await reconnectGemini.timers.runTimeout(400)
 check(
   !clientCloseRetried && !clientCloseCommitted && fakeSockets.length === socketsBeforeClientClose,
   'client-initiated Gemini close cancels pending transcription and does not reconnect',

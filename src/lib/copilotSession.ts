@@ -623,7 +623,7 @@ class CopilotSessionHost {
         ) {
           transcript.finalParts.push(event.text)
         }
-        if (event.boundary !== 'speech-final' && event.boundary !== 'utterance-end') return
+        if (event.boundary !== 'speech-final' && event.boundary !== 'final' && event.boundary !== 'utterance-end') return
         const text = (transcript.finalParts.join(' ') || event.text).trim()
         transcript.finalParts = []
         if (!text) {

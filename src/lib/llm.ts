@@ -337,7 +337,7 @@ const DEEPGRAM_CONNECT_TIMEOUT_MS = 10_000;
 const DEEPGRAM_KEEPALIVE_MS = 8_000;
 const DEEPGRAM_RECONNECT_BASE_MS = 1_000;
 const DEEPGRAM_RECONNECT_MAX_MS = 15_000;
-const GEMINI_UTTERANCE_END_MS = 1_500;
+const GEMINI_UTTERANCE_END_MS = 400;
 const GEMINI_LIVE_ENDPOINT = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 // The Deepgram-named exports are kept as the shared STT facade for backward compatibility.
 
@@ -546,6 +546,13 @@ function geminiSetup(inputLanguage: string, appLanguage: string) {
     inputAudioTranscription: inputLanguage === 'multi'
       ? {}
       : { languageCodes: [inputLanguage] },
+    realtimeInputConfig: {
+      automaticActivityDetection: {
+        disabled: false,
+        prefixPaddingMs: 20,
+        silenceDurationMs: 400,
+      },
+    },
   };
   return { setup };
 }
@@ -613,7 +620,7 @@ function attachGeminiHandlers(ws: DeepgramStream) {
 
       if (final) {
         ws.__geminiFinalSeen = true;
-        ws.__deepgramOnTranscript?.({ text: final, isFinal: true, boundary: 'final' });
+        ws.__deepgramOnTranscript?.({ text: final, isFinal: true, boundary: 'speech-final' });
         if (ws.__geminiTurnCompleteSeen) emitGeminiUtteranceEnd(ws);
         else scheduleGeminiUtteranceEnd(ws);
       }
