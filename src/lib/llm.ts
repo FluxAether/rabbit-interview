@@ -337,7 +337,7 @@ const DEEPGRAM_CONNECT_TIMEOUT_MS = 10_000;
 const DEEPGRAM_KEEPALIVE_MS = 8_000;
 const DEEPGRAM_RECONNECT_BASE_MS = 1_000;
 const DEEPGRAM_RECONNECT_MAX_MS = 15_000;
-const GEMINI_UTTERANCE_END_MS = 400;
+const GEMINI_UTTERANCE_END_MS = 1_500;
 const GEMINI_LIVE_ENDPOINT = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 // The Deepgram-named exports are kept as the shared STT facade for backward compatibility.
 
@@ -399,7 +399,6 @@ export interface DeepgramStream extends WebSocket {
   __geminiInputLanguage?: string;
   __geminiAppLanguage?: string;
   __geminiFinalSeen?: boolean;
-  __geminiTurnCompleteSeen?: boolean;
   __geminiUtteranceEnded?: boolean;
   __geminiUtteranceEndTimer?: ReturnType<typeof globalThis.setTimeout> | null;
   __geminiRotating?: boolean;
@@ -550,7 +549,8 @@ function geminiSetup(inputLanguage: string, appLanguage: string) {
       automaticActivityDetection: {
         disabled: false,
         prefixPaddingMs: 20,
-        silenceDurationMs: 400,
+        endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+        silenceDurationMs: GEMINI_UTTERANCE_END_MS,
       },
     },
   };
@@ -608,10 +608,8 @@ function attachGeminiHandlers(ws: DeepgramStream) {
       const content = data.serverContent || data;
       const interim = content.interimInputTranscription?.text?.trim();
       const final = content.inputTranscription?.text?.trim();
-      const turnComplete = Boolean(content.turnComplete);
       if ((interim || final) && ws.__geminiUtteranceEnded) {
         ws.__geminiFinalSeen = false;
-        ws.__geminiTurnCompleteSeen = false;
         ws.__geminiUtteranceEnded = false;
       }
       if (interim) {
@@ -620,13 +618,9 @@ function attachGeminiHandlers(ws: DeepgramStream) {
 
       if (final) {
         ws.__geminiFinalSeen = true;
-        ws.__deepgramOnTranscript?.({ text: final, isFinal: true, boundary: 'speech-final' });
-        if (ws.__geminiTurnCompleteSeen) emitGeminiUtteranceEnd(ws);
-        else scheduleGeminiUtteranceEnd(ws);
-      }
-      if (turnComplete) {
-        ws.__geminiTurnCompleteSeen = true;
-        emitGeminiUtteranceEnd(ws);
+        ws.__deepgramOnTranscript?.({ text: final, isFinal: true, boundary: 'final' });
+        // Gemini sends transcription independently of turnComplete with no ordering guarantee.
+        scheduleGeminiUtteranceEnd(ws);
       }
 
       if (data.goAway && !ws.__geminiRotating) {
@@ -766,7 +760,6 @@ async function openGeminiLiveSocket(
   ws.__geminiAppLanguage = appLanguage || (settings?.language as string) || 'en-US';
   ws.__geminiSetupComplete = false;
   ws.__geminiFinalSeen = false;
-  ws.__geminiTurnCompleteSeen = false;
   ws.__geminiUtteranceEnded = false;
   attachGeminiHandlers(ws);
 

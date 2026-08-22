@@ -169,8 +169,8 @@ check(
   'Deepgram speech-final and utterance-end signals remain distinct through turn detection',
 )
 check(
-  session.includes("event.boundary !== 'speech-final' && event.boundary !== 'final' && event.boundary !== 'utterance-end'"),
-  'Copilot commits Gemini inputTranscription without waiting for a synthetic utterance-end',
+  session.includes("event.boundary !== 'speech-final' && event.boundary !== 'utterance-end'"),
+  'Copilot accumulates Gemini inputTranscription chunks until an utterance boundary',
 )
 check(session.includes('MAX_AUTO_CONTINUATIONS') && session.includes('continuationAttempt < MAX_AUTO_CONTINUATIONS'), 'token-limited answers are automatically continued with a bounded retry count')
 check(session.includes('textSimilarity') && session.includes('isLikelyEcho'), 'system-audio echo is filtered against recent AI and microphone text')
@@ -938,7 +938,8 @@ check(
         automaticActivityDetection: {
           disabled: false,
           prefixPaddingMs: 20,
-          silenceDurationMs: 400,
+          endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+          silenceDurationMs: 1_500,
         },
       },
     },
@@ -972,6 +973,31 @@ check(
 )
 binaryFrameGemini.api.closeDeepgramStream(binaryFrameSocket)
 
+const geminiMessages = []
+let copilotOnTranscript = () => {}
+const { joinTranscriptParts: joinCopilotTranscriptParts } = loadTypeScriptModule(
+  'src/lib/mockInterviewVoiceEndpoint.ts',
+  ['joinTranscriptParts'],
+)
+const { CopilotSessionHost } = loadTypeScriptModule(
+  'src/lib/copilotSession.ts',
+  ['CopilotSessionHost'],
+  {
+    createInitialSnapshot: () => ({ sessionId: 7 }),
+    closeDeepgramStream: () => {},
+    joinTranscriptParts: joinCopilotTranscriptParts,
+    startDeepgramStream: async (onTranscript) => {
+      copilotOnTranscript = onTranscript
+      return {}
+    },
+  },
+)
+const transcriptHost = new CopilotSessionHost()
+transcriptHost.transition = (action) => {
+  if (action.type === 'message') geminiMessages.push(action.message)
+}
+await transcriptHost.startDeepgram(7, 'microphone', 16_000)
+
 const geminiEvents = []
 const geminiSocketChanges = []
 const gemini = createGeminiSttHarness({
@@ -982,7 +1008,10 @@ const gemini = createGeminiSttHarness({
 })
 let geminiReady = false
 const geminiOpening = gemini.api.startDeepgramStream(
-  (event) => geminiEvents.push(event),
+  (event) => {
+    geminiEvents.push(event)
+    copilotOnTranscript(event)
+  },
   undefined,
   16_000,
   (socket) => geminiSocketChanges.push(socket),
@@ -1031,40 +1060,71 @@ geminiSocket.receive({
   },
 })
 check(geminiEvents.length === eventsBeforeTranslatedOutput, 'Gemini translated text and generated audio are ignored')
+const earlyTurnMessageStart = geminiMessages.length
 geminiSocket.receive({ serverContent: { turnComplete: true } })
-geminiSocket.receive({ serverContent: { inputTranscription: { text: '乱序到达' } } })
+geminiSocket.receive({ serverContent: { inputTranscription: { text: '乱序' } } })
+geminiSocket.receive({ serverContent: { inputTranscription: { text: '到达' } } })
 check(
-  geminiEvents.map((event) => event.boundary).join(',') === 'speech-final,utterance-end'
-    && gemini.timers.pending(400).length === 0,
-  'Gemini flushes immediately when turnComplete arrives before source transcription',
+  geminiEvents.map((event) => event.boundary).join(',') === 'final,final'
+    && gemini.timers.pending(1_500).length === 1
+    && geminiMessages.length === earlyTurnMessageStart,
+  'an early turnComplete does not split later source-transcription chunks',
 )
+await gemini.timers.runTimeout(1_500)
+const earlyTurnMessages = geminiMessages.slice(earlyTurnMessageStart)
+check(
+  geminiEvents.map((event) => event.boundary).join(',') === 'final,final,utterance-end'
+    && earlyTurnMessages.length === 1
+    && earlyTurnMessages[0].text === '乱序到达',
+  'late transcription after turnComplete becomes one combined chat message',
+)
+const messageStart = geminiMessages.length
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '请介绍一下' } } })
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '你自己' } } })
 check(
-  gemini.timers.pending(400).length === 1
-    && geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'speech-final,speech-final',
+  gemini.timers.pending(1_500).length === 1
+    && geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'final,final',
   'Gemini source transcription resets one silence timer while chunks keep arriving',
 )
-await gemini.timers.runTimeout(400)
 check(
-  geminiEvents.slice(-3).map((event) => event.boundary).join(',') === 'speech-final,speech-final,utterance-end',
-  'Gemini commits source transcription after silence even when Live Translate omits turnComplete',
+  geminiMessages.length === messageStart,
+  'Gemini source-transcription chunks do not become separate chat messages',
+)
+await gemini.timers.runTimeout(1_500)
+check(
+  geminiEvents.slice(-3).map((event) => event.boundary).join(',') === 'final,final,utterance-end',
+  'Gemini emits one utterance boundary for multiple source-transcription chunks',
+)
+const chunkedTurnMessages = geminiMessages.slice(messageStart)
+check(
+  chunkedTurnMessages.length === 1 && chunkedTurnMessages[0].text === '请介绍一下你自己',
+  'one Gemini utterance becomes one combined chat message without Chinese chunk spacing',
 )
 geminiSocket.receive({ serverContent: { turnComplete: true } })
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '迟到后的新问题' } } })
 check(
-  geminiEvents.at(-1)?.boundary === 'speech-final' && gemini.timers.pending(400).length === 1,
+  geminiEvents.at(-1)?.boundary === 'final' && gemini.timers.pending(1_500).length === 1,
   'a late turnComplete cannot prematurely end the next Gemini transcription',
 )
-await gemini.timers.runTimeout(400)
-geminiSocket.receive({ serverContent: { inputTranscription: { text: '第二个问题' } } })
+await gemini.timers.runTimeout(1_500)
+const secondMessageStart = geminiMessages.length
+geminiSocket.receive({ serverContent: { inputTranscription: { text: '第二个' } } })
 geminiSocket.receive({ serverContent: { turnComplete: true } })
+geminiSocket.receive({ serverContent: { inputTranscription: { text: '问题' } } })
 check(
-  geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'speech-final,utterance-end'
-    && geminiEvents.at(-2)?.text === '第二个问题',
-  'Gemini turnComplete flushes immediately and cancels its pending silence timer',
+  geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'final,final'
+    && gemini.timers.pending(1_500).length === 1
+    && geminiMessages.length === secondMessageStart,
+  'turnComplete between source-transcription chunks does not end the utterance',
 )
-check(gemini.timers.pending(400).length === 0, 'Gemini turnComplete leaves no stale silence timer')
+await gemini.timers.runTimeout(1_500)
+const secondTurnMessages = geminiMessages.slice(secondMessageStart)
+check(
+  secondTurnMessages.length === 1
+    && secondTurnMessages[0].text === '第二个问题'
+    && gemini.timers.pending(1_500).length === 0,
+  'Gemini silence commits the complete transcription after an unordered turnComplete',
+)
 
 const socketsBeforeGoAway = fakeSockets.length
 geminiSocket.receive({ goAway: { timeLeft: '5s' } })
@@ -1111,7 +1171,7 @@ disconnectedSocket.receive({ serverContent: { inputTranscription: { text: '换�
 disconnectedSocket.disconnect()
 check(
   reconnectGemini.timers.pending(1_000).length === 1
-    && reconnectGemini.timers.pending(400).length === 0,
+    && reconnectGemini.timers.pending(1_500).length === 0,
   'an unexpected Gemini close cancels the old silence timer and schedules reconnect',
 )
 const socketsBeforeReconnect = fakeSockets.length
@@ -1129,20 +1189,20 @@ reconnectedSocket.receive({ setupComplete: {} })
 await flushTasks()
 check(reconnectChanges.at(-1) === reconnectedSocket, 'Gemini reconnect swaps the caller socket after setupComplete')
 check(
-  reconnectGemini.timers.pending(400).length === 1,
+  reconnectGemini.timers.pending(1_500).length === 1,
   'Gemini reconnect transfers an unfinished transcription to the replacement socket',
 )
-await reconnectGemini.timers.runTimeout(400)
+await reconnectGemini.timers.runTimeout(1_500)
 check(
-  reconnectEvents.map((event) => event.boundary).join(',') === 'speech-final,utterance-end',
+  reconnectEvents.map((event) => event.boundary).join(',') === 'final,utterance-end',
   'Gemini reconnect commits the pending transcription without waiting for another chunk',
 )
 const socketsBeforeClientClose = fakeSockets.length
 reconnectedSocket.receive({ serverContent: { inputTranscription: { text: '关闭前转写' } } })
-check(reconnectGemini.timers.pending(400).length === 1, 'Gemini close cleanup has a pending silence timer to cancel')
+check(reconnectGemini.timers.pending(1_500).length === 1, 'Gemini close cleanup has a pending silence timer to cancel')
 reconnectGemini.api.closeDeepgramStream(reconnectedSocket)
 const clientCloseRetried = await reconnectGemini.timers.runTimeout(1_000)
-const clientCloseCommitted = await reconnectGemini.timers.runTimeout(400)
+const clientCloseCommitted = await reconnectGemini.timers.runTimeout(1_500)
 check(
   !clientCloseRetried && !clientCloseCommitted && fakeSockets.length === socketsBeforeClientClose,
   'client-initiated Gemini close cancels pending transcription and does not reconnect',

@@ -95,7 +95,7 @@ function appendFinalPart(parts: string[], text: string): void {
   parts.push(normalized)
 }
 
-function joinTranscriptParts(parts: string[]): string {
+export function joinTranscriptParts(parts: string[]): string {
   return parts
     .map(part => part.replace(/\s+/g, ' ').trim())
     .filter(Boolean)

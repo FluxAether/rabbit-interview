@@ -27,6 +27,7 @@ import {
   shouldInterruptForInterviewerContinuation,
 } from './interviewerTurnDetector'
 import { MAX_RECORDING_SECONDS } from './recordingLimits'
+import { joinTranscriptParts } from './mockInterviewVoiceEndpoint'
 
 const COMMAND_EVENT = 'copilot-session-command'
 const SNAPSHOT_EVENT = 'copilot-session-snapshot'
@@ -623,8 +624,8 @@ class CopilotSessionHost {
         ) {
           transcript.finalParts.push(event.text)
         }
-        if (event.boundary !== 'speech-final' && event.boundary !== 'final' && event.boundary !== 'utterance-end') return
-        const text = (transcript.finalParts.join(' ') || event.text).trim()
+        if (event.boundary !== 'speech-final' && event.boundary !== 'utterance-end') return
+        const text = joinTranscriptParts(transcript.finalParts) || event.text.trim()
         transcript.finalParts = []
         if (!text) {
           if (source === 'system' && event.boundary === 'utterance-end') {
