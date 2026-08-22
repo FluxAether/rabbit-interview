@@ -941,6 +941,26 @@ check(
   'Gemini connectivity succeeds only after setupComplete and closes its test socket',
 )
 
+const binaryFrameGemini = createGeminiSttHarness({ sttProvider: 'gemini', sttLanguage: 'multi', language: 'en-US' })
+const binaryFrameOpening = binaryFrameGemini.api.testGeminiLiveConnection('binary-frame-key').then(
+  () => null,
+  (error) => error,
+)
+await flushTasks()
+const binaryFrameSocket = latestSocket
+binaryFrameSocket.open()
+binaryFrameSocket.onmessage?.({
+  data: new TextEncoder().encode(JSON.stringify({ setupComplete: {} })).buffer,
+})
+await flushTasks()
+const binaryFrameTimedOut = await binaryFrameGemini.timers.runTimeout(10_000)
+const binaryFrameError = await binaryFrameOpening
+check(
+  binaryFrameError === null && !binaryFrameTimedOut && binaryFrameSocket.binaryType === 'arraybuffer',
+  'Gemini Live parses binary setupComplete frames instead of timing out',
+)
+binaryFrameGemini.api.closeDeepgramStream(binaryFrameSocket)
+
 const geminiEvents = []
 const geminiSocketChanges = []
 const gemini = createGeminiSttHarness({
@@ -992,7 +1012,6 @@ gemini.api.sendAudioChunk(geminiSocket, new Float32Array([0.25]))
 check(geminiSocket.sent.length === sentBeforeBackpressure, 'Gemini audio obeys the shared websocket backpressure limit')
 geminiSocket.bufferedAmount = 0
 
-geminiSocket.receive({ serverContent: { interimInputTranscription: { text: '请介绍' } } })
 const eventsBeforeTranslatedOutput = geminiEvents.length
 geminiSocket.receive({
   serverContent: {
@@ -1001,20 +1020,40 @@ geminiSocket.receive({
   },
 })
 check(geminiEvents.length === eventsBeforeTranslatedOutput, 'Gemini translated text and generated audio are ignored')
-geminiSocket.receive({ serverContent: { inputTranscription: { text: '请介绍一下你自己' } } })
 geminiSocket.receive({ serverContent: { turnComplete: true } })
+geminiSocket.receive({ serverContent: { inputTranscription: { text: '乱序到达' } } })
 check(
-  geminiEvents.map((event) => event.boundary).join(',') === 'interim,final,utterance-end'
-    && geminiEvents[1]?.text === '请介绍一下你自己',
-  'Gemini source transcription maps interim/final and emits one utterance-end after final-first completion',
+  geminiEvents.map((event) => event.boundary).join(',') === 'final,utterance-end'
+    && gemini.timers.pending(1_500).length === 0,
+  'Gemini flushes immediately when turnComplete arrives before source transcription',
+)
+geminiSocket.receive({ serverContent: { inputTranscription: { text: '请介绍一下' } } })
+geminiSocket.receive({ serverContent: { inputTranscription: { text: '你自己' } } })
+check(
+  gemini.timers.pending(1_500).length === 1
+    && geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'final,final',
+  'Gemini source transcription resets one silence timer while chunks keep arriving',
+)
+await gemini.timers.runTimeout(1_500)
+check(
+  geminiEvents.slice(-3).map((event) => event.boundary).join(',') === 'final,final,utterance-end',
+  'Gemini commits source transcription after silence even when Live Translate omits turnComplete',
 )
 geminiSocket.receive({ serverContent: { turnComplete: true } })
+geminiSocket.receive({ serverContent: { inputTranscription: { text: '迟到后的新问题' } } })
+check(
+  geminiEvents.at(-1)?.boundary === 'final' && gemini.timers.pending(1_500).length === 1,
+  'a late turnComplete cannot prematurely end the next Gemini transcription',
+)
+await gemini.timers.runTimeout(1_500)
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '第二个问题' } } })
+geminiSocket.receive({ serverContent: { turnComplete: true } })
 check(
   geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'final,utterance-end'
     && geminiEvents.at(-2)?.text === '第二个问题',
-  'Gemini handles a later no-interim utterance when turnComplete arrives before final',
+  'Gemini turnComplete flushes immediately and cancels its pending silence timer',
 )
+check(gemini.timers.pending(1_500).length === 0, 'Gemini turnComplete leaves no stale silence timer')
 
 const socketsBeforeGoAway = fakeSockets.length
 geminiSocket.receive({ goAway: { timeLeft: '5s' } })
@@ -1040,13 +1079,14 @@ check(
 )
 
 const reconnectChanges = []
+const reconnectEvents = []
 const reconnectGemini = createGeminiSttHarness({
   sttProvider: 'gemini',
   sttLanguage: 'multi',
   language: 'zh-TW',
 })
 const reconnectOpening = reconnectGemini.api.startDeepgramStream(
-  () => {},
+  (event) => reconnectEvents.push(event),
   undefined,
   16_000,
   (socket) => reconnectChanges.push(socket),
@@ -1056,10 +1096,12 @@ const disconnectedSocket = latestSocket
 disconnectedSocket.open()
 disconnectedSocket.receive({ setupComplete: {} })
 await reconnectOpening
+disconnectedSocket.receive({ serverContent: { inputTranscription: { text: '换线前的转写' } } })
 disconnectedSocket.disconnect()
 check(
-  reconnectGemini.timers.pending(1_000).length === 1,
-  'an unexpected Gemini close schedules the existing exponential reconnect path',
+  reconnectGemini.timers.pending(1_000).length === 1
+    && reconnectGemini.timers.pending(1_500).length === 0,
+  'an unexpected Gemini close cancels the old silence timer and schedules reconnect',
 )
 const socketsBeforeReconnect = fakeSockets.length
 await reconnectGemini.timers.runTimeout(1_000)
@@ -1075,12 +1117,24 @@ check(
 reconnectedSocket.receive({ setupComplete: {} })
 await flushTasks()
 check(reconnectChanges.at(-1) === reconnectedSocket, 'Gemini reconnect swaps the caller socket after setupComplete')
+check(
+  reconnectGemini.timers.pending(1_500).length === 1,
+  'Gemini reconnect transfers an unfinished transcription to the replacement socket',
+)
+await reconnectGemini.timers.runTimeout(1_500)
+check(
+  reconnectEvents.map((event) => event.boundary).join(',') === 'final,utterance-end',
+  'Gemini reconnect commits the pending transcription without waiting for another chunk',
+)
 const socketsBeforeClientClose = fakeSockets.length
+reconnectedSocket.receive({ serverContent: { inputTranscription: { text: '关闭前转写' } } })
+check(reconnectGemini.timers.pending(1_500).length === 1, 'Gemini close cleanup has a pending silence timer to cancel')
 reconnectGemini.api.closeDeepgramStream(reconnectedSocket)
 const clientCloseRetried = await reconnectGemini.timers.runTimeout(1_000)
+const clientCloseCommitted = await reconnectGemini.timers.runTimeout(1_500)
 check(
-  !clientCloseRetried && fakeSockets.length === socketsBeforeClientClose,
-  'client-initiated Gemini close does not reconnect',
+  !clientCloseRetried && !clientCloseCommitted && fakeSockets.length === socketsBeforeClientClose,
+  'client-initiated Gemini close cancels pending transcription and does not reconnect',
 )
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)

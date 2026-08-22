@@ -337,6 +337,7 @@ const DEEPGRAM_CONNECT_TIMEOUT_MS = 10_000;
 const DEEPGRAM_KEEPALIVE_MS = 8_000;
 const DEEPGRAM_RECONNECT_BASE_MS = 1_000;
 const DEEPGRAM_RECONNECT_MAX_MS = 15_000;
+const GEMINI_UTTERANCE_END_MS = 1_500;
 const GEMINI_LIVE_ENDPOINT = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 // The Deepgram-named exports are kept as the shared STT facade for backward compatibility.
 
@@ -400,7 +401,14 @@ export interface DeepgramStream extends WebSocket {
   __geminiFinalSeen?: boolean;
   __geminiTurnCompleteSeen?: boolean;
   __geminiUtteranceEnded?: boolean;
+  __geminiUtteranceEndTimer?: ReturnType<typeof globalThis.setTimeout> | null;
   __geminiRotating?: boolean;
+}
+
+function clearGeminiUtteranceEndTimer(ws: DeepgramStream) {
+  if (ws.__geminiUtteranceEndTimer == null) return;
+  globalThis.clearTimeout(ws.__geminiUtteranceEndTimer);
+  ws.__geminiUtteranceEndTimer = null;
 }
 
 function clearDeepgramTimers(ws: DeepgramStream) {
@@ -412,6 +420,7 @@ function clearDeepgramTimers(ws: DeepgramStream) {
     globalThis.clearTimeout(ws.__deepgramReconnectTimer);
     ws.__deepgramReconnectTimer = null;
   }
+  clearGeminiUtteranceEndTimer(ws);
 }
 
 function startDeepgramKeepAlive(ws: DeepgramStream) {
@@ -542,12 +551,24 @@ function geminiSetup(inputLanguage: string, appLanguage: string) {
 }
 
 function emitGeminiUtteranceEnd(ws: DeepgramStream) {
-  if (!ws.__geminiFinalSeen || !ws.__geminiTurnCompleteSeen || ws.__geminiUtteranceEnded) return;
+  if (!ws.__geminiFinalSeen || ws.__geminiUtteranceEnded) return;
+  clearGeminiUtteranceEndTimer(ws);
   ws.__geminiUtteranceEnded = true;
   ws.__deepgramOnTranscript?.({ text: '', isFinal: true, boundary: 'utterance-end' });
 }
 
+function scheduleGeminiUtteranceEnd(ws: DeepgramStream) {
+  clearGeminiUtteranceEndTimer(ws);
+  const timer = globalThis.setTimeout(
+    () => emitGeminiUtteranceEnd(ws),
+    ws.__deepgramOptions?.utteranceEndMs ?? GEMINI_UTTERANCE_END_MS,
+  );
+  (timer as { unref?: () => void }).unref?.();
+  ws.__geminiUtteranceEndTimer = timer;
+}
+
 function attachGeminiHandlers(ws: DeepgramStream) {
+  ws.binaryType = 'arraybuffer';
   ws.onopen = () => {
     try {
       ws.send(JSON.stringify(geminiSetup(
@@ -561,7 +582,10 @@ function attachGeminiHandlers(ws: DeepgramStream) {
 
   ws.onmessage = (event) => {
     try {
-      const data = JSON.parse(event.data);
+      const payload = typeof event.data === 'string'
+        ? event.data
+        : new TextDecoder().decode(event.data);
+      const data = JSON.parse(payload);
       if (data.error) {
         const error = new Error(data.error.message || 'Gemini Live connection failed');
         if (!ws.__geminiSetupComplete) ws.__geminiSetupReject?.(error);
@@ -578,7 +602,7 @@ function attachGeminiHandlers(ws: DeepgramStream) {
       const interim = content.interimInputTranscription?.text?.trim();
       const final = content.inputTranscription?.text?.trim();
       const turnComplete = Boolean(content.turnComplete);
-      if ((interim || final || turnComplete) && ws.__geminiUtteranceEnded) {
+      if ((interim || final) && ws.__geminiUtteranceEnded) {
         ws.__geminiFinalSeen = false;
         ws.__geminiTurnCompleteSeen = false;
         ws.__geminiUtteranceEnded = false;
@@ -590,15 +614,21 @@ function attachGeminiHandlers(ws: DeepgramStream) {
       if (final) {
         ws.__geminiFinalSeen = true;
         ws.__deepgramOnTranscript?.({ text: final, isFinal: true, boundary: 'final' });
+        if (ws.__geminiTurnCompleteSeen) emitGeminiUtteranceEnd(ws);
+        else scheduleGeminiUtteranceEnd(ws);
       }
-      if (turnComplete) ws.__geminiTurnCompleteSeen = true;
-      emitGeminiUtteranceEnd(ws);
+      if (turnComplete) {
+        ws.__geminiTurnCompleteSeen = true;
+        emitGeminiUtteranceEnd(ws);
+      }
 
       if (data.goAway && !ws.__geminiRotating) {
         void rotateGeminiStream(ws);
       }
     } catch (error) {
-      ws.__deepgramOnError?.(error);
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      if (!ws.__geminiSetupComplete) ws.__geminiSetupReject?.(normalized);
+      else ws.__deepgramOnError?.(normalized);
     }
   };
 
@@ -644,12 +674,17 @@ function scheduleGeminiReconnect(ws: DeepgramStream) {
 }
 
 function manageGeminiReplacement(previous: DeepgramStream, next: DeepgramStream) {
+  const hasPendingUtterance = Boolean(previous.__geminiFinalSeen && !previous.__geminiUtteranceEnded);
   next.__deepgramManaged = true;
   next.__deepgramClosedByClient = false;
   next.__deepgramReconnectAttempt = 0;
   next.__deepgramReplaceSocket = previous.__deepgramReplaceSocket;
   previous.__deepgramManaged = false;
   clearDeepgramTimers(previous);
+  if (hasPendingUtterance) {
+    next.__geminiFinalSeen = true;
+    scheduleGeminiUtteranceEnd(next);
+  }
   previous.__deepgramReplaceSocket?.(next);
 }
 
