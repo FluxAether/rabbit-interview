@@ -192,13 +192,13 @@ jobs:
             gh release create "$GITHUB_REF_NAME" \
               --target "$GITHUB_SHA" \
               --draft \
-              --title "Rabbit Interview $GITHUB_REF_NAME 测试版" \
+              --title "$GITHUB_REF_NAME" \
               --notes "构建完成。安装包与校验文件见本 Release。"
           fi
           gh release upload "$GITHUB_REF_NAME" dist-release/* --clobber
           gh release edit "$GITHUB_REF_NAME" \
             --draft=false \
-            --title "Rabbit Interview $GITHUB_REF_NAME 测试版" \
+            --title "$GITHUB_REF_NAME" \
             --notes $'测试版。\n\n当前 macOS 包没有 Developer ID 与公证，Windows 包没有 Authenticode 签名，安装时可能出现系统安全警告。请从本 Release 下载，并核对 SHA256SUMS.txt。\n\n使用实时语音需要 Deepgram API Key，回答建议需要任一受支持的模型 API Key。仅在面试或测评规则允许辅助工具时使用。'
           ASSETS="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')"
           for required in RabbitInterview-macOS-universal.dmg RabbitInterview-Windows-x64.exe latest.json SHA256SUMS.txt; do
