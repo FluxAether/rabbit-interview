@@ -171,6 +171,10 @@ check(
 )
 check(archive.includes('createCopilotInterviewRecord'), 'automatic archives use one transcript record builder')
 check(source('src/lib/copilotScoring.ts').includes('buildCopilotQaPairs') && session.includes('scoreCopilotSession'), 'ending a session scores interviewer questions against microphone answers')
+check(session.includes('buildRecentTurnsContext') && session.includes('collectCopilotTurns(messages)') && session.includes('openMessageId'), 'Copilot answers rebuild recent turns from sealed snapshot messages')
+check(!session.includes('previousTurn'), 'Copilot no longer caches a single previous AI turn')
+check(llm.includes('recent interview turns') && llm.includes('Prefer Candidate said over Suggested answer') && llm.includes('Suggested but not used'), 'LLM prompts prefer spoken candidate turns over AI suggestions')
+check(session.includes('maybeRestartAnswerForSealedMicrophone') && session.includes('PRE_DELTA_RESTART_MS'), 'Copilot can restart an interviewer answer if the microphone seals before the first model token')
 check(!page.includes('saveSession = async') && page.includes('copilot.archive.autoSaveHint'), 'the page no longer requires a manual session-save action')
 check(
   historyPage.includes('convertFileSrc(selected.recordingPath)')
@@ -498,9 +502,21 @@ check(
   'scored archive records persist overall score details',
 )
 
-const { buildCopilotQaPairs } = loadTypeScriptModule(
+const { isMinimumVoiceAnswer } = loadTypeScriptModule(
+  'src/lib/mockInterviewVoiceEndpoint.ts',
+  ['isMinimumVoiceAnswer'],
+)
+const { textSimilarity: scoringTextSimilarity } = loadTypeScriptModule(
+  'src/lib/copilotText.ts',
+  ['textSimilarity'],
+)
+const { buildCopilotQaPairs, collectCopilotTurns, buildRecentTurnsContext } = loadTypeScriptModule(
   'src/lib/copilotScoring.ts',
-  ['buildCopilotQaPairs'],
+  ['buildCopilotQaPairs', 'collectCopilotTurns', 'buildRecentTurnsContext'],
+  {
+    textSimilarity: scoringTextSimilarity,
+    isMinimumVoiceAnswer,
+  },
 )
 const pairs = buildCopilotQaPairs([
   { id: 1, role: 'interviewer', source: 'system-stt', text: 'Tell me about yourself.', createdAt: 1 },
@@ -518,6 +534,98 @@ check(
     && pairs[1].answer === 'I enjoy product interviews.',
   'scoring pairs use interviewer questions and microphone answers only',
 )
+const contextMessages = [
+  { id: 1, role: 'interviewer', source: 'system-stt', text: 'Tell me about yourself.', createdAt: 1 },
+  { id: 2, role: 'assistant', source: 'llm', text: 'Ignore this AI suggestion.', createdAt: 2 },
+  { id: 3, role: 'me', source: 'microphone-stt', text: 'I build desktop tools.', createdAt: 3 },
+  { id: 4, role: 'me', source: 'follow-up', text: 'make it shorter', createdAt: 4 },
+  { id: 5, role: 'interviewer', source: 'system-stt', text: 'Why this role?', createdAt: 5 },
+  { id: 6, role: 'assistant', source: 'llm', text: 'I enjoy product interviews because I like shipping.', createdAt: 6 },
+]
+const turns = collectCopilotTurns(contextMessages)
+check(
+  turns.length === 2
+    && turns[0].candidateSaid === 'I build desktop tools.'
+    && turns[0].suggestedAnswer === 'Ignore this AI suggestion.'
+    && turns[1].candidateSaid === ''
+    && turns[1].suggestedAnswer === 'I enjoy product interviews because I like shipping.',
+  'context turns keep spoken answers and completed suggestions separately',
+)
+const spokenContext = buildRecentTurnsContext(turns, 'Why this role?')
+check(
+  spokenContext.includes('Candidate said: I build desktop tools.')
+    && spokenContext.includes('Suggested but not used: Ignore this AI suggestion.')
+    && !spokenContext.includes('Suggested answer: Ignore this AI suggestion.')
+    && !spokenContext.includes('Why this role?'),
+  'recent turns prefer microphone text and omit the current question',
+)
+const suggestionOnly = buildRecentTurnsContext([
+  { question: 'Tell me about yourself.', candidateSaid: '', suggestedAnswer: 'I ship interview tools.' },
+], 'Why this role?')
+check(
+  suggestionOnly.includes('Suggested answer: I ship interview tools.')
+    && !suggestionOnly.includes('Candidate said:'),
+  'recent turns fall back to the AI suggestion when the candidate has not spoken',
+)
+const manyTurns = Array.from({ length: 4 }, (_, index) => ({
+  question: `Question ${index + 1}`,
+  candidateSaid: `Spoken answer ${index + 1} with extra detail`,
+  suggestedAnswer: `Suggested ${index + 1}`,
+}))
+const limitedContext = buildRecentTurnsContext(manyTurns, 'Question 5')
+check(
+  limitedContext.includes('Question 2')
+    && limitedContext.includes('Question 4')
+    && !limitedContext.includes('Question 1')
+    && !limitedContext.includes('Question 5')
+    && limitedContext.includes('Suggested but not used: Suggested 4')
+    && !limitedContext.includes('Suggested answer: Suggested 4'),
+  'recent turns keep the newest three spoken turns and drop older ones',
+)
+const longSaid = 'alpha '.repeat(400).trim()
+const truncated = buildRecentTurnsContext([
+  { question: 'Long question', candidateSaid: longSaid, suggestedAnswer: 'unused suggestion' },
+], 'Next question', 3, 80)
+check(
+  truncated.startsWith('Recent turns:')
+    && truncated.slice('Recent turns:'.length).trim().length <= 80
+    && truncated.includes('Candidate said:')
+    && !truncated.includes('unused suggestion')
+    && truncated.includes('alpha'),
+  'oversized recent turns keep the newest spoken tail inside the budget',
+)
+const unusedSuggestion = buildRecentTurnsContext([
+  { question: 'Tell me about yourself.', candidateSaid: 'I ship desktop interview tools.', suggestedAnswer: 'I would discuss distributed systems and leadership.' },
+], 'Why this role?')
+check(
+  unusedSuggestion.includes('Candidate said: I ship desktop interview tools.')
+    && unusedSuggestion.includes('Suggested but not used: I would discuss distributed systems and leadership.')
+    && !unusedSuggestion.includes('Suggested answer:'),
+  'recent turns keep unused AI suggestions when the candidate said something different',
+)
+const echoedSuggestion = buildRecentTurnsContext([
+  { question: 'Tell me about yourself.', candidateSaid: 'I ship desktop interview tools.', suggestedAnswer: 'I ship desktop interview tools.' },
+], 'Why this role?')
+check(
+  echoedSuggestion.includes('Candidate said: I ship desktop interview tools.')
+    && !echoedSuggestion.includes('Suggested but not used:')
+    && !echoedSuggestion.includes('Suggested answer:'),
+  'recent turns omit the AI suggestion when the candidate repeated it',
+)
+const shortSpeechTurns = collectCopilotTurns([
+  { id: 1, role: 'interviewer', source: 'system-stt', text: 'Tell me about yourself.', createdAt: 1 },
+  { id: 2, role: 'assistant', source: 'llm', text: 'I ship desktop interview tools.', createdAt: 2 },
+  { id: 3, role: 'me', source: 'microphone-stt', text: 'ok', createdAt: 3 },
+])
+check(
+  shortSpeechTurns[0].candidateSaid === 'ok'
+    && shortSpeechTurns[0].suggestedAnswer === 'I ship desktop interview tools.'
+    && buildRecentTurnsContext(shortSpeechTurns, 'Why this role?').includes('Suggested answer: I ship desktop interview tools.')
+    && !buildRecentTurnsContext(shortSpeechTurns, 'Why this role?').includes('Candidate said:'),
+  'sub-minimum microphone speech does not replace the AI suggestion in context',
+)
+
+
 check(
   generateCopilotSessionTitle([
     { id: 1, role: 'me', source: 'microphone-stt', text: '  我先介绍项目背景，  然后讲结果。  ', createdAt: 1_000 },
@@ -590,7 +698,7 @@ const { generateSuggestionsStream: generateFollowUp } = loadTypeScriptModule(
 )
 const followUpResult = await generateFollowUp(
   '请把上一条答案改短一些',
-  'Previous turn:\nQuestion: 介绍一下你自己\nAnswer: 原答案',
+  'Recent turns:\nQ: 介绍一下你自己\nCandidate said: 原答案',
   { onDelta: () => {}, onComplete: () => {} },
   undefined,
   'follow-up',
@@ -1494,6 +1602,80 @@ check(
   echoAfterSystemFirst.join('|') === 'interviewer:一个血脉真灵而已，居然如此强|me:到什么呃 5:10什么|me:我负责支付系统上线',
   'a later microphone transcript removes the system-audio echo of the same answer',
 )
+let restartOnTranscript = () => {}
+const restartMessages = []
+const restartCalls = []
+const { CopilotSessionHost: RestartCopilotHost } = loadTypeScriptModule(
+  'src/lib/copilotSession.ts',
+  ['CopilotSessionHost'],
+  {
+    createInitialSnapshot: () => ({ sessionId: 11, messages: [], answerStatus: 'idle', activeAnswerId: null }),
+    closeDeepgramStream: () => {},
+    ...copilotEndpoint,
+    ...copilotTurnDetector,
+    textSimilarity,
+    startDeepgramStream: async (onTranscript) => {
+      restartOnTranscript = onTranscript
+      return {}
+    },
+  },
+)
+const restartHost = new RestartCopilotHost()
+restartHost.transition = (action) => {
+  if (action.type === 'message') restartMessages.push(action.message)
+  restartHost.snapshot = {
+    ...restartHost.snapshot,
+    messages: uniqueMessages(restartMessages),
+    answerStatus: restartHost.snapshot.answerStatus || 'idle',
+    activeAnswerId: restartHost.snapshot.activeAnswerId ?? null,
+  }
+}
+restartHost.answer = async (sessionId, question, requestType) => {
+  restartCalls.push({ sessionId, question, requestType })
+}
+restartHost.activeAnswer = {
+  controller: new AbortController(),
+  answerId: 1,
+  question: 'Why this role?',
+  startedAt: Date.now(),
+  requestType: 'interviewer-question',
+  emittedText: false,
+}
+await restartHost.startDeepgram(11, 'microphone', 16_000)
+restartOnTranscript({ text: 'I enjoy product interviews and shipping desktop tools', isFinal: true, boundary: 'speech-final' })
+restartOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+check(
+  restartCalls.length === 1
+    && restartCalls[0].question === 'Why this role?'
+    && restartCalls[0].requestType === 'interviewer-question',
+  'a sealed microphone answer restarts the interviewer request before the first model token',
+)
+
+restartCalls.length = 0
+restartHost.activeAnswer = {
+  controller: new AbortController(),
+  answerId: 2,
+  question: 'Why this role?',
+  startedAt: Date.now() - 5_000,
+  requestType: 'interviewer-question',
+  emittedText: false,
+}
+restartOnTranscript({ text: 'This arrives after the model already started', isFinal: true, boundary: 'speech-final' })
+restartOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+check(restartCalls.length === 0, 'a late microphone seal does not restart after the one-second window')
+
+restartHost.activeAnswer = {
+  controller: new AbortController(),
+  answerId: 3,
+  question: 'Why this role?',
+  startedAt: Date.now(),
+  requestType: 'interviewer-question',
+  emittedText: true,
+}
+restartOnTranscript({ text: 'This arrives after the first token', isFinal: true, boundary: 'speech-final' })
+restartOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+check(restartCalls.length === 0, 'a microphone seal does not restart after the model has started streaming')
+
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)
 if (failed > 0) process.exit(1)

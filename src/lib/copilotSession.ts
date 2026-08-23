@@ -22,7 +22,7 @@ import {
 import { useAppStore, type Suggestion } from '../stores/useAppStore'
 import { mergeContinuationText, textSimilarity } from './copilotText'
 import { createCopilotInterviewRecord, type SavedRecording } from './copilotArchive'
-import { scoreCopilotSession, type CopilotSessionScore } from './copilotScoring'
+import { buildRecentTurnsContext, collectCopilotTurns, scoreCopilotSession, type CopilotSessionScore } from './copilotScoring'
 import {
   getInterviewerCommitDelay,
   INTERVIEWER_COMMIT_DELAY_MS,
@@ -50,6 +50,7 @@ const INCOMPLETE_EXTEND_MS = INTERVIEWER_COMMIT_DELAY_MS.incompletePrompt
 const SEAL_DEDUP_MS = 2_000
 const COPILOT_ENDPOINTING_MS = 500
 const COPILOT_UTTERANCE_END_MS = 1_500
+const PRE_DELTA_RESTART_MS = 1_000
 
 export interface AudioCapabilities {
   system_audio_available: boolean
@@ -90,6 +91,8 @@ interface ActiveAnswer {
   answerId: number
   question: string
   startedAt: number
+  requestType: SuggestionRequestType
+  emittedText: boolean
 }
 
 function createUtteranceState(): CopilotUtteranceState {
@@ -160,7 +163,6 @@ class CopilotSessionHost {
   private limitTimer: ReturnType<typeof globalThis.setTimeout> | null = null
   private limitReached = false
   private persistenceSessionId: string | null = null
-  private previousTurn = ''
   private lastRequestType: SuggestionRequestType = 'interviewer-question'
   private recentAssistantText = ''
   private recentAssistantAt = 0
@@ -468,7 +470,6 @@ class CopilotSessionHost {
     this.sampleRate = 16_000
     this.messageSequence = 0
     this.resetUtterances()
-    this.previousTurn = ''
     this.lastRequestType = 'interviewer-question'
     this.recentAssistantText = ''
     this.recentAssistantAt = 0
@@ -757,6 +758,16 @@ class CopilotSessionHost {
     utterance.lastSealedAt = now
     this.resetOpenUtterance(utterance)
     if (source === 'system') this.scheduleInterviewerAnswer(sessionId, text, boundary)
+    if (source === 'microphone') this.maybeRestartAnswerForSealedMicrophone(sessionId)
+  }
+
+  private maybeRestartAnswerForSealedMicrophone(sessionId: number): void {
+    const active = this.activeAnswer
+    if (!active || active.requestType !== 'interviewer-question') return
+    if (active.emittedText || Date.now() - active.startedAt > PRE_DELTA_RESTART_MS) return
+    const question = active.question
+    this.cancelActiveAnswer(sessionId)
+    void this.answer(sessionId, question, 'interviewer-question', true)
   }
 
   private resetOpenUtterance(utterance: CopilotUtteranceState): void {
@@ -889,12 +900,23 @@ class CopilotSessionHost {
     )
   }
 
-  private buildContext(): string {
+  private buildContext(question: string): string {
     const { resumeOriginal, jobDescription } = useAppStore.getState()
+    const skipIds = new Set<number>()
+    if (this.transcripts.microphone.openMessageId != null) {
+      skipIds.add(this.transcripts.microphone.openMessageId)
+    }
+    if (this.snapshot.answerStatus !== 'idle' && this.snapshot.activeAnswerId != null) {
+      skipIds.add(this.snapshot.activeAnswerId)
+    }
+    const messages = skipIds.size
+      ? this.snapshot.messages.filter((message) => !skipIds.has(message.id))
+      : this.snapshot.messages
+    const recentTurns = buildRecentTurnsContext(collectCopilotTurns(messages), question)
     return [
       resumeOriginal ? `Resume:\n${resumeOriginal.slice(0, 6_000)}` : '',
       jobDescription ? `Job description:\n${jobDescription.slice(0, 4_000)}` : '',
-      this.previousTurn ? `Previous turn:\n${this.previousTurn.slice(0, 2_000)}` : '',
+      recentTurns,
     ].filter(Boolean).join('\n\n')
   }
 
@@ -924,11 +946,13 @@ class CopilotSessionHost {
       answerId: idBase,
       question,
       startedAt: Date.now(),
+      requestType,
+      emittedText: false,
     }
     const category = String(useAppStore.getState().settings?.aiModel || 'AI')
 
     try {
-      const context = this.buildContext()
+      const context = this.buildContext(question)
       let fullText = ''
       let continuationAttempt = 0
 
@@ -940,6 +964,7 @@ class CopilotSessionHost {
           {
             onDelta: (_delta, accumulated) => {
               if (!this.isCurrent(sessionId) || controller.signal.aborted) return
+              if (this.activeAnswer?.controller === controller) this.activeAnswer.emittedText = true
               fullText = attemptBaseText
                 ? mergeContinuationText(attemptBaseText, accumulated)
                 : accumulated
@@ -986,7 +1011,6 @@ class CopilotSessionHost {
             answer: fullText,
             suggestions: splitSuggestions(fullText, category, idBase),
           })
-          this.previousTurn = `Question: ${question}\nAnswer: ${fullText}`
           break
         }
 

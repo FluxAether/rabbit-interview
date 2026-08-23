@@ -7,8 +7,8 @@ import { GEMINI_LIVE_TRANSLATE_MODEL } from './settingsStore';
 
 let cachedKeys: Awaited<ReturnType<typeof loadApiKeys>> | null = null;
 
-const INTERVIEW_ANSWER_SYSTEM = 'You are an interview copilot. Answer the question directly using the provided question and context. Respond in the same language as the question. Be accurate, specific, concise, and professional. Give a complete answer of roughly 5 to 8 sentences, use plain paragraphs without Markdown headings, and always finish the final sentence.';
-const FOLLOW_UP_SYSTEM = 'You are an interview copilot handling a user follow-up. Answer the request directly using the previous turn and provided context. Do not treat the request itself as a new interviewer question. Use plain paragraphs without Markdown headings and always finish the final sentence.';
+const INTERVIEW_ANSWER_SYSTEM = 'You are an interview copilot. Answer the question directly using the provided question and context. Prefer Candidate said over Suggested answer; do not treat Suggested answer or Suggested but not used as something the candidate already said. Respond in the same language as the question. Be accurate, specific, concise, and professional. Give a complete answer of roughly 5 to 8 sentences, use plain paragraphs without Markdown headings, and always finish the final sentence.';
+const FOLLOW_UP_SYSTEM = 'You are an interview copilot handling a user follow-up. Answer the request directly using recent interview turns and provided context. Prefer Candidate said over Suggested answer. Do not treat the request itself as a new interviewer question. Use plain paragraphs without Markdown headings and always finish the final sentence.';
 
 type LlmProvider = 'groq' | 'openai' | 'anthropic' | 'gemini';
 
@@ -224,8 +224,8 @@ export async function generateSuggestionsStream(
     const { provider, model, apiKey } = await resolveConfiguredProvider();
     const isFollowUp = requestType === 'follow-up';
     const basePrompt = isFollowUp
-      ? `Respond in the same language as the user. Apply the request to the previous interview turn when relevant.\nUser follow-up: ${question}\nRelevant resume, job and previous-turn context: ${context || 'none'}`
-      : `Answer the interviewer question directly in the same language, using the relevant resume, job and previous-turn context.\nInterviewer question: ${question}\nRelevant resume, job and previous-turn context: ${context || 'none'}`;
+      ? `Respond in the same language as the user. Apply the request to recent interview turns when relevant.\nUser follow-up: ${question}\nRelevant resume, job and recent interview turns: ${context || 'none'}`
+      : `Answer the interviewer question directly in the same language, using the relevant resume, job and recent interview turns.\nInterviewer question: ${question}\nRelevant resume, job and recent interview turns: ${context || 'none'}`;
     const prompt = options.continuationText
       ? `${basePrompt}\n\nThe previous answer was cut off by an output limit. Continue exactly where it stopped. Do not restart, repeat, summarize, add a new heading, or mention that you are continuing. Finish the answer with a complete final sentence.\nPartial answer so far:\n${options.continuationText.slice(-8_000)}`
       : basePrompt;

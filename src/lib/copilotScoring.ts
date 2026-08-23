@@ -1,11 +1,23 @@
 import { generateStructuredJson } from './llm'
 import { clampScore } from './mockInterviewState'
+import { textSimilarity } from './copilotText'
+import { isMinimumVoiceAnswer } from './mockInterviewVoiceEndpoint'
 import type { CopilotMessage } from './copilotSessionState'
 
 export interface CopilotQaPair {
   question: string
   answer: string
 }
+
+export interface CopilotTurn {
+  question: string
+  candidateSaid: string
+  suggestedAnswer: string
+}
+
+export const RECENT_TURNS_LIMIT = 3
+export const RECENT_TURNS_MAX_CHARS = 2_000
+export const UNUSED_SUGGESTION_SIMILARITY = 0.68
 
 export interface CopilotSessionScore {
   overallScore: number
@@ -27,34 +39,126 @@ function stringArray(value: unknown): string[] {
     : []
 }
 
-/** Pair each interviewer question with following microphone answers. */
-export function buildCopilotQaPairs(messages: CopilotMessage[]): CopilotQaPair[] {
-  const pairs: CopilotQaPair[] = []
-  let question = ''
-  let answers: string[] = []
+function flushTurn(
+  turns: CopilotTurn[],
+  question: string,
+  candidateParts: string[],
+  suggestedAnswer: string,
+): void {
+  if (!question) return
+  turns.push({
+    question,
+    candidateSaid: candidateParts.join(' ').trim(),
+    suggestedAnswer: suggestedAnswer.trim(),
+  })
+}
 
-  const flush = () => {
-    if (!question || answers.length === 0) {
-      answers = []
-      return
-    }
-    pairs.push({ question, answer: answers.join(' ').trim() })
-    answers = []
-  }
+/** Group interviewer questions with later microphone answers and completed AI suggestions. */
+export function collectCopilotTurns(messages: CopilotMessage[]): CopilotTurn[] {
+  const turns: CopilotTurn[] = []
+  let question = ''
+  let candidateParts: string[] = []
+  let suggestedAnswer = ''
 
   for (const message of messages) {
     if (message.role === 'interviewer') {
-      flush()
+      flushTurn(turns, question, candidateParts, suggestedAnswer)
       question = message.text.trim()
-      answers = []
+      candidateParts = []
+      suggestedAnswer = ''
       continue
     }
+    if (!question) continue
     if (message.role === 'me' && message.source === 'microphone-stt' && message.text.trim()) {
-      answers.push(message.text.trim())
+      candidateParts.push(message.text.trim())
+      continue
+    }
+    if (message.role === 'assistant' && message.source === 'llm' && message.text.trim()) {
+      suggestedAnswer = message.text.trim()
     }
   }
-  flush()
-  return pairs
+  flushTurn(turns, question, candidateParts, suggestedAnswer)
+  return turns
+}
+
+/** Pair each interviewer question with following microphone answers. */
+export function buildCopilotQaPairs(messages: CopilotMessage[]): CopilotQaPair[] {
+  return collectCopilotTurns(messages)
+    .filter((turn) => turn.candidateSaid)
+    .map((turn) => ({ question: turn.question, answer: turn.candidateSaid }))
+}
+
+function usedSuggestedAnswer(said: string, suggested: string): boolean {
+  if (!said || !suggested) return false
+  return textSimilarity(said, suggested) >= UNUSED_SUGGESTION_SIMILARITY
+}
+
+function usableCandidateSaid(text: string): string {
+  const trimmed = text.trim()
+  return isMinimumVoiceAnswer(trimmed) ? trimmed : ''
+}
+
+function formatTurn(turn: CopilotTurn): string {
+  const said = usableCandidateSaid(turn.candidateSaid)
+  const lines = [`Q: ${turn.question}`]
+  if (said) {
+    lines.push(`Candidate said: ${said}`)
+    if (turn.suggestedAnswer && !usedSuggestedAnswer(said, turn.suggestedAnswer)) {
+      lines.push(`Suggested but not used: ${turn.suggestedAnswer}`)
+    }
+  } else if (turn.suggestedAnswer) {
+    lines.push(`Suggested answer: ${turn.suggestedAnswer}`)
+  }
+  return lines.join('\n')
+}
+
+function trimOldestSaid(text: string, overflow: number): string {
+  if (overflow <= 0) return text
+  const keep = Math.max(0, text.length - overflow)
+  if (keep <= 0) return ''
+  const sliced = text.slice(-keep)
+  const cut = sliced.search(/\s/)
+  return (cut >= 0 ? sliced.slice(cut + 1) : sliced).trim()
+}
+
+/** Keep the newest 2-3 turns, prefer spoken answers, and stay within the context budget. */
+export function buildRecentTurnsContext(
+  turns: CopilotTurn[],
+  currentQuestion = '',
+  limit = RECENT_TURNS_LIMIT,
+  maxChars = RECENT_TURNS_MAX_CHARS,
+): string {
+  const normalizedCurrent = currentQuestion.trim()
+  const history = normalizedCurrent && turns.length > 0 && turns[turns.length - 1].question === normalizedCurrent
+    ? turns.slice(0, -1)
+    : turns
+  const recent = history.filter((turn) => usableCandidateSaid(turn.candidateSaid) || turn.suggestedAnswer).slice(-limit)
+  if (recent.length === 0) return ''
+
+  const render = (items: CopilotTurn[]) => items.map(formatTurn).join('\n\n')
+  let selected = recent
+  while (selected.length > 1 && render(selected).length > maxChars) {
+    selected = selected.slice(1)
+  }
+
+  let block = render(selected)
+  if (block.length <= maxChars) return `Recent turns:\n${block}`
+
+  const newest = selected[selected.length - 1]
+  const said = usableCandidateSaid(newest.candidateSaid)
+  let overflowTurn = newest
+  if (said && newest.suggestedAnswer && !usedSuggestedAnswer(said, newest.suggestedAnswer)) {
+    overflowTurn = { ...newest, suggestedAnswer: '' }
+    block = formatTurn(overflowTurn)
+    if (block.length <= maxChars) return `Recent turns:\n${block}`
+  }
+  if (said) {
+    const overflow = formatTurn(overflowTurn).length - maxChars
+    const trimmedSaid = trimOldestSaid(overflowTurn.candidateSaid, overflow) || overflowTurn.candidateSaid.slice(-Math.max(1, maxChars - overflowTurn.question.length))
+    block = formatTurn({ ...overflowTurn, candidateSaid: trimmedSaid })
+  }
+  if (block.length > maxChars) block = block.slice(-maxChars).trim()
+  return `Recent turns:\n${block}`
 }
 
 export async function scoreCopilotSession(
