@@ -24,15 +24,31 @@ import { createCopilotInterviewRecord, type SavedRecording } from './copilotArch
 import { scoreCopilotSession, type CopilotSessionScore } from './copilotScoring'
 import {
   getInterviewerCommitDelay,
+  INTERVIEWER_COMMIT_DELAY_MS,
+  INTERVIEWER_CONTINUATION_WINDOW_MS,
+  isLikelyIncompleteInterviewPrompt,
+  isNewInterviewQuestion,
   shouldInterruptForInterviewerContinuation,
 } from './interviewerTurnDetector'
 import { MAX_RECORDING_SECONDS } from './recordingLimits'
-import { joinTranscriptParts } from './mockInterviewVoiceEndpoint'
+import {
+  applyVoiceTranscriptEvent,
+  createVoiceEndpointState,
+  isMinimumVoiceAnswer,
+  SPEECH_FINAL_GRACE_MS,
+  transcriptFromEndpointState,
+  type VoiceEndpointState,
+} from './mockInterviewVoiceEndpoint'
 
 const COMMAND_EVENT = 'copilot-session-command'
 const SNAPSHOT_EVENT = 'copilot-session-snapshot'
 const MAX_AUTO_CONTINUATIONS = 2
 const ECHO_WINDOW_MS = 15_000
+const UTTERANCE_HARD_CAP_MS = INTERVIEWER_CONTINUATION_WINDOW_MS
+const INCOMPLETE_EXTEND_MS = INTERVIEWER_COMMIT_DELAY_MS.incompletePrompt
+const SEAL_DEDUP_MS = 2_000
+const COPILOT_ENDPOINTING_MS = 500
+const COPILOT_UTTERANCE_END_MS = 1_500
 
 export interface AudioCapabilities {
   system_audio_available: boolean
@@ -58,10 +74,14 @@ interface AudioSourceChunk {
   samples: number[]
 }
 
-interface TranscriptState {
-  finalParts: string[]
-  lastFinal: string
-  lastFinalAt: number
+interface CopilotUtteranceState {
+  endpoint: VoiceEndpointState
+  openMessageId: number | null
+  openedAt: number | null
+  lastSealedText: string
+  lastSealedAt: number
+  commitTimer: ReturnType<typeof globalThis.setTimeout> | null
+  hardCapTimer: ReturnType<typeof globalThis.setTimeout> | null
 }
 
 interface ActiveAnswer {
@@ -71,8 +91,16 @@ interface ActiveAnswer {
   startedAt: number
 }
 
-function createTranscriptState(): TranscriptState {
-  return { finalParts: [], lastFinal: '', lastFinalAt: 0 }
+function createUtteranceState(): CopilotUtteranceState {
+  return {
+    endpoint: createVoiceEndpointState(),
+    openMessageId: null,
+    openedAt: null,
+    lastSealedText: '',
+    lastSealedAt: 0,
+    commitTimer: null,
+    hardCapTimer: null,
+  }
 }
 
 function createChatMessage(
@@ -116,9 +144,9 @@ class CopilotSessionHost {
     microphone: null,
   }
   private enabledSources: CopilotAudioSource[] = []
-  private transcripts: Record<CopilotAudioSource, TranscriptState> = {
-    system: createTranscriptState(),
-    microphone: createTranscriptState(),
+  private transcripts: Record<CopilotAudioSource, CopilotUtteranceState> = {
+    system: createUtteranceState(),
+    microphone: createUtteranceState(),
   }
   private unlisteners: UnlistenFn[] = []
   private commandUnlisten: UnlistenFn | null = null
@@ -404,10 +432,7 @@ class CopilotSessionHost {
     this.transition({ type: 'start', sessionId })
     this.sampleRate = 16_000
     this.messageSequence = 0
-    this.transcripts = {
-      system: createTranscriptState(),
-      microphone: createTranscriptState(),
-    }
+    this.resetUtterances()
     this.previousTurn = ''
     this.lastRequestType = 'interviewer-question'
     this.recentAssistantText = ''
@@ -495,6 +520,7 @@ class CopilotSessionHost {
     if (options.reason === 'limit') this.limitReached = true
     const sessionId = this.snapshot.sessionId
     this.clearLimitTimer()
+    if (sessionId != null) this.flushOpenUtterances(sessionId)
     this.clearPendingInterviewerQuestion()
     this.cancelActiveAnswer(sessionId)
     const archiveSnapshot = this.snapshot
@@ -516,6 +542,7 @@ class CopilotSessionHost {
   private async cleanupRuntime(): Promise<void> {
     this.clearLimitTimer()
     this.closeDeepgrams()
+    this.resetUtterances()
     this.enabledSources = []
     this.unlisteners.splice(0).forEach((unlisten) => unlisten())
   }
@@ -551,6 +578,192 @@ class CopilotSessionHost {
     closeDeepgramStream(this.deepgrams.microphone)
     this.deepgrams.system = null
     this.deepgrams.microphone = null
+  }
+
+  private resetUtterances(): void {
+    this.clearUtteranceTimers(this.transcripts.system)
+    this.clearUtteranceTimers(this.transcripts.microphone)
+    this.transcripts = {
+      system: createUtteranceState(),
+      microphone: createUtteranceState(),
+    }
+  }
+
+  private clearUtteranceTimers(utterance: CopilotUtteranceState): void {
+    if (utterance.commitTimer != null) {
+      globalThis.clearTimeout(utterance.commitTimer)
+      utterance.commitTimer = null
+    }
+    if (utterance.hardCapTimer != null) {
+      globalThis.clearTimeout(utterance.hardCapTimer)
+      utterance.hardCapTimer = null
+    }
+  }
+
+  private nextMessageId(sessionId: number): number {
+    return -(sessionId * 1_000_000 + ++this.messageSequence)
+  }
+
+  private utteranceText(utterance: CopilotUtteranceState, includeInterim = false): string {
+    return transcriptFromEndpointState(utterance.endpoint, includeInterim)
+  }
+
+  private upsertUtteranceMessage(
+    sessionId: number,
+    source: CopilotAudioSource,
+    text: string,
+    createdAt: number,
+  ): void {
+    const utterance = this.transcripts[source]
+    if (!text || utterance.openMessageId == null) return
+    this.transition({
+      type: 'message',
+      sessionId,
+      message: createChatMessage(
+        utterance.openMessageId,
+        source === 'system' ? 'interviewer' : 'me',
+        source === 'system' ? 'system-stt' : 'microphone-stt',
+        text,
+        createdAt,
+      ),
+    })
+  }
+
+  private ensureOpenUtterance(sessionId: number, source: CopilotAudioSource, now: number): CopilotUtteranceState {
+    const utterance = this.transcripts[source]
+    if (utterance.openMessageId == null) {
+      utterance.openMessageId = this.nextMessageId(sessionId)
+      utterance.openedAt = now
+    }
+    if (utterance.hardCapTimer == null) {
+      const remaining = Math.max(0, UTTERANCE_HARD_CAP_MS - (now - (utterance.openedAt ?? now)))
+      utterance.hardCapTimer = globalThis.setTimeout(() => {
+        utterance.hardCapTimer = null
+        this.trySeal(sessionId, source, 'speech-final', true)
+      }, remaining)
+      ;(utterance.hardCapTimer as { unref?: () => void }).unref?.()
+    }
+    return utterance
+  }
+
+  private cancelDeferredSeal(utterance: CopilotUtteranceState): void {
+    if (utterance.commitTimer == null) return
+    globalThis.clearTimeout(utterance.commitTimer)
+    utterance.commitTimer = null
+  }
+
+  private scheduleSeal(
+    sessionId: number,
+    source: CopilotAudioSource,
+    boundary: TranscriptBoundary,
+    delayMs: number,
+  ): void {
+    const utterance = this.transcripts[source]
+    this.cancelDeferredSeal(utterance)
+    utterance.commitTimer = globalThis.setTimeout(() => {
+      utterance.commitTimer = null
+      this.trySeal(sessionId, source, boundary)
+    }, delayMs)
+    ;(utterance.commitTimer as { unref?: () => void }).unref?.()
+  }
+
+  private trySeal(
+    sessionId: number,
+    source: CopilotAudioSource,
+    boundary: TranscriptBoundary,
+    force = false,
+  ): void {
+    if (!this.isCurrent(sessionId)) return
+    const utterance = this.transcripts[source]
+    const text = this.utteranceText(utterance)
+    if (!text || !isMinimumVoiceAnswer(text)) return
+
+    const now = Date.now()
+    if (text === utterance.lastSealedText && now - utterance.lastSealedAt < SEAL_DEDUP_MS) {
+      this.resetOpenUtterance(utterance)
+      return
+    }
+    if (source === 'system' && this.isLikelyEcho(text, now)) {
+      this.resetOpenUtterance(utterance)
+      return
+    }
+
+    const openedAt = utterance.openedAt ?? now
+    const withinHardCap = now - openedAt < UTTERANCE_HARD_CAP_MS
+    if (
+      !force
+      && !isNewInterviewQuestion(text)
+      && isLikelyIncompleteInterviewPrompt(text)
+      && withinHardCap
+    ) {
+      this.scheduleSeal(sessionId, source, boundary, INCOMPLETE_EXTEND_MS)
+      return
+    }
+
+    this.sealUtterance(sessionId, source, text, boundary, now)
+  }
+
+  private sealUtterance(
+    sessionId: number,
+    source: CopilotAudioSource,
+    text: string,
+    boundary: TranscriptBoundary,
+    now: number,
+  ): void {
+    const utterance = this.transcripts[source]
+    this.ensureOpenUtterance(sessionId, source, utterance.openedAt ?? now)
+    this.upsertUtteranceMessage(sessionId, source, text, utterance.openedAt ?? now)
+    if (source === 'microphone') {
+      this.recentMicrophoneText = text
+      this.recentMicrophoneAt = now
+    }
+    utterance.lastSealedText = text
+    utterance.lastSealedAt = now
+    this.resetOpenUtterance(utterance)
+    if (source === 'system') this.scheduleInterviewerAnswer(sessionId, text, boundary)
+  }
+
+  private resetOpenUtterance(utterance: CopilotUtteranceState): void {
+    this.clearUtteranceTimers(utterance)
+    utterance.endpoint = createVoiceEndpointState()
+    utterance.openMessageId = null
+    utterance.openedAt = null
+  }
+
+  private handleTranscriptEvent(
+    sessionId: number,
+    source: CopilotAudioSource,
+    event: { text: string; isFinal: boolean; boundary: TranscriptBoundary },
+  ): void {
+    if (!this.isCurrent(sessionId)) return
+    const now = Date.now()
+    const utterance = this.transcripts[source]
+    const update = applyVoiceTranscriptEvent(utterance.endpoint, event, now)
+    utterance.endpoint = update.state
+    const preview = this.utteranceText(utterance, true)
+    if (preview) {
+      this.ensureOpenUtterance(sessionId, source, utterance.openedAt ?? now)
+      if (source === 'microphone') {
+        this.upsertUtteranceMessage(sessionId, source, preview, utterance.openedAt ?? now)
+      }
+    }
+    if (update.activity) this.cancelDeferredSeal(utterance)
+
+    if (update.endpoint === 'utterance-end') {
+      this.trySeal(sessionId, source, 'utterance-end')
+      return
+    }
+    if (update.endpoint === 'speech-final' && isMinimumVoiceAnswer(this.utteranceText(utterance))) {
+      this.scheduleSeal(sessionId, source, 'speech-final', SPEECH_FINAL_GRACE_MS)
+    }
+  }
+
+  private flushOpenUtterances(sessionId: number): void {
+    for (const source of ['system', 'microphone'] as const) {
+      const utterance = this.transcripts[source]
+      if (utterance.openMessageId == null) continue
+      this.trySeal(sessionId, source, 'speech-final', true)
+    }
   }
 
   private async installAudioListeners(sessionId: number): Promise<void> {
@@ -612,51 +825,10 @@ class CopilotSessionHost {
     sampleRate: number,
   ): Promise<void> {
     closeDeepgramStream(this.deepgrams[source])
-    this.transcripts[source] = createTranscriptState()
+    this.clearUtteranceTimers(this.transcripts[source])
+    this.transcripts[source] = createUtteranceState()
     this.deepgrams[source] = await startDeepgramStream(
-      (event) => {
-        if (!this.isCurrent(sessionId)) return
-        const transcript = this.transcripts[source]
-        if (
-          event.isFinal
-          && event.text
-          && transcript.finalParts[transcript.finalParts.length - 1] !== event.text
-        ) {
-          transcript.finalParts.push(event.text)
-        }
-        if (event.boundary !== 'speech-final' && event.boundary !== 'utterance-end') return
-        const text = joinTranscriptParts(transcript.finalParts) || event.text.trim()
-        transcript.finalParts = []
-        if (!text) {
-          if (source === 'system' && event.boundary === 'utterance-end') {
-            this.scheduleInterviewerAnswer(sessionId, '', event.boundary)
-          }
-          return
-        }
-        const now = Date.now()
-        if (text === transcript.lastFinal && now - transcript.lastFinalAt < 2_000) return
-        transcript.lastFinal = text
-        transcript.lastFinalAt = now
-        if (source === 'microphone') {
-          this.recentMicrophoneText = text
-          this.recentMicrophoneAt = now
-        } else if (this.isLikelyEcho(text, now)) {
-          return
-        }
-        this.transition({
-          type: 'message',
-          sessionId,
-          message: createChatMessage(
-            -(sessionId * 1_000_000 + ++this.messageSequence),
-            source === 'system' ? 'interviewer' : 'me',
-            source === 'system' ? 'system-stt' : 'microphone-stt',
-            text,
-          ),
-        })
-        if (source === 'system') {
-          this.scheduleInterviewerAnswer(sessionId, text, event.boundary)
-        }
-      },
+      (event) => this.handleTranscriptEvent(sessionId, source, event),
       (error) => {
         // Reconnect handles transient socket failures; only surface non-socket parse issues.
         console.warn('[Copilot] Deepgram stream warning', error)
@@ -668,6 +840,10 @@ class CopilotSessionHost {
           return
         }
         this.deepgrams[source] = socket
+      },
+      {
+        endpointingMs: COPILOT_ENDPOINTING_MS,
+        utteranceEndMs: COPILOT_UTTERANCE_END_MS,
       },
     )
   }
@@ -823,6 +999,7 @@ class CopilotSessionHost {
   private async fail(sessionId: number, error: string): Promise<void> {
     if (!this.isCurrent(sessionId)) return
     this.clearLimitTimer()
+    this.flushOpenUtterances(sessionId)
     this.clearPendingInterviewerQuestion()
     this.cancelActiveAnswer(sessionId)
     const archiveSnapshot = this.snapshot

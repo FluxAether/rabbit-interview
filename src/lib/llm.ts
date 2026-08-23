@@ -439,6 +439,7 @@ function attachDeepgramHandlers(ws: DeepgramStream) {
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
+      if (data.type === 'UtteranceEnd' && data.last_word_end === -1) return;
       const transcript = data.channel?.alternatives?.[0]?.transcript?.trim();
       const boundary: TranscriptBoundary = data.type === 'UtteranceEnd'
         ? 'utterance-end'

@@ -165,12 +165,15 @@ check(
 )
 check(
   llm.includes("'speech-final' | 'utterance-end'")
-    && session.includes("event.boundary === 'utterance-end'"),
+    && session.includes("update.endpoint === 'utterance-end'"),
   'Deepgram speech-final and utterance-end signals remain distinct through turn detection',
 )
 check(
-  session.includes("event.boundary !== 'speech-final' && event.boundary !== 'utterance-end'"),
-  'Copilot accumulates Gemini inputTranscription chunks until an utterance boundary',
+  session.includes('applyVoiceTranscriptEvent')
+    && session.includes('openMessageId')
+    && session.includes('trySeal')
+    && llm.includes("data.last_word_end === -1"),
+  'Copilot keeps one open utterance until grace, utterance-end, or the hard cap',
 )
 check(session.includes('MAX_AUTO_CONTINUATIONS') && session.includes('continuationAttempt < MAX_AUTO_CONTINUATIONS'), 'token-limited answers are automatically continued with a bounded retry count')
 check(session.includes('textSimilarity') && session.includes('isLikelyEcho'), 'system-audio echo is filtered against recent AI and microphone text')
@@ -855,6 +858,11 @@ check(
     && deepgramEvents[1]?.boundary === 'utterance-end',
   'Deepgram boundary events preserve endpoint confidence instead of collapsing to one boolean',
 )
+latestSocket?.onmessage?.({ data: JSON.stringify({ type: 'UtteranceEnd', last_word_end: -1 }) })
+check(
+  deepgramEvents.length === 2,
+  'Deepgram ignores UtteranceEnd events that were already finalized',
+)
 latestSocket.bufferedAmount = 512 * 1024
 sendAudioChunk(latestSocket, new Float32Array([0.5]))
 check(latestSocket.sent.length === 0, 'Deepgram audio is dropped when websocket buffering reaches the memory limit')
@@ -975,9 +983,26 @@ binaryFrameGemini.api.closeDeepgramStream(binaryFrameSocket)
 
 const geminiMessages = []
 let copilotOnTranscript = () => {}
-const { joinTranscriptParts: joinCopilotTranscriptParts } = loadTypeScriptModule(
+const copilotEndpoint = loadTypeScriptModule(
   'src/lib/mockInterviewVoiceEndpoint.ts',
-  ['joinTranscriptParts'],
+  [
+    'applyVoiceTranscriptEvent',
+    'createVoiceEndpointState',
+    'isMinimumVoiceAnswer',
+    'SPEECH_FINAL_GRACE_MS',
+    'transcriptFromEndpointState',
+  ],
+)
+const copilotTurnDetector = loadTypeScriptModule(
+  'src/lib/interviewerTurnDetector.ts',
+  [
+    'getInterviewerCommitDelay',
+    'INTERVIEWER_COMMIT_DELAY_MS',
+    'INTERVIEWER_CONTINUATION_WINDOW_MS',
+    'isLikelyIncompleteInterviewPrompt',
+    'isNewInterviewQuestion',
+    'shouldInterruptForInterviewerContinuation',
+  ],
 )
 const { CopilotSessionHost } = loadTypeScriptModule(
   'src/lib/copilotSession.ts',
@@ -985,7 +1010,9 @@ const { CopilotSessionHost } = loadTypeScriptModule(
   {
     createInitialSnapshot: () => ({ sessionId: 7 }),
     closeDeepgramStream: () => {},
-    joinTranscriptParts: joinCopilotTranscriptParts,
+    ...copilotEndpoint,
+    ...copilotTurnDetector,
+    textSimilarity,
     startDeepgramStream: async (onTranscript) => {
       copilotOnTranscript = onTranscript
       return {}
@@ -995,6 +1022,11 @@ const { CopilotSessionHost } = loadTypeScriptModule(
 const transcriptHost = new CopilotSessionHost()
 transcriptHost.transition = (action) => {
   if (action.type === 'message') geminiMessages.push(action.message)
+}
+const uniqueMessages = (messages) => {
+  const latest = new Map()
+  for (const message of messages) latest.set(message.id, message)
+  return [...latest.values()]
 }
 await transcriptHost.startDeepgram(7, 'microphone', 16_000)
 
@@ -1067,18 +1099,18 @@ geminiSocket.receive({ serverContent: { inputTranscription: { text: '到达' } }
 check(
   geminiEvents.map((event) => event.boundary).join(',') === 'final,final'
     && gemini.timers.pending(1_500).length === 1
-    && geminiMessages.length === earlyTurnMessageStart,
+    && uniqueMessages(geminiMessages).length === uniqueMessages(geminiMessages.slice(0, earlyTurnMessageStart)).length + 1,
   'an early turnComplete does not split later source-transcription chunks',
 )
 await gemini.timers.runTimeout(1_500)
-const earlyTurnMessages = geminiMessages.slice(earlyTurnMessageStart)
+const earlyTurnMessages = uniqueMessages(geminiMessages).slice(uniqueMessages(geminiMessages.slice(0, earlyTurnMessageStart)).length)
 check(
   geminiEvents.map((event) => event.boundary).join(',') === 'final,final,utterance-end'
     && earlyTurnMessages.length === 1
     && earlyTurnMessages[0].text === '乱序到达',
   'late transcription after turnComplete becomes one combined chat message',
 )
-const messageStart = geminiMessages.length
+const messageStartCount = uniqueMessages(geminiMessages).length
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '请介绍一下' } } })
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '你自己' } } })
 check(
@@ -1086,8 +1118,10 @@ check(
     && geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'final,final',
   'Gemini source transcription resets one silence timer while chunks keep arriving',
 )
+const openGeminiMessage = uniqueMessages(geminiMessages).at(-1)
 check(
-  geminiMessages.length === messageStart,
+  uniqueMessages(geminiMessages).length === messageStartCount + 1
+    && openGeminiMessage.text === '请介绍一下你自己',
   'Gemini source-transcription chunks do not become separate chat messages',
 )
 await gemini.timers.runTimeout(1_500)
@@ -1095,9 +1129,10 @@ check(
   geminiEvents.slice(-3).map((event) => event.boundary).join(',') === 'final,final,utterance-end',
   'Gemini emits one utterance boundary for multiple source-transcription chunks',
 )
-const chunkedTurnMessages = geminiMessages.slice(messageStart)
 check(
-  chunkedTurnMessages.length === 1 && chunkedTurnMessages[0].text === '请介绍一下你自己',
+  uniqueMessages(geminiMessages).length === messageStartCount + 1
+    && uniqueMessages(geminiMessages).at(-1).id === openGeminiMessage.id
+    && uniqueMessages(geminiMessages).at(-1).text === '请介绍一下你自己',
   'one Gemini utterance becomes one combined chat message without Chinese chunk spacing',
 )
 geminiSocket.receive({ serverContent: { turnComplete: true } })
@@ -1107,18 +1142,18 @@ check(
   'a late turnComplete cannot prematurely end the next Gemini transcription',
 )
 await gemini.timers.runTimeout(1_500)
-const secondMessageStart = geminiMessages.length
+const lateQuestionCount = uniqueMessages(geminiMessages).length
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '第二个' } } })
 geminiSocket.receive({ serverContent: { turnComplete: true } })
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '问题' } } })
 check(
   geminiEvents.slice(-2).map((event) => event.boundary).join(',') === 'final,final'
     && gemini.timers.pending(1_500).length === 1
-    && geminiMessages.length === secondMessageStart,
+    && uniqueMessages(geminiMessages).length === lateQuestionCount + 1,
   'turnComplete between source-transcription chunks does not end the utterance',
 )
 await gemini.timers.runTimeout(1_500)
-const secondTurnMessages = geminiMessages.slice(secondMessageStart)
+const secondTurnMessages = uniqueMessages(geminiMessages).slice(lateQuestionCount)
 check(
   secondTurnMessages.length === 1
     && secondTurnMessages[0].text === '第二个问题'
@@ -1206,6 +1241,92 @@ const clientCloseCommitted = await reconnectGemini.timers.runTimeout(1_500)
 check(
   !clientCloseRetried && !clientCloseCommitted && fakeSockets.length === socketsBeforeClientClose,
   'client-initiated Gemini close cancels pending transcription and does not reconnect',
+)
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+const deepgramHostMessages = []
+const deepgramHostAnswers = []
+let deepgramHostOnTranscript = () => {}
+const { CopilotSessionHost: DeepgramCopilotHost } = loadTypeScriptModule(
+  'src/lib/copilotSession.ts',
+  ['CopilotSessionHost'],
+  {
+    createInitialSnapshot: () => ({ sessionId: 8 }),
+    closeDeepgramStream: () => {},
+    ...copilotEndpoint,
+    ...copilotTurnDetector,
+    textSimilarity,
+    startDeepgramStream: async (onTranscript) => {
+      deepgramHostOnTranscript = onTranscript
+      return {}
+    },
+  },
+)
+const deepgramHost = new DeepgramCopilotHost()
+deepgramHost.transition = (action) => {
+  if (action.type === 'message') deepgramHostMessages.push(action.message)
+}
+deepgramHost.scheduleInterviewerAnswer = (_sessionId, text) => {
+  deepgramHostAnswers.push(text)
+}
+await deepgramHost.startDeepgram(8, 'system', 16_000)
+
+deepgramHostOnTranscript({ text: '请介绍一下你上一个项目', isFinal: true, boundary: 'speech-final' })
+deepgramHostOnTranscript({ text: '尤其是你负责的模块', isFinal: true, boundary: 'final' })
+deepgramHostOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+check(
+  uniqueMessages(deepgramHostMessages).length === 1
+    && uniqueMessages(deepgramHostMessages)[0].text === '请介绍一下你上一个项目尤其是你负责的模块'
+    && deepgramHostAnswers.length === 1,
+  'speech-final plus a continuation stays one interviewer message until utterance-end',
+)
+
+const incompleteStart = uniqueMessages(deepgramHostMessages).length
+deepgramHostOnTranscript({ text: '你怎么看，以及', isFinal: true, boundary: 'speech-final' })
+await wait(200)
+check(
+  uniqueMessages(deepgramHostMessages).length === incompleteStart
+    && deepgramHostAnswers.length === 1,
+  'an incomplete speech-final does not create a second interviewer message',
+)
+deepgramHostOnTranscript({ text: '这个方案的风险？', isFinal: true, boundary: 'final' })
+deepgramHostOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+check(
+  uniqueMessages(deepgramHostMessages).length === incompleteStart + 1
+    && uniqueMessages(deepgramHostMessages).at(-1).text === '你怎么看，以及这个方案的风险？'
+    && deepgramHostAnswers.at(-1) === '你怎么看，以及这个方案的风险？',
+  'an incomplete prompt waits and seals as one question',
+)
+
+deepgramHostOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+check(
+  uniqueMessages(deepgramHostMessages).length === incompleteStart + 1,
+  'empty utterance-end does not create a chat message',
+)
+
+const nextQuestionStart = uniqueMessages(deepgramHostMessages).length
+deepgramHostOnTranscript({ text: '下一个问题，为什么离开上一家公司？', isFinal: true, boundary: 'speech-final' })
+deepgramHostOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+check(
+  uniqueMessages(deepgramHostMessages).length === nextQuestionStart + 1
+    && uniqueMessages(deepgramHostMessages).at(-1).text === '下一个问题，为什么离开上一家公司？',
+  'an explicit next question starts a new interviewer message',
+)
+
+await deepgramHost.startDeepgram(8, 'microphone', 16_000)
+const micStart = uniqueMessages(deepgramHostMessages).length
+deepgramHostOnTranscript({ text: '我最近负责支付', isFinal: true, boundary: 'speech-final' })
+deepgramHostOnTranscript({ text: '平台和账务系统', isFinal: true, boundary: 'final' })
+deepgramHostOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+const micMessages = uniqueMessages(deepgramHostMessages).slice(micStart)
+check(
+  micMessages.length === 1
+    && micMessages[0].role === 'me'
+    && micMessages[0].text === '我最近负责支付平台和账务系统',
+  'microphone breath pauses stay one candidate message',
 )
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)
