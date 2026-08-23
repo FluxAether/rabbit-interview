@@ -41,7 +41,7 @@ export default function StealthCopilot() {
   const loadDevices = async (preferredDevice = selectedDevice) => {
     const values: string[] = await invoke<string[]>("list_audio_devices").catch(() => [])
     setDevices(values)
-    setSelectedDevice(values.includes(preferredDevice) ? preferredDevice : values[0] || "")
+    setSelectedDevice(values.includes(preferredDevice) ? preferredDevice : preferredDevice || values[0] || "")
   }
 
   useEffect(() => {
@@ -57,7 +57,7 @@ export default function StealthCopilot() {
       loadAppSettings().then((settings) => {
         setUseSystemAudio(settings.useSystemAudio ?? true)
         setUseMicrophone(settings.useMicWithSystem ?? true)
-        return loadDevices(settings.micDevice || "")
+        setSelectedDevice(settings.micDevice || "")
       }),
     ]).then(() => {
       if (!cancelled) setAudioReady(true)
@@ -118,7 +118,13 @@ export default function StealthCopilot() {
           <div className="relative flex shrink-0 items-center gap-2">
             <button
               type="button"
-              onClick={() => setAudioSettingsOpen((open) => !open)}
+              onClick={() => {
+                setAudioSettingsOpen((open) => {
+                  const next = !open
+                  if (next) void loadDevices()
+                  return next
+                })
+              }}
               className="flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] hover:bg-[var(--bg-hover)]"
               aria-expanded={audioSettingsOpen}
               aria-controls="copilot-audio-settings"

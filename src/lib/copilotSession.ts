@@ -3,6 +3,7 @@ import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import {
   closeDeepgramStream,
+  ensureAppleSttSources,
   generateSuggestionsStream,
   sendAudioChunk,
   startDeepgramStream,
@@ -348,13 +349,47 @@ class CopilotSessionHost {
     }
   }
 
+  private isMicrophoneEcho(text: string, other: string): boolean {
+    if (!other) return false
+    const left = text.replace(/\s/g, '')
+    const right = other.replace(/\s/g, '')
+    if (!left || !right) return false
+    if (Math.min(left.length, right.length) / Math.max(left.length, right.length) < 0.5) return false
+    return textSimilarity(text, other) >= 0.68
+  }
+
   private isLikelyEcho(text: string, now: number): boolean {
+    if (
+      this.isMicrophoneEcho(text, this.utteranceText(this.transcripts.microphone, true))
+      || (now - this.recentMicrophoneAt <= ECHO_WINDOW_MS
+        && this.isMicrophoneEcho(text, this.recentMicrophoneText))
+    ) return true
     if (text.replace(/\s/g, '').length < 12) return false
-    const assistantEcho = now - this.recentAssistantAt <= ECHO_WINDOW_MS
+    return now - this.recentAssistantAt <= ECHO_WINDOW_MS
       && textSimilarity(text, this.recentAssistantText) >= 0.68
-    const microphoneEcho = now - this.recentMicrophoneAt <= ECHO_WINDOW_MS
-      && textSimilarity(text, this.recentMicrophoneText) >= 0.68
-    return assistantEcho || microphoneEcho
+  }
+
+  private dropSystemEcho(sessionId: number, text: string, now: number): void {
+    const messages = this.snapshot.messages
+    if (!messages?.length) return
+    const message = [...messages].reverse().find((item) => (
+      item.role === 'interviewer'
+      && item.source === 'system-stt'
+      && now - item.createdAt <= ECHO_WINDOW_MS
+      && this.isMicrophoneEcho(text, item.text)
+    ))
+    if (!message) return
+    this.transition({ type: 'drop-message', sessionId, messageId: message.id })
+    if (this.pendingInterviewerQuestion === message.text) {
+      this.clearPendingInterviewerQuestion()
+    } else if (this.pendingInterviewerQuestion.endsWith(message.text)) {
+      this.pendingInterviewerQuestion = this.pendingInterviewerQuestion
+        .slice(0, -message.text.length)
+        .trim()
+    }
+    if (this.activeAnswer && this.isMicrophoneEcho(this.activeAnswer.question, message.text)) {
+      this.cancelActiveAnswer(sessionId)
+    }
   }
 
   private async publish(force = false): Promise<void> {
@@ -716,6 +751,7 @@ class CopilotSessionHost {
     if (source === 'microphone') {
       this.recentMicrophoneText = text
       this.recentMicrophoneAt = now
+      this.dropSystemEcho(sessionId, text, now)
     }
     utterance.lastSealedText = text
     utterance.lastSealedAt = now
@@ -745,6 +781,7 @@ class CopilotSessionHost {
       this.ensureOpenUtterance(sessionId, source, utterance.openedAt ?? now)
       if (source === 'microphone') {
         this.upsertUtteranceMessage(sessionId, source, preview, utterance.openedAt ?? now)
+        this.dropSystemEcho(sessionId, preview, now)
       }
     }
     if (update.activity) this.cancelDeferredSeal(utterance)
@@ -817,6 +854,9 @@ class CopilotSessionHost {
   ): Promise<void> {
     this.enabledSources = sources
     await Promise.all(sources.map((source) => this.startDeepgram(sessionId, source, sampleRate)))
+    if (useAppStore.getState().settings?.sttProvider === 'apple') {
+      await ensureAppleSttSources(sources)
+    }
   }
 
   private async startDeepgram(
@@ -844,6 +884,7 @@ class CopilotSessionHost {
       {
         endpointingMs: COPILOT_ENDPOINTING_MS,
         utteranceEndMs: COPILOT_UTTERANCE_END_MS,
+        source,
       },
     )
   }

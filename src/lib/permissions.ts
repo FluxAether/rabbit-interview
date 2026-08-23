@@ -8,11 +8,7 @@ export async function openMicrophoneSettings(): Promise<void> {
 }
 
 export async function tryRequestMicrophone(): Promise<boolean> {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    stream.getTracks().forEach((t) => t.stop())
-    return true
-  } catch {
-    return false
-  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  const status = await invoke<string>('request_microphone_permission_command').catch(() => 'denied')
+  return status === 'granted'
 }

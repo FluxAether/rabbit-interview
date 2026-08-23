@@ -56,13 +56,16 @@ const windowBridge = source('src/lib/copilotWindow.ts')
 const rustLib = source('src-tauri/src/lib.rs')
 const rustWindow = source('src-tauri/src/copilot_window.rs')
 const rustAudio = source('src-tauri/src/audio/mod.rs')
+const appleSttSwift = source('src-tauri/native/apple-stt/AppleSttBridge.swift')
+const appleSttRust = source('src-tauri/src/stt/apple.rs')
 const cargo = source('src-tauri/Cargo.toml')
 const defaultCapability = source('src-tauri/capabilities/default.json')
 const tauriConfig = source('src-tauri/tauri.conf.json')
 
 check(session.length > 0, 'single Copilot session host exists')
 check(panel.length > 0 && app.includes('CopilotPanel') && page.includes('CopilotPanel'), 'main and floating views share CopilotPanel')
-check(page.includes('values.includes(preferredDevice) ? preferredDevice : values[0] ||'), 'unavailable saved microphone falls back to an available device')
+check(page.includes('values.includes(preferredDevice) ? preferredDevice : preferredDevice || values[0] ||'), 'saved microphone is kept until a device list is available')
+check(!page.includes('return loadDevices(settings.micDevice'), 'Copilot page load does not enumerate microphones before permission')
 check(!app.includes('startDeepgramStream') && !page.includes('startDeepgramStream'), 'views do not own STT connections')
 check(
   settingsPage.includes('testDeepgramConnection(targetKey)')
@@ -77,6 +80,25 @@ check(
   'STT settings expose Google AI Studio and test its Live API handshake',
 )
 check(
+  settingsPage.includes('APPLE_STT_MODEL')
+    && settingsPage.includes("updateSttConfig('apple'")
+    && settingsPage.includes('get_apple_stt_status')
+    && llm.includes('openAppleSttSocket')
+    && llm.includes('ensureAppleSttSources')
+    && source('src-tauri/Info.plist').includes('NSSpeechRecognitionUsageDescription'),
+  'STT settings expose Apple on-device speech and the shared facade can start it',
+)
+check(
+  appleSttSwift.includes('ingestQueue')
+    && appleSttSwift.includes('ingestQueue.async')
+    && appleSttSwift.includes('prepareToAnalyze')
+    && appleSttSwift.includes('AnalyzerInputConverter')
+    && appleSttRust.includes('if samples.is_empty() || !is_active()')
+    && appleSttSwift.includes('session.inputBuilder.yield')
+    && !appleSttSwift.split('private func ingest')[0].includes('AnalyzerInput(buffer:'),
+  'Apple STT copies audio off the CoreAudio IO thread before AnalyzerInput',
+)
+check(
   (translations.match(/'settings\.stt\.(?:desc|help)': .*Google/g) || []).length >= 3
     && (translations.match(/'settings\.stt\.sourceOnly'/g) || []).length === 3
     && (translations.match(/'settings\.stt\.inputLanguage'/g) || []).length === 3
@@ -86,7 +108,7 @@ check(
   'STT provider guidance covers Google in all locales without claiming Deepgram exclusivity',
 )
 check(
-  settingsStore.includes("export type SttProvider = 'deepgram' | 'gemini'")
+  settingsStore.includes("export type SttProvider = 'deepgram' | 'gemini' | 'apple'")
     && !llm.match(/SUPPORTED_GEMINI_MODELS[^;]+;/s)?.[0].includes('gemini-3.5-live-translate-preview'),
   'Gemini Live Translate is typed as STT-only and is not offered as a regular LLM',
 )
@@ -178,6 +200,14 @@ check(
 check(session.includes('MAX_AUTO_CONTINUATIONS') && session.includes('continuationAttempt < MAX_AUTO_CONTINUATIONS'), 'token-limited answers are automatically continued with a bounded retry count')
 check(session.includes('textSimilarity') && session.includes('isLikelyEcho'), 'system-audio echo is filtered against recent AI and microphone text')
 check(session.includes("text.replace(/\\s/g, '').length < 12"), 'short interviewer acknowledgements are never discarded as echo')
+check(session.includes('isMinimumVoiceAnswer(text)') && session.includes('utteranceText(this.transcripts.microphone, true)'), 'live microphone text can suppress system-audio echoes before they are sealed')
+check(
+  llm.includes('options.source ? [options.source]')
+    && session.includes('source,')
+    && session.includes("type: 'drop-message'")
+    && !llm.includes('stream.__appleSources = sources'),
+  'Apple STT sockets keep one audio source instead of sharing every transcript',
+)
 check(!session.includes('queueMessagePersistence'), 'per-message SQLite persistence queue is gone')
 check(panel.includes('copilot.answerStatus') && panel.includes('copilot.answerNotice'), 'the UI distinguishes generating, continuing, and incomplete answers')
 check(session.includes("type: 'cancel-answer'"), 'interrupted streaming answers are removed instead of remaining as partial chat messages')
@@ -228,6 +258,8 @@ check(!cargo.includes('screencapturekit') && !cargo.includes('macos-system-audio
 check(!rustAudio.includes('start_macos_capture') && !rustAudio.includes('stop_macos_capture'), 'platform-specific ScreenCaptureKit commands are removed')
 check(source('src-tauri/src/audio/audiotee.rs').includes('--sample-rate') && source('src-tauri/src/audio/audiotee.rs').includes('16000'), 'AudioTee adapter is fixed to 16 kHz PCM')
 check(source('src-tauri/Info.plist').includes('NSAudioCaptureUsageDescription') && !source('src-tauri/Info.plist').includes('NSScreenCaptureUsageDescription'), 'macOS declares audio capture rather than screen capture permission')
+check(source('src/lib/permissions.ts').includes("invoke<string>('request_microphone_permission_command'") && rustAudio.includes('request_microphone_permission') && rustAudio.includes('if microphone_permission() !='), 'microphone TCC is requested natively and device listing waits for grant')
+check(tauriConfig.includes('"signingIdentity": "-"'), 'macOS ad-hoc signing keeps a stable bundle identity')
 
 let storedSettings = JSON.stringify({ sttProvider: 'gemini', sttModel: 'not-a-live-model' })
 let savedSettings = ''
@@ -261,6 +293,13 @@ check(
     && DEFAULT_SETTINGS.sttProvider === 'deepgram'
     && DEFAULT_SETTINGS.sttModel === 'nova-3',
   'Google STT selection persists without changing the Deepgram default',
+)
+storedSettings = JSON.stringify({ sttProvider: 'apple', sttModel: 'not-a-speech-model' })
+const normalizedAppleSettings = await loadAppSettings()
+check(
+  normalizedAppleSettings.sttProvider === 'apple'
+    && normalizedAppleSettings.sttModel === 'speech-transcriber',
+  'Apple STT settings normalize to speech-transcriber',
 )
 
 if (sessionState) {
@@ -345,6 +384,15 @@ if (sessionState) {
   check(stopping.phase === 'stopping' && stopping.sessionId === null, 'stop invalidates the active session id immediately')
   check(lateSuggestion === stopping, 'late callbacks are ignored after stop')
   check(interviewerMessage.question === 'Tell me about yourself.', 'system audio transcript becomes the interviewer question')
+  const droppedEcho = reduceCopilotSnapshot(interviewerMessage, {
+    type: 'drop-message',
+    sessionId: 7,
+    messageId: 1,
+  })
+  check(
+    droppedEcho.messages.length === 0 && droppedEcho.question === '',
+    'system-audio echo can be removed from the live chat snapshot',
+  )
   check(assistantMessage?.messages.map((message) => message.role).join(',') === 'interviewer,me,me,assistant', 'chat snapshot preserves interviewer, user, follow-up, and AI roles')
   check(assistantMessage?.messages.map((message) => message.source).join(',') === 'system-stt,microphone-stt,follow-up,llm', 'chat snapshot preserves all four message sources in order')
   check(assistantMessage?.messages.every((message) => typeof message.createdAt === 'number'), 'chat messages always include a send timestamp')
@@ -1008,7 +1056,7 @@ const { CopilotSessionHost } = loadTypeScriptModule(
   'src/lib/copilotSession.ts',
   ['CopilotSessionHost'],
   {
-    createInitialSnapshot: () => ({ sessionId: 7 }),
+    createInitialSnapshot: () => ({ sessionId: 7, messages: [] }),
     closeDeepgramStream: () => {},
     ...copilotEndpoint,
     ...copilotTurnDetector,
@@ -1254,7 +1302,7 @@ const { CopilotSessionHost: DeepgramCopilotHost } = loadTypeScriptModule(
   'src/lib/copilotSession.ts',
   ['CopilotSessionHost'],
   {
-    createInitialSnapshot: () => ({ sessionId: 8 }),
+    createInitialSnapshot: () => ({ sessionId: 8, messages: [] }),
     closeDeepgramStream: () => {},
     ...copilotEndpoint,
     ...copilotTurnDetector,
@@ -1327,6 +1375,124 @@ check(
     && micMessages[0].role === 'me'
     && micMessages[0].text === '我最近负责支付平台和账务系统',
   'microphone breath pauses stay one candidate message',
+)
+
+function createAppleSttHarness() {
+  const listeners = []
+  const invokeCalls = []
+  const api = loadTypeScriptModule(
+    'src/lib/llm.ts',
+    ['startDeepgramStream', 'ensureAppleSttSources', 'closeDeepgramStream'],
+    {
+      loadApiKeys: async () => ({}),
+      getLlmApiKey: async () => null,
+      useAppStore: { getState: () => ({ settings: { sttProvider: 'apple', sttLanguage: 'zh-CN' } }) },
+      listen: async (event, handler) => {
+        if (event === 'stt-transcript') listeners.push(handler)
+        return () => {
+          const index = listeners.indexOf(handler)
+          if (index >= 0) listeners.splice(index, 1)
+        }
+      },
+      invoke: async (cmd, args) => {
+        invokeCalls.push({ cmd, args })
+      },
+    },
+  )
+  return {
+    api,
+    invokeCalls,
+    emit(payload) {
+      for (const handler of listeners) handler({ payload })
+    },
+  }
+}
+
+const apple = createAppleSttHarness()
+const appleSystemEvents = []
+const appleMicEvents = []
+const appleSystemSocket = await apple.api.startDeepgramStream(
+  (event) => appleSystemEvents.push(event),
+  undefined,
+  16_000,
+  undefined,
+  { source: 'system' },
+)
+const appleMicSocket = await apple.api.startDeepgramStream(
+  (event) => appleMicEvents.push(event),
+  undefined,
+  16_000,
+  undefined,
+  { source: 'microphone' },
+)
+await apple.api.ensureAppleSttSources(['system', 'microphone'])
+apple.emit({ source: 'microphone', text: '到什么呃 5:10什么', is_final: true, boundary: 'final' })
+apple.emit({ source: 'system', text: '一个血脉真灵而已，居然如此强', is_final: true, boundary: 'final' })
+check(
+  apple.invokeCalls.some((call) => call.cmd === 'start_apple_stt')
+    && appleSystemEvents.map((event) => event.text).join('|') === '一个血脉真灵而已，居然如此强'
+    && appleMicEvents.map((event) => event.text).join('|') === '到什么呃 5:10什么',
+  'Apple STT routes each transcript to only the matching audio source',
+)
+apple.api.closeDeepgramStream(appleSystemSocket)
+apple.api.closeDeepgramStream(appleMicSocket)
+
+const echoMessages = []
+const echoAnswers = []
+const echoTranscripts = {}
+const { CopilotSessionHost: EchoCopilotHost } = loadTypeScriptModule(
+  'src/lib/copilotSession.ts',
+  ['CopilotSessionHost'],
+  {
+    createInitialSnapshot: () => ({ sessionId: 9, messages: [] }),
+    closeDeepgramStream: () => {},
+    ...copilotEndpoint,
+    ...copilotTurnDetector,
+    textSimilarity,
+    startDeepgramStream: async (onTranscript, _onError, _sampleRate, _onSocketChange, options) => {
+      echoTranscripts[options?.source || Object.keys(echoTranscripts).length] = onTranscript
+      return {}
+    },
+  },
+)
+const echoHost = new EchoCopilotHost()
+echoHost.transition = (action) => {
+  if (action.type === 'message') echoMessages.push(action.message)
+  if (action.type === 'drop-message') {
+    const index = echoMessages.findIndex((message) => message.id === action.messageId)
+    if (index >= 0) echoMessages.splice(index, 1)
+  }
+  echoHost.snapshot = { ...echoHost.snapshot, messages: uniqueMessages(echoMessages) }
+}
+echoHost.scheduleInterviewerAnswer = (_sessionId, text) => {
+  echoAnswers.push(text)
+}
+await echoHost.startDeepgram(9, 'system', 16_000)
+await echoHost.startDeepgram(9, 'microphone', 16_000)
+const echoSystem = echoTranscripts.system || echoTranscripts[0]
+const echoMic = echoTranscripts.microphone || echoTranscripts[1]
+
+echoSystem({ text: '一个血脉真灵而已，居然如此强', isFinal: true, boundary: 'speech-final' })
+echoSystem({ text: '', isFinal: false, boundary: 'utterance-end' })
+echoMic({ text: '到什么呃 5:10什么', isFinal: true, boundary: 'speech-final' })
+echoSystem({ text: '到什么呃 5:10什么', isFinal: true, boundary: 'speech-final' })
+echoSystem({ text: '', isFinal: false, boundary: 'utterance-end' })
+echoMic({ text: '', isFinal: false, boundary: 'utterance-end' })
+const echoAfterMicFirst = uniqueMessages(echoMessages).map((message) => `${message.role}:${message.text}`)
+check(
+  echoAfterMicFirst.join('|') === 'interviewer:一个血脉真灵而已，居然如此强|me:到什么呃 5:10什么'
+    && echoAnswers.join('|') === '一个血脉真灵而已，居然如此强',
+  'live microphone text is not also sealed as an interviewer question',
+)
+
+echoSystem({ text: '我负责支付系统上线', isFinal: true, boundary: 'speech-final' })
+echoSystem({ text: '', isFinal: false, boundary: 'utterance-end' })
+echoMic({ text: '我负责支付系统上线', isFinal: true, boundary: 'speech-final' })
+echoMic({ text: '', isFinal: false, boundary: 'utterance-end' })
+const echoAfterSystemFirst = uniqueMessages(echoMessages).map((message) => `${message.role}:${message.text}`)
+check(
+  echoAfterSystemFirst.join('|') === 'interviewer:一个血脉真灵而已，居然如此强|me:到什么呃 5:10什么|me:我负责支付系统上线',
+  'a later microphone transcript removes the system-audio echo of the same answer',
 )
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)

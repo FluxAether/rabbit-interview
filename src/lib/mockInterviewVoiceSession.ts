@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { SupportedLanguage } from '../i18n/types'
 import {
   closeDeepgramStream,
+  ensureAppleSttSources,
   sendAudioChunk,
   startDeepgramStream,
   type DeepgramTranscriptEvent,
@@ -236,6 +237,9 @@ export class MockInterviewVoiceSession {
       this.sampleRate = audioConfig.sample_rate || 16_000
       this.updateSnapshot({ captureActive: true })
       this.socket = await this.openDeepgram(runtimeGeneration, this.sampleRate)
+      if (this.config && this.socket && (this.socket as { __sttProvider?: string }).__sttProvider === 'apple') {
+        await ensureAppleSttSources(['microphone'], this.config.language)
+      }
       if (runtimeGeneration !== this.runtimeGeneration) {
         closeDeepgramStream(this.socket)
         this.socket = null
@@ -337,7 +341,7 @@ export class MockInterviewVoiceSession {
         }
         this.socket = next
       },
-      { language: config.language },
+      { language: config.language, source: 'microphone' },
     )
   }
 

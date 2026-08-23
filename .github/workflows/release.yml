@@ -64,8 +64,9 @@ jobs:
           APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Rabbit Interview.app"
           test -x "$APP/Contents/MacOS/audiotee"
           test "$(lipo -archs "$APP/Contents/MacOS/audiotee")" = "x86_64 arm64"
-          codesign -f -s - --deep "$APP"
-          codesign --verify --deep --strict "$APP"
+          codesign --verify --verbose=2 "$APP"
+          IDENTIFIER=$(codesign -d --verbose=2 "$APP" 2>&1 | sed -n "s/^Identifier=//p")
+          test "$IDENTIFIER" = "com.rabbitinterview.desktop"
 
       - name: Build Windows application
         if: matrix.platform_os == 'windows'

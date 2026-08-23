@@ -1,6 +1,8 @@
 // Real LLM + STT integration hooks using SQLite-backed encrypted key storage
 import { loadApiKeys, getLlmApiKey } from './keyStore';
 import { useAppStore } from '../stores/useAppStore';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { GEMINI_LIVE_TRANSLATE_MODEL } from './settingsStore';
 
 let cachedKeys: Awaited<ReturnType<typeof loadApiKeys>> | null = null;
@@ -379,10 +381,11 @@ export interface DeepgramStreamOptions {
   language?: string;
   endpointingMs?: number;
   utteranceEndMs?: number;
+  source?: string;
 }
 
 export interface DeepgramStream extends WebSocket {
-  __sttProvider?: 'deepgram' | 'gemini';
+  __sttProvider?: 'deepgram' | 'gemini' | 'apple';
   __deepgramManaged?: boolean;
   __deepgramClosedByClient?: boolean;
   __deepgramKeepAliveTimer?: ReturnType<typeof globalThis.setInterval> | null;
@@ -868,6 +871,82 @@ async function openDeepgramSocket(
   });
 }
 
+
+interface AppleSttStream extends DeepgramStream {
+  __appleSources?: string[];
+  __appleUnlisten?: Promise<UnlistenFn> | null;
+  __appleClosed?: boolean;
+}
+
+const appleSttStreams: AppleSttStream[] = [];
+
+class AppleSttSocket {
+  // Match the DOM WebSocket enum so sendAudioChunk sees the socket as open.
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+  readyState = (typeof WebSocket === 'undefined' ? AppleSttSocket.OPEN : WebSocket.OPEN);
+  bufferedAmount = 0;
+  binaryType = 'arraybuffer';
+  onopen: ((event: Event) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  send(_data?: unknown) {}
+  close() {
+    this.readyState = AppleSttSocket.CLOSED;
+    this.onclose?.({ code: 1000, wasClean: true } as CloseEvent);
+  }
+}
+
+async function openAppleSttSocket(
+  onTranscript: (event: DeepgramTranscriptEvent) => void,
+  onError?: (err: any) => void,
+  options: DeepgramStreamOptions = {},
+): Promise<WebSocket> {
+  const settings = useAppStore.getState().settings;
+  const language = options.language || (settings?.sttLanguage as string) || 'zh-CN';
+  if (language === 'multi') {
+    throw new Error('Apple on-device STT does not support multilingual auto-detect');
+  }
+
+  const ws = new AppleSttSocket() as unknown as AppleSttStream;
+  ws.__sttProvider = 'apple';
+  ws.__deepgramOptions = { ...options };
+  ws.__deepgramOnTranscript = onTranscript;
+  ws.__deepgramOnError = onError;
+  ws.__appleClosed = false;
+  ws.__appleSources = options.source ? [options.source] : [];
+  ws.__appleUnlisten = listen<{ source: string; text: string; is_final: boolean; boundary: string }>('stt-transcript', (event) => {
+    if (ws.__appleClosed) return;
+    const sources = ws.__appleSources || [];
+    if (!sources.includes(event.payload.source)) return;
+    const boundary = (event.payload.boundary || (event.payload.is_final ? 'final' : 'interim')) as TranscriptBoundary;
+    ws.__deepgramOnTranscript?.({
+      text: event.payload.text || '',
+      isFinal: Boolean(event.payload.is_final) || boundary === 'final' || boundary === 'utterance-end',
+      boundary,
+    });
+  }).catch((error) => {
+    ws.__deepgramOnError?.(error);
+    return () => {};
+  });
+
+  appleSttStreams.push(ws);
+  return ws;
+}
+
+export async function ensureAppleSttSources(sources: string[], language?: string): Promise<void> {
+  const settings = useAppStore.getState().settings;
+  const resolvedLanguage = language || (settings?.sttLanguage as string) || 'zh-CN';
+  await invoke('start_apple_stt', { sources, language: resolvedLanguage });
+}
+
+export async function testAppleSttConnection(language = 'zh-CN'): Promise<void> {
+  await invoke('test_apple_stt', { language });
+}
+
 export async function startDeepgramStream(
   onTranscript: (event: DeepgramTranscriptEvent) => void,
   onError?: (err: any) => void,
@@ -875,10 +954,13 @@ export async function startDeepgramStream(
   onSocketChange?: (ws: WebSocket) => void,
   options: DeepgramStreamOptions = {},
 ): Promise<WebSocket> {
-  const provider = useAppStore.getState().settings?.sttProvider === 'gemini' ? 'gemini' : 'deepgram';
+  const configured = useAppStore.getState().settings?.sttProvider;
+  const provider = configured === 'gemini' ? 'gemini' : configured === 'apple' ? 'apple' : 'deepgram';
   const ws = await (provider === 'gemini'
     ? openGeminiLiveSocket(onTranscript, onError, false, undefined, options)
-    : openDeepgramSocket(sampleRate, onTranscript, onError, false, undefined, options)) as DeepgramStream;
+    : provider === 'apple'
+      ? openAppleSttSocket(onTranscript, onError, options)
+      : openDeepgramSocket(sampleRate, onTranscript, onError, false, undefined, options)) as DeepgramStream;
   ws.__deepgramManaged = true;
   ws.__deepgramClosedByClient = false;
   ws.__deepgramReconnectAttempt = 0;
@@ -923,10 +1005,11 @@ function pcm16ToBase64(pcm16: Int16Array): string {
  */
 export function sendAudioChunk(ws: WebSocket | null, float32Chunk: Float32Array) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const managed = ws as DeepgramStream;
+  if (managed.__sttProvider === 'apple') return;
   if (ws.bufferedAmount >= MAX_DEEPGRAM_BUFFERED_BYTES) return;
 
   const pcm16 = float32ToInt16(float32Chunk);
-  const managed = ws as DeepgramStream;
   if (managed.__sttProvider === 'gemini') {
     if (!managed.__geminiSetupComplete) return;
     ws.send(JSON.stringify({
@@ -1018,6 +1101,18 @@ export function closeDeepgramStream(ws: WebSocket | null) {
   managed.__deepgramClosedByClient = true;
   managed.__deepgramManaged = false;
   clearDeepgramTimers(managed);
+  if (managed.__sttProvider === 'apple') {
+    const apple = managed as AppleSttStream;
+    apple.__appleClosed = true;
+    void apple.__appleUnlisten?.then((unlisten) => unlisten()).catch(() => {});
+    apple.__appleUnlisten = null;
+    apple.__appleSources = [];
+    const remaining = appleSttStreams.filter((stream) => stream !== apple && !stream.__appleClosed);
+    appleSttStreams.splice(0, appleSttStreams.length, ...remaining);
+    if (remaining.length === 0) {
+      void invoke('stop_apple_stt').catch(() => {});
+    }
+  }
   if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
     // Send a final empty message is not required; just close
     ws.close();

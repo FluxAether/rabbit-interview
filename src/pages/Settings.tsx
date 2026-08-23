@@ -28,6 +28,7 @@ import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
 import { LANGUAGE_OPTIONS, SupportedLanguage, DEFAULT_LANGUAGE } from '../i18n/types'
 import {
+  APPLE_STT_MODEL,
   GEMINI_LIVE_TRANSLATE_MODEL,
   saveAppSettings,
   type AppSettings as PersistedSettings,
@@ -131,6 +132,8 @@ export default function Settings() {
   const [sttProvider, setSttProvider] = useState<SttProvider>('deepgram')
   const [sttModel, setSttModel] = useState('nova-3')
   const [sttLanguage, setSttLanguage] = useState<SttLanguage>('zh-CN')
+  const [appleStt, setAppleStt] = useState<{ available: boolean; reason: string | null }>({ available: false, reason: null })
+  const [appleTest, setAppleTest] = useState<TestResult>({ loading: false })
 
   const [recordingStorage, setRecordingStorage] = useState<RecordingStorageUsage>({ bytes: 0, fileCount: 0 })
   const [historyStorage, setHistoryStorage] = useState<HistoryStorageUsage>({ bytes: 0, recordCount: 0 })
@@ -724,6 +727,19 @@ export default function Settings() {
     }
   }
 
+
+  useEffect(() => {
+    let cancelled = false
+    void invoke<{ available: boolean; reason?: string | null }>('get_apple_stt_status')
+      .then((status) => {
+        if (!cancelled) setAppleStt({ available: Boolean(status?.available), reason: status?.reason || null })
+      })
+      .catch((error) => {
+        if (!cancelled) setAppleStt({ available: false, reason: error instanceof Error ? error.message : String(error) })
+      })
+    return () => { cancelled = true }
+  }, [])
+
   const shortcutMod = navigator.platform.toLowerCase().includes('mac') ? '⌘' : 'Ctrl'
 
   return (
@@ -1299,6 +1315,57 @@ export default function Settings() {
                       {renderKeyInputRow('gemini', 'GEMINI_API_KEY (Google AI Studio)', true)}
                     </div>
                   </div>
+
+                  <div
+                    className={`rounded-md border p-4 transition-colors ${
+                      sttProvider === 'apple'
+                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
+                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">{t('settings.stt.appleTitle')}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                          {t('settings.stt.appleBadge')}
+                        </span>
+                      </div>
+                      {sttProvider === 'apple' ? (
+                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
+                          {t('settings.active')}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={!appleStt.available || sttLanguage === 'multi'}
+                          onClick={() => updateSttConfig('apple', APPLE_STT_MODEL)}
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          {t('settings.useProvider', { name: t('settings.stt.appleTitle') })}
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
+                        <select
+                          value={APPLE_STT_MODEL}
+                          disabled
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm disabled:opacity-100"
+                        >
+                          <option value={APPLE_STT_MODEL}>{APPLE_STT_MODEL}</option>
+                        </select>
+                      </div>
+
+                      <div className="text-[11px] text-[var(--text-muted)]">{appleStt.available ? t('settings.stt.appleReady') : (appleStt.reason || t('settings.stt.appleUnavailable'))}</div>
+                      {sttLanguage === 'multi' && (
+                        <div className="text-[11px] text-[var(--text-muted)]">{t('settings.stt.appleNoMulti')}</div>
+                      )}
+                      <button type="button" disabled={appleTest.loading || !appleStt.available || sttLanguage === 'multi'} onClick={() => { setAppleTest({ loading: true }); void import('../lib/llm').then(({ testAppleSttConnection }) => testAppleSttConnection(sttLanguage === 'multi' ? 'zh-CN' : sttLanguage)).then(() => setAppleTest({ loading: false, success: true, message: t('settings.test.ok') })).catch((error) => setAppleTest({ loading: false, success: false, message: error instanceof Error ? error.message : String(error) })); }} className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-50">{appleTest.loading ? t('settings.test.testing') : t('settings.test.testConnection')}</button>
+                      {appleTest.message && <div className="text-xs">{appleTest.message}</div>}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="mt-4 flex items-center gap-2 text-sm">
@@ -1332,6 +1399,11 @@ export default function Settings() {
 
                   <button
                     onClick={async () => {
+                      const granted = await invoke<string>('request_microphone_permission_command').catch(() => 'denied')
+                      if (granted !== 'granted') {
+                        alert(t('settings.audio.listDevices') + ':\n' + (granted || 'denied'))
+                        return
+                      }
                       const devices = await invoke<string[]>('list_audio_devices')
                       alert(t('settings.audio.listDevices') + ':\n' + devices.join('\n'))
                     }}

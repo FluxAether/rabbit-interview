@@ -43,6 +43,7 @@ export type CopilotSnapshotAction =
   | { type: 'clear' }
   | { type: 'question'; sessionId: number; question: string }
   | { type: 'message'; sessionId: number; message: CopilotMessage }
+  | { type: 'drop-message'; sessionId: number; messageId: number }
   | { type: 'suggestion'; sessionId: number; suggestion: Suggestion }
   | { type: 'stream-answer'; sessionId: number; suggestion: Suggestion; continuing?: boolean }
   | { type: 'complete-answer'; sessionId: number; answerId: number; answer: string; suggestions: Suggestion[] }
@@ -261,6 +262,17 @@ export function reduceCopilotSnapshot(
       return {
         ...snapshot,
         question,
+        messages,
+        revision: snapshot.revision + 1,
+      }
+    }
+    case 'drop-message': {
+      const messages = snapshot.messages.filter((message) => message.id !== action.messageId)
+      if (messages.length === snapshot.messages.length) return snapshot
+      const previousInterviewer = [...messages].reverse().find((message) => message.role === 'interviewer')
+      return {
+        ...snapshot,
+        question: previousInterviewer?.text ?? '',
         messages,
         revision: snapshot.revision + 1,
       }

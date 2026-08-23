@@ -654,6 +654,7 @@ fn emit_audio_source_chunk(app: &AppHandle, source: &'static str, samples: &[f32
     if samples.is_empty() {
         return;
     }
+    crate::stt::apple::push_samples(source, samples);
     // Cap IPC payload size after device backlog so the frontend/STT path stays bounded.
     let samples = if samples.len() > MAX_SOURCE_CHUNK_SAMPLES {
         &samples[samples.len() - MAX_SOURCE_CHUNK_SAMPLES..]
@@ -804,17 +805,35 @@ fn system_audio_capability() -> Result<(), String> {
     Err("Built-in system audio capture is not available on this platform; microphone-only mode is available".into())
 }
 
+fn microphone_permission() -> String {
+    crate::stt::apple::microphone_permission_status()
+}
+
 #[tauri::command]
 pub async fn get_audio_capabilities() -> AudioCapabilities {
     let system_audio = system_audio_capability();
-    let microphone_available = cpal::default_host().default_input_device().is_some();
+    let microphone_permission = microphone_permission();
+    // Probing Core Audio before TCC is granted retriggers the system prompt.
+    let microphone_available = if microphone_permission == "denied" {
+        false
+    } else if microphone_permission == "granted" {
+        cpal::default_host().default_input_device().is_some()
+    } else {
+        true
+    };
     let current_mode = AUDIO_STATE.current_mode.lock().unwrap_or_else(|e| e.into_inner()).clone();
     AudioCapabilities {
         system_audio_available: system_audio.is_ok(),
         microphone_available,
         system_audio_reason: system_audio.err(),
         microphone_reason: (!microphone_available)
-            .then(|| "No microphone input device is available".into()),
+            .then(|| {
+                if microphone_permission == "denied" {
+                    "Microphone permission was denied".into()
+                } else {
+                    "No microphone input device is available".into()
+                }
+            }),
         current_mode: if current_mode.is_empty() {
             "idle".into()
         } else {
@@ -842,6 +861,16 @@ pub async fn start_audio_capture(
     }
     if useSystemAudio {
         if let Err(error) = system_audio_capability() {
+            remember_audio_failure(error.clone());
+            return Err(error);
+        }
+    }
+    if useMicrophone {
+        let status = tokio::task::spawn_blocking(crate::stt::apple::request_microphone_permission)
+            .await
+            .unwrap_or_else(|_| "denied".into());
+        if status != "granted" {
+            let error = "Microphone permission is required for the selected capture mode".to_string();
             remember_audio_failure(error.clone());
             return Err(error);
         }
@@ -1305,6 +1334,9 @@ pub async fn export_audio_recording(app: AppHandle) -> Result<Option<SavedRecord
 
 #[tauri::command]
 pub async fn list_audio_devices() -> Result<Vec<String>, String> {
+    if microphone_permission() != "granted" {
+        return Ok(Vec::new());
+    }
     Ok(cpal::default_host()
         .input_devices()
         .map_err(|error| error.to_string())?

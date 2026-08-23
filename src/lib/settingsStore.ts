@@ -6,10 +6,11 @@ import {
 import { encryptSecret } from './secretCrypto';
 
 export type SttLanguage = 'zh-CN' | 'zh-TW' | 'en-US' | 'multi';
-export type SttProvider = 'deepgram' | 'gemini';
+export type SttProvider = 'deepgram' | 'gemini' | 'apple';
 export type CopilotFontSize = 'sm' | 'base' | 'lg';
 
 export const GEMINI_LIVE_TRANSLATE_MODEL = 'gemini-3.5-live-translate-preview';
+export const APPLE_STT_MODEL = 'speech-transcriber';
 
 export interface AppSettings {
   theme: 'Light' | 'Dark' | 'System';
@@ -74,14 +75,20 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
     aiModel = 'gemini-3.6-flash';
   }
   const savedSttProvider = saved?.sttProvider as string | undefined;
-  const sttProvider: SttProvider = savedSttProvider === 'gemini' ? 'gemini' : 'deepgram';
+  const sttProvider: SttProvider = savedSttProvider === 'gemini'
+    ? 'gemini'
+    : savedSttProvider === 'apple'
+      ? 'apple'
+      : 'deepgram';
   const sttModel = sttProvider === 'gemini'
     ? GEMINI_LIVE_TRANSLATE_MODEL
-    : savedSttProvider !== undefined && savedSttProvider !== 'deepgram'
-      ? DEFAULT_SETTINGS.sttModel
-      : saved?.sttModel === 'nova-2'
-        ? 'nova-3'
-        : (saved?.sttModel || DEFAULT_SETTINGS.sttModel);
+    : sttProvider === 'apple'
+      ? APPLE_STT_MODEL
+      : savedSttProvider !== undefined && savedSttProvider !== 'deepgram'
+        ? DEFAULT_SETTINGS.sttModel
+        : saved?.sttModel === 'nova-2'
+          ? 'nova-3'
+          : (saved?.sttModel || DEFAULT_SETTINGS.sttModel);
   const copilotFontSize: CopilotFontSize =
     saved?.copilotFontSize === 'sm' || saved?.copilotFontSize === 'base' || saved?.copilotFontSize === 'lg'
       ? saved.copilotFontSize

@@ -1,6 +1,7 @@
 mod audio;
 mod copilot_window;
 mod speech;
+mod stt;
 
 use audio::{
     clear_audio_recordings, export_audio_recording, get_audio_capabilities,
@@ -12,6 +13,10 @@ use copilot_window::{
     set_copilot_window_opacity, show_copilot_window, toggle_copilot_window,
 };
 use speech::{speak_text, stop_speaking};
+use stt::apple::{
+    get_apple_stt_status, get_microphone_permission_status, request_microphone_permission_command,
+    start_apple_stt, stop_apple_stt, test_apple_stt,
+};
 use tauri::Emitter;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
@@ -59,6 +64,12 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut}
             set_copilot_window_opacity,
             speak_text,
             stop_speaking,
+            get_apple_stt_status,
+            start_apple_stt,
+            stop_apple_stt,
+            test_apple_stt,
+            get_microphone_permission_status,
+            request_microphone_permission_command,
         ])
         .setup(|app| {
             // Register the actual hotkey combinations.
@@ -75,6 +86,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut}
                 eprintln!("Failed to register ⌘⇧I copilot shortcut: {}", e);
             }
 
+            stt::apple::attach_app(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -83,6 +95,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut}
             if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
                 audio::stop_audio_capture_and_wait();
                 speech::stop_current();
+                stt::apple::stop();
             }
         });
 }
