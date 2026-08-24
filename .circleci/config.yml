@@ -39,6 +39,9 @@ commands:
           shell: << parameters.run_shell >>
           command: |
             set -euo pipefail
+            if [ "<< parameters.platform_os >>" = "windows" ]; then
+              find() { /usr/bin/find.exe "$@"; }
+            fi
             BUNDLE="src-tauri/target/<< parameters.target >>/release/bundle"
             mkdir -p release-assets
             copy_normalized() {
