@@ -15,12 +15,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - os: [self-hosted, macOS]
             target: universal-apple-darwin
             rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
             bundle: app,dmg
             platform_os: darwin
-          - os: windows-latest
+          - os: [self-hosted, Windows]
             target: x86_64-pc-windows-msvc
             rust_targets: x86_64-pc-windows-msvc
             bundle: msi,nsis
@@ -136,7 +136,7 @@ jobs:
   publish:
     needs:
       - build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux]
     permissions:
       contents: write
     steps:
