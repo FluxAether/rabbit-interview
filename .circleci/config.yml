@@ -19,6 +19,7 @@ commands:
     steps:
       - run:
           name: Build updater fragment
+          shell: bash.exe
           command: |
             set -euo pipefail
             VERSION="${CIRCLE_TAG#v}"
@@ -33,6 +34,7 @@ commands:
               --out "updater-fragment-<< parameters.platform_os >>.json"
       - run:
           name: Collect release assets
+          shell: bash.exe
           command: |
             set -euo pipefail
             BUNDLE="src-tauri/target/<< parameters.target >>/release/bundle"
@@ -140,53 +142,50 @@ jobs:
     resource_class: windows.medium
     machine:
       image: windows-server-2022-gui:current
-      shell: bash.exe
+      shell: powershell.exe -ExecutionPolicy Bypass
     steps:
       - checkout
       - run:
           name: Check updater signing key
           command: |
-            set -euo pipefail
-            test -n "${TAURI_SIGNING_PRIVATE_KEY:-}" || {
-              echo "Set TAURI_SIGNING_PRIVATE_KEY (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD) in CircleCI project env vars" >&2
+            if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+              Write-Error "Set TAURI_SIGNING_PRIVATE_KEY in CircleCI project env vars"
               exit 1
             }
       - run:
           name: Setup Rust
           command: |
-            set -euo pipefail
-            if ! command -v rustup >/dev/null 2>&1; then
-              curl -sSfL https://win.rustup.rs/x86_64 -o /tmp/rustup-init.exe
-              /tmp/rustup-init.exe -y --profile minimal --default-toolchain stable --default-host x86_64-pc-windows-msvc
-            fi
-            if [ -f "$HOME/.cargo/env" ]; then
-              . "$HOME/.cargo/env"
-            fi
-            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
-            export PATH="$HOME/.cargo/bin:$PATH"
+            $ErrorActionPreference = "Stop"
+            $cargoBin = Join-Path $HOME ".cargo\bin"
+            if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+              $installer = Join-Path $env:TEMP "rustup-init.exe"
+              Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $installer
+              & $installer -y --profile minimal --default-toolchain stable --default-host x86_64-pc-windows-msvc
+            }
+            $env:Path = "$cargoBin;$env:Path"
             rustup toolchain install stable
             rustup default stable
             rustup target add x86_64-pc-windows-msvc
       - run:
           name: Setup Node 20
           command: |
-            set -euo pipefail
-            export PATH="/c/Program Files/nodejs:$PATH"
-            echo 'export PATH="/c/Program Files/nodejs:$PATH"' >> "$BASH_ENV"
-            major="$(node -e 'process.stdout.write(process.versions.node.split(".")[0])' 2>/dev/null || true)"
-            if [ "$major" != "20" ]; then
+            $ErrorActionPreference = "Stop"
+            $major = ""
+            try { $major = node -p "process.versions.node.split('.')[0]" } catch {}
+            if ($major -ne "20") {
               choco install nodejs-lts --version=20.19.0 -y
-            fi
-            hash -r || true
+            }
+            $nodeBin = "C:\Program Files\nodejs"
+            $env:Path = "$nodeBin;$env:Path"
             node -v
             npm -v
       - run:
           name: Install WiX
           command: |
-            set -euo pipefail
-            if ! command -v candle >/dev/null 2>&1; then
+            $ErrorActionPreference = "Stop"
+            if (-not (Get-Command candle -ErrorAction SilentlyContinue)) {
               choco install wixtoolset -y
-            fi
+            }
       - run:
           name: Install dependencies
           command: npm ci
