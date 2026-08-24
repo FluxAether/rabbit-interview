@@ -25,10 +25,9 @@ import { createCopilotInterviewRecord, type SavedRecording } from './copilotArch
 import { buildRecentTurnsContext, collectCopilotTurns, scoreCopilotSession, type CopilotSessionScore } from './copilotScoring'
 import {
   getInterviewerCommitDelay,
-  INTERVIEWER_COMMIT_DELAY_MS,
-  INTERVIEWER_CONTINUATION_WINDOW_MS,
   isLikelyIncompleteInterviewPrompt,
   isNewInterviewQuestion,
+  shouldHoldOpenUtterance,
   shouldInterruptForInterviewerContinuation,
 } from './interviewerTurnDetector'
 import { MAX_RECORDING_SECONDS } from './recordingLimits'
@@ -45,8 +44,8 @@ const COMMAND_EVENT = 'copilot-session-command'
 const SNAPSHOT_EVENT = 'copilot-session-snapshot'
 const MAX_AUTO_CONTINUATIONS = 2
 const ECHO_WINDOW_MS = 15_000
-const UTTERANCE_HARD_CAP_MS = INTERVIEWER_CONTINUATION_WINDOW_MS
-const INCOMPLETE_EXTEND_MS = INTERVIEWER_COMMIT_DELAY_MS.incompletePrompt
+const UTTERANCE_HARD_CAP_MS = 7_000
+const INCOMPLETE_EXTEND_MS = 1_500
 const SEAL_DEDUP_MS = 2_000
 const COPILOT_ENDPOINTING_MS = 500
 const COPILOT_UTTERANCE_END_MS = 1_500
@@ -80,8 +79,10 @@ interface CopilotUtteranceState {
   endpoint: VoiceEndpointState
   openMessageId: number | null
   openedAt: number | null
+  lastActivityAt: number | null
   lastSealedText: string
   lastSealedAt: number
+  semanticHoldElapsed: boolean
   commitTimer: ReturnType<typeof globalThis.setTimeout> | null
   hardCapTimer: ReturnType<typeof globalThis.setTimeout> | null
 }
@@ -100,8 +101,10 @@ function createUtteranceState(): CopilotUtteranceState {
     endpoint: createVoiceEndpointState(),
     openMessageId: null,
     openedAt: null,
+    lastActivityAt: null,
     lastSealedText: '',
     lastSealedAt: 0,
+    semanticHoldElapsed: false,
     commitTimer: null,
     hardCapTimer: null,
   }
@@ -382,6 +385,8 @@ class CopilotSessionHost {
     ))
     if (!message) return
     this.transition({ type: 'drop-message', sessionId, messageId: message.id })
+    const system = this.transcripts.system
+    if (system.openMessageId === message.id) this.resetOpenUtterance(system)
     if (this.pendingInterviewerQuestion === message.text) {
       this.clearPendingInterviewerQuestion()
     } else if (this.pendingInterviewerQuestion.endsWith(message.text)) {
@@ -670,16 +675,25 @@ class CopilotSessionHost {
     if (utterance.openMessageId == null) {
       utterance.openMessageId = this.nextMessageId(sessionId)
       utterance.openedAt = now
+      utterance.semanticHoldElapsed = false
     }
-    if (utterance.hardCapTimer == null) {
-      const remaining = Math.max(0, UTTERANCE_HARD_CAP_MS - (now - (utterance.openedAt ?? now)))
-      utterance.hardCapTimer = globalThis.setTimeout(() => {
-        utterance.hardCapTimer = null
-        this.trySeal(sessionId, source, 'speech-final', true)
-      }, remaining)
-      ;(utterance.hardCapTimer as { unref?: () => void }).unref?.()
-    }
+    utterance.lastActivityAt = now
+    this.armHardCap(sessionId, source, now)
     return utterance
+  }
+
+  private armHardCap(sessionId: number, source: CopilotAudioSource, now: number): void {
+    const utterance = this.transcripts[source]
+    if (utterance.hardCapTimer != null) {
+      globalThis.clearTimeout(utterance.hardCapTimer)
+      utterance.hardCapTimer = null
+    }
+    const remaining = Math.max(0, UTTERANCE_HARD_CAP_MS - (now - (utterance.lastActivityAt ?? now)))
+    utterance.hardCapTimer = globalThis.setTimeout(() => {
+      utterance.hardCapTimer = null
+      this.trySeal(sessionId, source, 'speech-final', true)
+    }, remaining)
+    ;(utterance.hardCapTimer as { unref?: () => void }).unref?.()
   }
 
   private cancelDeferredSeal(utterance: CopilotUtteranceState): void {
@@ -724,14 +738,14 @@ class CopilotSessionHost {
       return
     }
 
-    const openedAt = utterance.openedAt ?? now
-    const withinHardCap = now - openedAt < UTTERANCE_HARD_CAP_MS
-    if (
-      !force
-      && !isNewInterviewQuestion(text)
-      && isLikelyIncompleteInterviewPrompt(text)
-      && withinHardCap
-    ) {
+    const lastActivityAt = utterance.lastActivityAt ?? utterance.openedAt ?? now
+    const withinHardCap = now - lastActivityAt < UTTERANCE_HARD_CAP_MS
+    if (!force && shouldHoldOpenUtterance(text) && withinHardCap) {
+      if (utterance.semanticHoldElapsed && !isLikelyIncompleteInterviewPrompt(text) && !isNewInterviewQuestion(text)) {
+        this.sealUtterance(sessionId, source, text, boundary, now)
+        return
+      }
+      utterance.semanticHoldElapsed = true
       this.scheduleSeal(sessionId, source, boundary, INCOMPLETE_EXTEND_MS)
       return
     }
@@ -747,7 +761,7 @@ class CopilotSessionHost {
     now: number,
   ): void {
     const utterance = this.transcripts[source]
-    this.ensureOpenUtterance(sessionId, source, utterance.openedAt ?? now)
+    this.ensureOpenUtterance(sessionId, source, now)
     this.upsertUtteranceMessage(sessionId, source, text, utterance.openedAt ?? now)
     if (source === 'microphone') {
       this.recentMicrophoneText = text
@@ -775,6 +789,8 @@ class CopilotSessionHost {
     utterance.endpoint = createVoiceEndpointState()
     utterance.openMessageId = null
     utterance.openedAt = null
+    utterance.lastActivityAt = null
+    utterance.semanticHoldElapsed = false
   }
 
   private handleTranscriptEvent(
@@ -784,18 +800,28 @@ class CopilotSessionHost {
   ): void {
     if (!this.isCurrent(sessionId)) return
     const now = Date.now()
+    const incoming = event.text.trim()
+    if (source === 'system' && incoming && this.isLikelyEcho(incoming, now)) return
     const utterance = this.transcripts[source]
     const update = applyVoiceTranscriptEvent(utterance.endpoint, event, now)
     utterance.endpoint = update.state
     const preview = this.utteranceText(utterance, true)
     if (preview) {
-      this.ensureOpenUtterance(sessionId, source, utterance.openedAt ?? now)
+      this.ensureOpenUtterance(sessionId, source, now)
+      if (source === 'system' && this.isLikelyEcho(preview, now)) {
+        this.resetOpenUtterance(utterance)
+        return
+      }
+      this.upsertUtteranceMessage(sessionId, source, preview, utterance.openedAt ?? now)
       if (source === 'microphone') {
-        this.upsertUtteranceMessage(sessionId, source, preview, utterance.openedAt ?? now)
         this.dropSystemEcho(sessionId, preview, now)
+        if (incoming && incoming !== preview) this.dropSystemEcho(sessionId, incoming, now)
       }
     }
-    if (update.activity) this.cancelDeferredSeal(utterance)
+    if (update.activity) {
+      utterance.semanticHoldElapsed = false
+      this.cancelDeferredSeal(utterance)
+    }
 
     if (update.endpoint === 'utterance-end') {
       this.trySeal(sessionId, source, 'utterance-end')

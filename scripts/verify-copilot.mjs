@@ -185,7 +185,9 @@ check(
 check(defaultCapability.includes('sql:allow-execute'), 'SQLite write operations are explicitly allowed')
 check(
   turnDetector.includes('getInterviewerCommitDelay')
+    && turnDetector.includes('shouldHoldOpenUtterance')
     && session.includes('getInterviewerCommitDelay')
+    && session.includes('shouldHoldOpenUtterance')
     && session.includes('shouldInterruptForInterviewerContinuation'),
   'interviewer turns use adaptive commit timing and continuation-aware interruption',
 )
@@ -197,9 +199,12 @@ check(
 check(
   session.includes('applyVoiceTranscriptEvent')
     && session.includes('openMessageId')
+    && session.includes('lastActivityAt')
     && session.includes('trySeal')
+    && session.includes('UTTERANCE_HARD_CAP_MS = 7_000')
+    && session.includes('INCOMPLETE_EXTEND_MS = 1_500')
     && llm.includes("data.last_word_end === -1"),
-  'Copilot keeps one open utterance until grace, utterance-end, or the hard cap',
+  'Copilot keeps one open utterance until semantic hold, utterance-end, or the sliding hard cap',
 )
 check(session.includes('MAX_AUTO_CONTINUATIONS') && session.includes('continuationAttempt < MAX_AUTO_CONTINUATIONS'), 'token-limited answers are automatically continued with a bounded retry count')
 check(session.includes('textSimilarity') && session.includes('isLikelyEcho'), 'system-audio echo is filtered against recent AI and microphone text')
@@ -800,12 +805,14 @@ check(
 const {
   getInterviewerCommitDelay,
   isLikelyIncompleteInterviewPrompt,
+  shouldHoldOpenUtterance,
   shouldInterruptForInterviewerContinuation,
 } = loadTypeScriptModule(
   'src/lib/interviewerTurnDetector.ts',
   [
     'getInterviewerCommitDelay',
     'isLikelyIncompleteInterviewPrompt',
+    'shouldHoldOpenUtterance',
     'shouldInterruptForInterviewerContinuation',
   ],
 )
@@ -837,6 +844,16 @@ check(
     1_000,
   ),
   'explicit new questions do not interrupt the current answer as continuations',
+)
+check(
+  shouldHoldOpenUtterance('请介绍一下你上一个项目')
+    && shouldHoldOpenUtterance('你怎么看，以及'),
+  'unpunctuated and incomplete interviewer text stays on the open utterance',
+)
+check(
+  !shouldHoldOpenUtterance('请介绍一下你上一个项目。')
+    && !shouldHoldOpenUtterance('下一个问题，为什么离开上一家公司？'),
+  'terminal punctuation and explicit next questions are allowed to seal',
 )
 
 const createProviderHarness = (aiModel, body) => loadTypeScriptModule(
@@ -1137,7 +1154,6 @@ check(
 )
 binaryFrameGemini.api.closeDeepgramStream(binaryFrameSocket)
 
-const geminiMessages = []
 let copilotOnTranscript = () => {}
 const copilotEndpoint = loadTypeScriptModule(
   'src/lib/mockInterviewVoiceEndpoint.ts',
@@ -1157,34 +1173,82 @@ const copilotTurnDetector = loadTypeScriptModule(
     'INTERVIEWER_CONTINUATION_WINDOW_MS',
     'isLikelyIncompleteInterviewPrompt',
     'isNewInterviewQuestion',
+    'shouldHoldOpenUtterance',
     'shouldInterruptForInterviewerContinuation',
   ],
 )
-const { CopilotSessionHost } = loadTypeScriptModule(
-  'src/lib/copilotSession.ts',
-  ['CopilotSessionHost'],
-  {
-    createInitialSnapshot: () => ({ sessionId: 7, messages: [] }),
-    closeDeepgramStream: () => {},
-    ...copilotEndpoint,
-    ...copilotTurnDetector,
-    textSimilarity,
-    startDeepgramStream: async (onTranscript) => {
-      copilotOnTranscript = onTranscript
-      return {}
-    },
-  },
-)
-const transcriptHost = new CopilotSessionHost()
-transcriptHost.transition = (action) => {
-  if (action.type === 'message') geminiMessages.push(action.message)
-}
 const uniqueMessages = (messages) => {
   const latest = new Map()
   for (const message of messages) latest.set(message.id, message)
   return [...latest.values()]
 }
-await transcriptHost.startDeepgram(7, 'microphone', 16_000)
+
+function createCopilotSessionHost(sessionId) {
+  const timers = createFakeTimers()
+  const messages = []
+  const answers = []
+  const transcripts = {}
+  let lastTranscript = () => {}
+  const { CopilotSessionHost } = loadTypeScriptModule(
+    'src/lib/copilotSession.ts',
+    ['CopilotSessionHost'],
+    {
+      createInitialSnapshot: () => ({
+        sessionId,
+        messages: [],
+        answerStatus: 'idle',
+        activeAnswerId: null,
+      }),
+      closeDeepgramStream: () => {},
+      ...copilotEndpoint,
+      ...copilotTurnDetector,
+      textSimilarity,
+      globalThis: timers.global,
+      startDeepgramStream: async (onTranscript, _onError, _sampleRate, _onSocketChange, options) => {
+        lastTranscript = onTranscript
+        transcripts[options?.source || 'default'] = onTranscript
+        return {}
+      },
+    },
+  )
+  const host = new CopilotSessionHost()
+  host.snapshot = {
+    sessionId,
+    messages: [],
+    answerStatus: 'idle',
+    activeAnswerId: null,
+  }
+  host.transition = (action) => {
+    if (action.type === 'message') messages.push(action.message)
+    if (action.type === 'drop-message') {
+      messages.splice(0, messages.length, ...messages.filter((message) => message.id !== action.messageId))
+    }
+    host.snapshot = {
+      ...host.snapshot,
+      messages: uniqueMessages(messages),
+      answerStatus: host.snapshot.answerStatus || 'idle',
+      activeAnswerId: host.snapshot.activeAnswerId ?? null,
+    }
+  }
+  host.scheduleInterviewerAnswer = (_id, text) => {
+    answers.push(text)
+  }
+  return {
+    host,
+    timers,
+    messages,
+    answers,
+    transcripts,
+    get onTranscript() {
+      return lastTranscript
+    },
+  }
+}
+
+const geminiHost = createCopilotSessionHost(7)
+const geminiMessages = geminiHost.messages
+await geminiHost.host.startDeepgram(7, 'microphone', 16_000)
+copilotOnTranscript = geminiHost.onTranscript
 
 const geminiEvents = []
 const geminiSocketChanges = []
@@ -1259,6 +1323,7 @@ check(
   'an early turnComplete does not split later source-transcription chunks',
 )
 await gemini.timers.runTimeout(1_500)
+await geminiHost.timers.runTimeout(1_500)
 const earlyTurnMessages = uniqueMessages(geminiMessages).slice(uniqueMessages(geminiMessages.slice(0, earlyTurnMessageStart)).length)
 check(
   geminiEvents.map((event) => event.boundary).join(',') === 'final,final,utterance-end'
@@ -1281,6 +1346,7 @@ check(
   'Gemini source-transcription chunks do not become separate chat messages',
 )
 await gemini.timers.runTimeout(1_500)
+await geminiHost.timers.runTimeout(1_500)
 check(
   geminiEvents.slice(-3).map((event) => event.boundary).join(',') === 'final,final,utterance-end',
   'Gemini emits one utterance boundary for multiple source-transcription chunks',
@@ -1298,6 +1364,7 @@ check(
   'a late turnComplete cannot prematurely end the next Gemini transcription',
 )
 await gemini.timers.runTimeout(1_500)
+await geminiHost.timers.runTimeout(1_500)
 const lateQuestionCount = uniqueMessages(geminiMessages).length
 geminiSocket.receive({ serverContent: { inputTranscription: { text: '第二个' } } })
 geminiSocket.receive({ serverContent: { turnComplete: true } })
@@ -1309,6 +1376,7 @@ check(
   'turnComplete between source-transcription chunks does not end the utterance',
 )
 await gemini.timers.runTimeout(1_500)
+await geminiHost.timers.runTimeout(1_500)
 const secondTurnMessages = uniqueMessages(geminiMessages).slice(lateQuestionCount)
 check(
   secondTurnMessages.length === 1
@@ -1399,36 +1467,11 @@ check(
   'client-initiated Gemini close cancels pending transcription and does not reconnect',
 )
 
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-const deepgramHostMessages = []
-const deepgramHostAnswers = []
-let deepgramHostOnTranscript = () => {}
-const { CopilotSessionHost: DeepgramCopilotHost } = loadTypeScriptModule(
-  'src/lib/copilotSession.ts',
-  ['CopilotSessionHost'],
-  {
-    createInitialSnapshot: () => ({ sessionId: 8, messages: [] }),
-    closeDeepgramStream: () => {},
-    ...copilotEndpoint,
-    ...copilotTurnDetector,
-    textSimilarity,
-    startDeepgramStream: async (onTranscript) => {
-      deepgramHostOnTranscript = onTranscript
-      return {}
-    },
-  },
-)
-const deepgramHost = new DeepgramCopilotHost()
-deepgramHost.transition = (action) => {
-  if (action.type === 'message') deepgramHostMessages.push(action.message)
-}
-deepgramHost.scheduleInterviewerAnswer = (_sessionId, text) => {
-  deepgramHostAnswers.push(text)
-}
-await deepgramHost.startDeepgram(8, 'system', 16_000)
+const deepgramHost = createCopilotSessionHost(8)
+const deepgramHostMessages = deepgramHost.messages
+const deepgramHostAnswers = deepgramHost.answers
+await deepgramHost.host.startDeepgram(8, 'system', 16_000)
+let deepgramHostOnTranscript = deepgramHost.onTranscript
 
 deepgramHostOnTranscript({ text: '请介绍一下你上一个项目', isFinal: true, boundary: 'speech-final' })
 deepgramHostOnTranscript({ text: '尤其是你负责的模块', isFinal: true, boundary: 'final' })
@@ -1436,17 +1479,44 @@ deepgramHostOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' }
 check(
   uniqueMessages(deepgramHostMessages).length === 1
     && uniqueMessages(deepgramHostMessages)[0].text === '请介绍一下你上一个项目尤其是你负责的模块'
-    && deepgramHostAnswers.length === 1,
+    && deepgramHostAnswers.length === 0,
   'speech-final plus a continuation stays one interviewer message until utterance-end',
+)
+await deepgramHost.timers.runTimeout(1_500)
+check(
+  uniqueMessages(deepgramHostMessages).length === 1
+    && deepgramHostAnswers.length === 1
+    && deepgramHostAnswers[0] === '请介绍一下你上一个项目尤其是你负责的模块',
+  'unpunctuated interviewer text waits one semantic hold before asking the model',
+)
+
+const holdStart = uniqueMessages(deepgramHostMessages).length
+const holdAnswers = deepgramHostAnswers.length
+deepgramHostOnTranscript({ text: '请介绍一下你上一个项目', isFinal: true, boundary: 'speech-final' })
+deepgramHostOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+check(
+  uniqueMessages(deepgramHostMessages).length === holdStart + 1
+    && uniqueMessages(deepgramHostMessages).at(-1).text === '请介绍一下你上一个项目'
+    && deepgramHostAnswers.length === holdAnswers,
+  'unpunctuated utterance-end previews the interviewer bubble without scheduling the model',
+)
+deepgramHostOnTranscript({ text: '尤其是你负责的模块。', isFinal: true, boundary: 'final' })
+deepgramHostOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+check(
+  uniqueMessages(deepgramHostMessages).length === holdStart + 1
+    && uniqueMessages(deepgramHostMessages).at(-1).text === '请介绍一下你上一个项目尤其是你负责的模块。'
+    && deepgramHostAnswers.at(-1) === '请介绍一下你上一个项目尤其是你负责的模块。',
+  'a complete-looking pause plus delayed continuation stays one interviewer question',
 )
 
 const incompleteStart = uniqueMessages(deepgramHostMessages).length
+const incompleteAnswers = deepgramHostAnswers.length
 deepgramHostOnTranscript({ text: '你怎么看，以及', isFinal: true, boundary: 'speech-final' })
-await wait(200)
 check(
-  uniqueMessages(deepgramHostMessages).length === incompleteStart
-    && deepgramHostAnswers.length === 1,
-  'an incomplete speech-final does not create a second interviewer message',
+  uniqueMessages(deepgramHostMessages).length === incompleteStart + 1
+    && uniqueMessages(deepgramHostMessages).at(-1).text === '你怎么看，以及'
+    && deepgramHostAnswers.length === incompleteAnswers,
+  'an incomplete speech-final previews the open utterance without asking the model',
 )
 deepgramHostOnTranscript({ text: '这个方案的风险？', isFinal: true, boundary: 'final' })
 deepgramHostOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
@@ -1468,11 +1538,29 @@ deepgramHostOnTranscript({ text: '下一个问题，为什么离开上一家公�
 deepgramHostOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
 check(
   uniqueMessages(deepgramHostMessages).length === nextQuestionStart + 1
-    && uniqueMessages(deepgramHostMessages).at(-1).text === '下一个问题，为什么离开上一家公司？',
+    && uniqueMessages(deepgramHostMessages).at(-1).text === '下一个问题，为什么离开上一家公司？'
+    && deepgramHostAnswers.at(-1) === '下一个问题，为什么离开上一家公司？',
   'an explicit next question starts a new interviewer message',
 )
 
-await deepgramHost.startDeepgram(8, 'microphone', 16_000)
+const slidingStart = uniqueMessages(deepgramHostMessages).length
+const slidingAnswers = deepgramHostAnswers.length
+deepgramHostOnTranscript({ text: '你怎么看，以及', isFinal: true, boundary: 'speech-final' })
+check(
+  uniqueMessages(deepgramHostMessages).length === slidingStart + 1
+    && deepgramHostAnswers.length === slidingAnswers,
+  'an unfinished interviewer prompt stays open until the sliding hard cap',
+)
+await deepgramHost.timers.runTimeout(7_000)
+check(
+  uniqueMessages(deepgramHostMessages).length === slidingStart + 1
+    && uniqueMessages(deepgramHostMessages).at(-1).text === '你怎么看，以及'
+    && deepgramHostAnswers.at(-1) === '你怎么看，以及',
+  'the sliding hard cap force-seals an unfinished interviewer prompt',
+)
+
+await deepgramHost.host.startDeepgram(8, 'microphone', 16_000)
+deepgramHostOnTranscript = deepgramHost.onTranscript
 const micStart = uniqueMessages(deepgramHostMessages).length
 deepgramHostOnTranscript({ text: '我最近负责支付', isFinal: true, boundary: 'speech-final' })
 deepgramHostOnTranscript({ text: '平台和账务系统', isFinal: true, boundary: 'final' })
@@ -1481,8 +1569,33 @@ const micMessages = uniqueMessages(deepgramHostMessages).slice(micStart)
 check(
   micMessages.length === 1
     && micMessages[0].role === 'me'
-    && micMessages[0].text === '我最近负责支付平台和账务系统',
+    && micMessages[0].text === '我最近负责支付平台和账务系统'
+    && deepgramHostAnswers.at(-1) === '你怎么看，以及',
   'microphone breath pauses stay one candidate message',
+)
+await deepgramHost.timers.runTimeout(1_500)
+check(
+  uniqueMessages(deepgramHostMessages).slice(micStart).length === 1
+    && uniqueMessages(deepgramHostMessages).at(-1).role === 'me',
+  'unpunctuated microphone text still occupies one sealed candidate bubble',
+)
+
+const appleHost = createCopilotSessionHost(10)
+await appleHost.host.startDeepgram(10, 'system', 16_000)
+appleHost.onTranscript({ text: '请介绍一下你上一个项目', isFinal: true, boundary: 'final' })
+appleHost.onTranscript({ text: '尤其是你负责的模块', isFinal: true, boundary: 'final' })
+appleHost.onTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+check(
+  uniqueMessages(appleHost.messages).length === 1
+    && uniqueMessages(appleHost.messages)[0].text === '请介绍一下你上一个项目尤其是你负责的模块'
+    && appleHost.answers.length === 0,
+  'Apple and Gemini final-only chunks stay one interviewer message until utterance-end',
+)
+await appleHost.timers.runTimeout(1_500)
+check(
+  uniqueMessages(appleHost.messages).length === 1
+    && appleHost.answers[0] === '请介绍一下你上一个项目尤其是你负责的模块',
+  'Apple and Gemini silence still wait one semantic hold before asking the model',
 )
 
 function createAppleSttHarness() {
@@ -1545,43 +1658,17 @@ check(
 apple.api.closeDeepgramStream(appleSystemSocket)
 apple.api.closeDeepgramStream(appleMicSocket)
 
-const echoMessages = []
-const echoAnswers = []
-const echoTranscripts = {}
-const { CopilotSessionHost: EchoCopilotHost } = loadTypeScriptModule(
-  'src/lib/copilotSession.ts',
-  ['CopilotSessionHost'],
-  {
-    createInitialSnapshot: () => ({ sessionId: 9, messages: [] }),
-    closeDeepgramStream: () => {},
-    ...copilotEndpoint,
-    ...copilotTurnDetector,
-    textSimilarity,
-    startDeepgramStream: async (onTranscript, _onError, _sampleRate, _onSocketChange, options) => {
-      echoTranscripts[options?.source || Object.keys(echoTranscripts).length] = onTranscript
-      return {}
-    },
-  },
-)
-const echoHost = new EchoCopilotHost()
-echoHost.transition = (action) => {
-  if (action.type === 'message') echoMessages.push(action.message)
-  if (action.type === 'drop-message') {
-    const index = echoMessages.findIndex((message) => message.id === action.messageId)
-    if (index >= 0) echoMessages.splice(index, 1)
-  }
-  echoHost.snapshot = { ...echoHost.snapshot, messages: uniqueMessages(echoMessages) }
-}
-echoHost.scheduleInterviewerAnswer = (_sessionId, text) => {
-  echoAnswers.push(text)
-}
-await echoHost.startDeepgram(9, 'system', 16_000)
-await echoHost.startDeepgram(9, 'microphone', 16_000)
-const echoSystem = echoTranscripts.system || echoTranscripts[0]
-const echoMic = echoTranscripts.microphone || echoTranscripts[1]
+const echoHost = createCopilotSessionHost(9)
+const echoMessages = echoHost.messages
+const echoAnswers = echoHost.answers
+await echoHost.host.startDeepgram(9, 'system', 16_000)
+await echoHost.host.startDeepgram(9, 'microphone', 16_000)
+const echoSystem = echoHost.transcripts.system
+const echoMic = echoHost.transcripts.microphone
 
 echoSystem({ text: '一个血脉真灵而已，居然如此强', isFinal: true, boundary: 'speech-final' })
 echoSystem({ text: '', isFinal: false, boundary: 'utterance-end' })
+await echoHost.timers.runTimeout(1_500)
 echoMic({ text: '到什么呃 5:10什么', isFinal: true, boundary: 'speech-final' })
 echoSystem({ text: '到什么呃 5:10什么', isFinal: true, boundary: 'speech-final' })
 echoSystem({ text: '', isFinal: false, boundary: 'utterance-end' })
@@ -1593,6 +1680,7 @@ check(
   'live microphone text is not also sealed as an interviewer question',
 )
 
+await echoHost.timers.runTimeout(1_500)
 echoSystem({ text: '我负责支付系统上线', isFinal: true, boundary: 'speech-final' })
 echoSystem({ text: '', isFinal: false, boundary: 'utterance-end' })
 echoMic({ text: '我负责支付系统上线', isFinal: true, boundary: 'speech-final' })
@@ -1602,34 +1690,9 @@ check(
   echoAfterSystemFirst.join('|') === 'interviewer:一个血脉真灵而已，居然如此强|me:到什么呃 5:10什么|me:我负责支付系统上线',
   'a later microphone transcript removes the system-audio echo of the same answer',
 )
-let restartOnTranscript = () => {}
-const restartMessages = []
+const restartHarness = createCopilotSessionHost(11)
 const restartCalls = []
-const { CopilotSessionHost: RestartCopilotHost } = loadTypeScriptModule(
-  'src/lib/copilotSession.ts',
-  ['CopilotSessionHost'],
-  {
-    createInitialSnapshot: () => ({ sessionId: 11, messages: [], answerStatus: 'idle', activeAnswerId: null }),
-    closeDeepgramStream: () => {},
-    ...copilotEndpoint,
-    ...copilotTurnDetector,
-    textSimilarity,
-    startDeepgramStream: async (onTranscript) => {
-      restartOnTranscript = onTranscript
-      return {}
-    },
-  },
-)
-const restartHost = new RestartCopilotHost()
-restartHost.transition = (action) => {
-  if (action.type === 'message') restartMessages.push(action.message)
-  restartHost.snapshot = {
-    ...restartHost.snapshot,
-    messages: uniqueMessages(restartMessages),
-    answerStatus: restartHost.snapshot.answerStatus || 'idle',
-    activeAnswerId: restartHost.snapshot.activeAnswerId ?? null,
-  }
-}
+const restartHost = restartHarness.host
 restartHost.answer = async (sessionId, question, requestType) => {
   restartCalls.push({ sessionId, question, requestType })
 }
@@ -1642,8 +1705,10 @@ restartHost.activeAnswer = {
   emittedText: false,
 }
 await restartHost.startDeepgram(11, 'microphone', 16_000)
+let restartOnTranscript = restartHarness.onTranscript
 restartOnTranscript({ text: 'I enjoy product interviews and shipping desktop tools', isFinal: true, boundary: 'speech-final' })
 restartOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+await restartHarness.timers.runTimeout(1_500)
 check(
   restartCalls.length === 1
     && restartCalls[0].question === 'Why this role?'
@@ -1662,6 +1727,7 @@ restartHost.activeAnswer = {
 }
 restartOnTranscript({ text: 'This arrives after the model already started', isFinal: true, boundary: 'speech-final' })
 restartOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+await restartHarness.timers.runTimeout(1_500)
 check(restartCalls.length === 0, 'a late microphone seal does not restart after the one-second window')
 
 restartHost.activeAnswer = {
@@ -1674,6 +1740,7 @@ restartHost.activeAnswer = {
 }
 restartOnTranscript({ text: 'This arrives after the first token', isFinal: true, boundary: 'speech-final' })
 restartOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
+await restartHarness.timers.runTimeout(1_500)
 check(restartCalls.length === 0, 'a microphone seal does not restart after the model has started streaming')
 
 
