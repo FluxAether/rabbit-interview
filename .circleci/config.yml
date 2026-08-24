@@ -81,7 +81,7 @@ commands:
 jobs:
   build-macos:
     macos:
-      xcode: "16.4.0"
+      xcode: "27.0.0"
     resource_class: m4pro.medium
     steps:
       - checkout
@@ -194,7 +194,9 @@ jobs:
       - run:
           name: Build Windows application
           no_output_timeout: 60m
-          command: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles msi,nsis
+          command: |
+            $env:Path = "$(Join-Path $HOME '.cargo\bin');$env:Path"
+            npm run tauri build -- --target x86_64-pc-windows-msvc --bundles msi,nsis
       - collect-release-assets:
           platform_os: windows
           target: x86_64-pc-windows-msvc
