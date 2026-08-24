@@ -1,8 +1,7 @@
 # Matches .github/workflows/release.yml: v* tag -> macOS+Windows installers -> GitHub Release.
-# CircleCI project env vars required:
+# CircleCI `release` context vars required:
 #   GH_TOKEN or GITHUB_TOKEN  (GitHub PAT with repo contents:write)
 #   TAURI_SIGNING_PRIVATE_KEY
-#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 version: 2.1
 
 orbs:
@@ -16,10 +15,13 @@ commands:
         type: string
       target:
         type: string
+      run_shell:
+        type: string
+        default: bash
     steps:
       - run:
           name: Build updater fragment
-          shell: bash.exe
+          shell: << parameters.run_shell >>
           command: |
             set -euo pipefail
             VERSION="${CIRCLE_TAG#v}"
@@ -34,7 +36,7 @@ commands:
               --out "updater-fragment-<< parameters.platform_os >>.json"
       - run:
           name: Collect release assets
-          shell: bash.exe
+          shell: << parameters.run_shell >>
           command: |
             set -euo pipefail
             BUNDLE="src-tauri/target/<< parameters.target >>/release/bundle"
@@ -88,7 +90,7 @@ jobs:
           command: |
             set -euo pipefail
             test -n "${TAURI_SIGNING_PRIVATE_KEY:-}" || {
-              echo "Set TAURI_SIGNING_PRIVATE_KEY (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD) in CircleCI project env vars" >&2
+              echo "Set TAURI_SIGNING_PRIVATE_KEY in the CircleCI release context" >&2
               exit 1
             }
       - run:
@@ -149,7 +151,7 @@ jobs:
           name: Check updater signing key
           command: |
             if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
-              Write-Error "Set TAURI_SIGNING_PRIVATE_KEY in CircleCI project env vars"
+              Write-Error "Set TAURI_SIGNING_PRIVATE_KEY in the CircleCI release context"
               exit 1
             }
       - run:
@@ -196,6 +198,7 @@ jobs:
       - collect-release-assets:
           platform_os: windows
           target: x86_64-pc-windows-msvc
+          run_shell: bash.exe
 
   publish:
     docker:
@@ -276,18 +279,21 @@ workflows:
   release:
     jobs:
       - build-macos:
+          context: release
           filters:
             tags:
               only: /^v.*/
             branches:
               ignore: /.*/
       - build-windows:
+          context: release
           filters:
             tags:
               only: /^v.*/
             branches:
               ignore: /.*/
       - publish:
+          context: release
           requires:
             - build-macos
             - build-windows
