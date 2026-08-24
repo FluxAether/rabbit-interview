@@ -267,7 +267,7 @@ jobs:
               --notes "$NOTES"
             ASSETS="$(gh release view "$CIRCLE_TAG" --repo "$GH_REPO" --json assets --jq ".assets[].name")"
             for required in RabbitInterview-macOS-universal.dmg RabbitInterview-Windows-x64.exe latest.json SHA256SUMS.txt; do
-              grep -Fxq "$required" <<<"$ASSETS" || { echo "Missing source release asset: $required" >&2; exit 1; }
+              printf "%s\n" "$ASSETS" | grep -Fxq "$required" || { echo "Missing source release asset: $required" >&2; exit 1; }
             done
       - store_artifacts:
           path: dist-release
