@@ -1,80 +1,299 @@
-# This config was automatically generated from your source code
-# Stacks detected: cicd:github-actions:.github/workflows,deps:node:.,deps:rust:src-tauri
+# Matches .github/workflows/release.yml: v* tag -> macOS+Windows installers -> GitHub Release.
+# CircleCI project env vars required:
+#   GH_TOKEN or GITHUB_TOKEN  (GitHub PAT with repo contents:write)
+#   TAURI_SIGNING_PRIVATE_KEY
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 version: 2.1
+
 orbs:
-  node: circleci/node@5
+  node: circleci/node@7
+  gh: circleci/github-cli@2.6
+
+commands:
+  collect-release-assets:
+    parameters:
+      platform_os:
+        type: string
+      target:
+        type: string
+    steps:
+      - run:
+          name: Build updater fragment
+          command: |
+            set -euo pipefail
+            VERSION="${CIRCLE_TAG#v}"
+            REPO="${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
+            node scripts/build-updater-manifest.mjs fragment \
+              --os "<< parameters.platform_os >>" \
+              --target "<< parameters.target >>" \
+              --version "$VERSION" \
+              --tag "$CIRCLE_TAG" \
+              --repo "$REPO" \
+              --notes "$CIRCLE_TAG 测试版" \
+              --out "updater-fragment-<< parameters.platform_os >>.json"
+      - run:
+          name: Collect release assets
+          command: |
+            set -euo pipefail
+            BUNDLE="src-tauri/target/<< parameters.target >>/release/bundle"
+            mkdir -p release-assets
+            copy_normalized() {
+              local source="$1"
+              local name="${source##*/}"
+              cp "$source" "release-assets/${name// /.}"
+            }
+            while IFS= read -r asset; do
+              copy_normalized "$asset"
+            done < <(find "$BUNDLE" -type f \( \
+              -name "*.dmg" -o \
+              -name "*.app.tar.gz" -o \
+              -name "*.app.tar.gz.sig" -o \
+              -name "*.msi" -o \
+              -name "*.msi.sig" -o \
+              -name "*.exe" -o \
+              -name "*.exe.sig" \
+            \))
+            if [ "<< parameters.platform_os >>" = "darwin" ]; then
+              INSTALLER="$(find "$BUNDLE" -type f -name "*.dmg" -print -quit)"
+              test -n "$INSTALLER"
+              cp "$INSTALLER" release-assets/RabbitInterview-macOS-universal.dmg
+              test -f src-tauri/target/audiotee-checksums.txt
+              cp src-tauri/target/audiotee-checksums.txt release-assets/
+            else
+              INSTALLER="$(find "$BUNDLE" -type f -path "*/nsis/*-setup.exe" -print -quit)"
+              test -n "$INSTALLER"
+              cp "$INSTALLER" release-assets/RabbitInterview-Windows-x64.exe
+            fi
+            cp "updater-fragment-<< parameters.platform_os >>.json" release-assets/
+            test -n "$(find release-assets -type f -print -quit)"
+      - persist_to_workspace:
+          root: release-assets
+          paths:
+            - .
+      - store_artifacts:
+          path: release-assets
+          destination: release-assets-<< parameters.platform_os >>
+
 jobs:
-  build-node:
-    # Build node project
-    executor: node/default
+  build-macos:
+    macos:
+      xcode: "16.4.0"
+    resource_class: m4pro.medium
     steps:
       - checkout
+      - run:
+          name: Check updater signing key
+          command: |
+            set -euo pipefail
+            test -n "${TAURI_SIGNING_PRIVATE_KEY:-}" || {
+              echo "Set TAURI_SIGNING_PRIVATE_KEY (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD) in CircleCI project env vars" >&2
+              exit 1
+            }
+      - run:
+          name: Install Rosetta
+          command: |
+            set -euo pipefail
+            if [ "$(uname -m)" = "arm64" ]; then
+              /usr/sbin/softwareupdate --install-rosetta --agree-to-license
+            fi
+      - run:
+          name: Setup Rust
+          command: |
+            set -euo pipefail
+            if ! command -v rustup >/dev/null 2>&1; then
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            fi
+            if [ -f "$HOME/.cargo/env" ]; then
+              . "$HOME/.cargo/env"
+            fi
+            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+            export PATH="$HOME/.cargo/bin:$PATH"
+            rustup toolchain install stable
+            rustup default stable
+            rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - node/install:
+          node-version: "20.19"
       - node/install-packages:
           pkg-manager: npm
       - run:
-          command: npm run build
+          name: Build AudioTee universal sidecar
+          command: scripts/build-audiotee.sh universal
       - run:
-          name: Create the ~/artifacts directory if it doesn't exist
-          command: mkdir -p ~/artifacts
-      # Copy output to artifacts dir
+          name: Build macOS application
+          no_output_timeout: 60m
+          command: npm run tauri build -- --target universal-apple-darwin --bundles app,dmg --config src-tauri/tauri.audiotee.conf.json
       - run:
-          name: Copy artifacts
-          command: cp -R build dist public .output .next .docusaurus ~/artifacts 2>/dev/null || true
+          name: Verify bundled AudioTee
+          command: |
+            set -euo pipefail
+            APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Rabbit Interview.app"
+            test -x "$APP/Contents/MacOS/audiotee"
+            test "$(lipo -archs "$APP/Contents/MacOS/audiotee")" = "x86_64 arm64"
+            codesign --verify --verbose=2 "$APP"
+            IDENTIFIER=$(codesign -d --verbose=2 "$APP" 2>&1 | sed -n "s/^Identifier=//p")
+            test "$IDENTIFIER" = "com.rabbitinterview.desktop"
+      - collect-release-assets:
+          platform_os: darwin
+          target: universal-apple-darwin
+
+  build-windows:
+    resource_class: windows.medium
+    machine:
+      image: windows-server-2022-gui:current
+      shell: bash.exe
+    steps:
+      - checkout
+      - run:
+          name: Check updater signing key
+          command: |
+            set -euo pipefail
+            test -n "${TAURI_SIGNING_PRIVATE_KEY:-}" || {
+              echo "Set TAURI_SIGNING_PRIVATE_KEY (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD) in CircleCI project env vars" >&2
+              exit 1
+            }
+      - run:
+          name: Setup Rust
+          command: |
+            set -euo pipefail
+            if ! command -v rustup >/dev/null 2>&1; then
+              curl -sSfL https://win.rustup.rs/x86_64 -o /tmp/rustup-init.exe
+              /tmp/rustup-init.exe -y --profile minimal --default-toolchain stable --default-host x86_64-pc-windows-msvc
+            fi
+            if [ -f "$HOME/.cargo/env" ]; then
+              . "$HOME/.cargo/env"
+            fi
+            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+            export PATH="$HOME/.cargo/bin:$PATH"
+            rustup toolchain install stable
+            rustup default stable
+            rustup target add x86_64-pc-windows-msvc
+      - run:
+          name: Setup Node 20
+          command: |
+            set -euo pipefail
+            export PATH="/c/Program Files/nodejs:$PATH"
+            echo 'export PATH="/c/Program Files/nodejs:$PATH"' >> "$BASH_ENV"
+            major="$(node -e 'process.stdout.write(process.versions.node.split(".")[0])' 2>/dev/null || true)"
+            if [ "$major" != "20" ]; then
+              choco install nodejs-lts --version=20.19.0 -y
+            fi
+            hash -r || true
+            node -v
+            npm -v
+      - run:
+          name: Install WiX
+          command: |
+            set -euo pipefail
+            if ! command -v candle >/dev/null 2>&1; then
+              choco install wixtoolset -y
+            fi
+      - run:
+          name: Install dependencies
+          command: npm ci
+      - run:
+          name: Build Windows application
+          no_output_timeout: 60m
+          command: npm run tauri build -- --target x86_64-pc-windows-msvc --bundles msi,nsis
+      - collect-release-assets:
+          platform_os: windows
+          target: x86_64-pc-windows-msvc
+
+  publish:
+    docker:
+      - image: cimg/node:20.19
+    steps:
+      - checkout
+      - attach_workspace:
+          at: dist-release
+      - run:
+          name: Configure GitHub token
+          command: |
+            set -euo pipefail
+            TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+            if [ -z "$TOKEN" ]; then
+              echo "Set GH_TOKEN or GITHUB_TOKEN with repo contents:write" >&2
+              exit 1
+            fi
+            echo "export GH_TOKEN=$TOKEN" >> "$BASH_ENV"
+            echo "export GITHUB_TOKEN=$TOKEN" >> "$BASH_ENV"
+            echo "export GH_REPO=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}" >> "$BASH_ENV"
+            echo "export GITHUB_REPOSITORY=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}" >> "$BASH_ENV"
+      - gh/setup
+      - run:
+          name: Build manifest and checksums
+          command: |
+            set -euo pipefail
+            VERSION="${CIRCLE_TAG#v}"
+            test -f dist-release/RabbitInterview-macOS-universal.dmg
+            test -f dist-release/RabbitInterview-Windows-x64.exe
+            PARTS="$(find dist-release -maxdepth 1 -name "updater-fragment-*.json" -print | sort | paste -sd, -)"
+            test -n "$PARTS"
+            node scripts/build-updater-manifest.mjs merge \
+              --version "$VERSION" \
+              --notes "$CIRCLE_TAG 测试版" \
+              --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --parts "$PARTS" \
+              --out dist-release/latest.json
+            find dist-release -maxdepth 1 -type f \( \
+              -name "*.dmg" -o \
+              -name "*.app.tar.gz" -o \
+              -name "*.msi" -o \
+              -name "*.exe" \
+            \) -print0 | sort -z | xargs -0 sha256sum | sed "s#  dist-release/#  #" > dist-release/SHA256SUMS.txt
+            node scripts/verify-release-assets.mjs dist-release
+      - run:
+          name: Upload and publish source release
+          command: |
+            set -euo pipefail
+            NOTES=$(printf "%s\n\n%s\n\n%s" \
+              "测试版。" \
+              "当前 macOS 包没有 Developer ID 与公证，Windows 包没有 Authenticode 签名，安装时可能出现系统安全警告。请从本 Release 下载，并核对 SHA256SUMS.txt。" \
+              "使用实时语音需要 Deepgram API Key，回答建议需要任一受支持的模型 API Key。仅在面试或测评规则允许辅助工具时使用。")
+            if gh release view "$CIRCLE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+              echo "Source release $CIRCLE_TAG already exists; assets will be replaced."
+            else
+              gh release create "$CIRCLE_TAG" \
+                --repo "$GH_REPO" \
+                --target "$CIRCLE_SHA1" \
+                --draft \
+                --title "$CIRCLE_TAG" \
+                --notes "构建完成。安装包与校验文件见本 Release。"
+            fi
+            gh release upload "$CIRCLE_TAG" dist-release/* --repo "$GH_REPO" --clobber
+            gh release edit "$CIRCLE_TAG" \
+              --repo "$GH_REPO" \
+              --draft=false \
+              --title "$CIRCLE_TAG" \
+              --notes "$NOTES"
+            ASSETS="$(gh release view "$CIRCLE_TAG" --repo "$GH_REPO" --json assets --jq ".assets[].name")"
+            for required in RabbitInterview-macOS-universal.dmg RabbitInterview-Windows-x64.exe latest.json SHA256SUMS.txt; do
+              grep -Fxq "$required" <<<"$ASSETS" || { echo "Missing source release asset: $required" >&2; exit 1; }
+            done
       - store_artifacts:
-          path: ~/artifacts
-          destination: node-build
-  test-rust:
-    docker:
-      - image: cimg/rust:1.70
-    working_directory: ~/project/src-tauri
-    steps:
-      - checkout:
-          path: ~/project
-      - restore_cache:
-          key: cargo-{{ checksum "Cargo.lock" }}
-      - run:
-          command: cargo test
-      - save_cache:
-          key: cargo-{{ checksum "Cargo.lock" }}
-          paths:
-            - ~/.cargo
-  deploy:
-    # This is an example deploy job, not actually used by the workflow
-    docker:
-      - image: cimg/base:stable
-    steps:
-      - run:
-          name: Plan deployment
-          command: |-
-            circleci run release plan deploy \
-              --environment-name="default" \
-              --component-name="deploy" \
-              --target-version="1.0.${CIRCLE_BUILD_NUM}-${CIRCLE_SHA1:0:7}"
-      # Replace this with steps to deploy to users
-      - run:
-          name: deploy
-          command: '#e.g. ./deploy.sh'
-      - run:
-          name: found github actions config
-          command: ':'
-      - run:
-          name: Update deployment status to running
-          command: circleci run release update deploy --status=RUNNING
-      - run:
-          name: Update deployment status to success
-          command: circleci run release update deploy --status=SUCCESS
-          when: on_success
-      - run:
-          name: Update deployment status to failed
-          command: circleci run release update deploy --status=FAILED
-          when: on_fail
+          path: dist-release
+          destination: dist-release
+
 workflows:
-  build-and-test:
+  release:
     jobs:
-      - build-node:
+      - build-macos:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - build-windows:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - publish:
           requires:
-            - test-rust
-      - test-rust
-    # - deploy:
-    #     requires:
-    #       - build-node
+            - build-macos
+            - build-windows
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
