@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{ipc::Response, AppHandle, Emitter, Manager};
 
 const TARGET_SAMPLE_RATE: u32 = AUDIOTEE_SAMPLE_RATE;
 const MAX_RECORDING_SECONDS: usize = 24 * 60 * 60;
@@ -402,7 +402,28 @@ fn is_app_recording(entry: &fs::DirEntry) -> Result<bool, String> {
     let Some(file_name) = file_name.to_str() else {
         return Ok(false);
     };
-    Ok(file_name.starts_with("interview-") && file_name.ends_with(".wav"))
+    Ok(is_saved_recording_name(file_name))
+}
+
+fn is_saved_recording_name(file_name: &str) -> bool {
+    file_name.starts_with("interview-") && file_name.ends_with(".wav")
+}
+
+fn saved_recording_file_name(path: &str) -> Result<&str, String> {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|file_name| is_saved_recording_name(file_name))
+        .ok_or_else(|| "Recording path is not an app recording".to_string())
+}
+
+fn resolve_saved_recording_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
+    let file_name = saved_recording_file_name(path)?;
+    let resolved = recordings_dir(app)?.join(file_name);
+    if !resolved.is_file() {
+        return Err("Saved recording was not found".into());
+    }
+    Ok(resolved)
 }
 
 fn recording_storage_usage_in_dir(recording_dir: &Path) -> Result<RecordingStorageUsage, String> {
@@ -1270,6 +1291,13 @@ pub async fn save_audio_recording(
 }
 
 #[tauri::command]
+pub async fn read_saved_recording(app: AppHandle, path: String) -> Result<Response, String> {
+    let resolved = resolve_saved_recording_path(&app, &path)?;
+    let bytes = fs::read(&resolved).map_err(|error| error.to_string())?;
+    Ok(Response::new(bytes))
+}
+
+#[tauri::command]
 pub async fn get_recording_storage_usage(app: AppHandle) -> Result<RecordingStorageUsage, String> {
     recording_storage_usage_in_dir(&recordings_dir(&app)?)
 }
@@ -1348,7 +1376,7 @@ pub async fn list_audio_devices() -> Result<Vec<String>, String> {
 mod tests {
     use super::{
         admit_realtime_samples, capture_origin_frame, clear_audio_recordings_in_dir,
-        convert_samples, process_output_audio, recording_storage_usage_in_dir,
+        convert_samples, process_output_audio, recording_storage_usage_in_dir, saved_recording_file_name,
         stop_audio_capture_and_wait, write_pcm16_wav, AtomicU64, AudioCaptureLease, MonoResampler,
     };
     use std::time::Instant;
@@ -1545,5 +1573,19 @@ mod tests {
                 file_count: 0,
             }
         );
+    }
+
+    #[test]
+    fn saved_recording_paths_only_accept_interview_wav_names() {
+        assert_eq!(
+            saved_recording_file_name(
+                "/Users/thomas/Library/Application Support/com.rabbitinterview.desktop/recordings/interview-1.wav"
+            )
+            .unwrap(),
+            "interview-1.wav"
+        );
+        assert!(saved_recording_file_name("/tmp/notes.txt").is_err());
+        assert!(saved_recording_file_name("/tmp/other.wav").is_err());
+        assert!(saved_recording_file_name("/tmp/nested/interview-3.wav/../notes.txt").is_err());
     }
 }

@@ -479,8 +479,9 @@ export default function Settings({
     }
   }
 
-  const saveProviderKey = async (provider: ProviderKeyType, value: string) => {
+  const saveProviderKey = async (provider: ProviderKeyType, value: string, { clear = false } = {}) => {
     const trimmed = value.trim()
+    if (!trimmed && !clear) return
     const keyMap = {
       groq: 'GROQ_API_KEY',
       openai: 'OPENAI_API_KEY',
@@ -648,7 +649,11 @@ export default function Settings({
                 const val = e.target.value
                 setKeyInputs((prev) => ({ ...prev, [provider]: val }))
               }}
-              onBlur={(e) => saveProviderKey(provider, e.target.value)}
+              onBlur={(e) => {
+                const next = e.target.value.trim()
+                if (!next) return
+                void saveProviderKey(provider, next)
+              }}
             />
             <button
               type="button"
@@ -665,7 +670,7 @@ export default function Settings({
               type="button"
               onClick={() => {
                 setKeyInputs((prev) => ({ ...prev, [provider]: '' }))
-                void saveProviderKey(provider, '')
+                void saveProviderKey(provider, '', { clear: true })
               }}
               className="rounded-md border border-[var(--border-color)] px-2 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
             >

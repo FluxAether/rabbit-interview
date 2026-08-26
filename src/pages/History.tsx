@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { invoke } from '@tauri-apps/api/core'
 import { Clipboard } from 'lucide-react'
 import type { InterviewRecord } from '../stores/useAppStore'
 import WaveSurfer from 'wavesurfer.js'
@@ -152,42 +152,67 @@ export default function History({
     setAudioReady(false)
     setAudioError(false)
     setIsPlaying(false)
-    if (!selected?.recordingPath || !waveformRef.current) return
+    const recordingPath = selected?.recordingPath
+    if (!recordingPath) return
 
     let wavesurfer: ReturnType<typeof WaveSurfer.create> | null = null
     let cancelled = false
-    try {
-      const styles = getComputedStyle(document.documentElement)
-      wavesurfer = WaveSurfer.create({
-        container: waveformRef.current,
-        backend: 'WebAudio',
-        waveColor: styles.getPropertyValue('--text-muted').trim() || '#8a8a8a',
-        progressColor: styles.getPropertyValue('--text-main').trim() || '#202020',
-        height: 60,
-        barWidth: 2,
-        barGap: 1,
-      })
-      // MediaElement volume is capped at 1; WebAudio gain can boost quiet interview recordings.
-      wavesurfer.on('ready', () => {
-        if (cancelled) return
-        wavesurfer?.setVolume(3)
-        wavesurfer?.setPlaybackRate(playbackRate)
-        setAudioReady(true)
-      })
-      wavesurfer.on('finish', () => setIsPlaying(false))
-      void wavesurfer.load(convertFileSrc(selected.recordingPath)).catch((error) => {
-        if (cancelled) return
-        setAudioReady(false)
+
+    const startReplay = () => {
+      if (cancelled) return
+      const container = waveformRef.current
+      if (!container) {
         setAudioError(true)
-        console.warn('Unable to load saved interview recording', error)
-      })
-      wavesurferRef.current = wavesurfer
-    } catch (error) {
-      console.warn('Unable to load saved interview recording', error)
+        return
+      }
+      try {
+        const styles = getComputedStyle(document.documentElement)
+        wavesurfer = WaveSurfer.create({
+          container,
+          backend: 'WebAudio',
+          waveColor: styles.getPropertyValue('--text-muted').trim() || '#8a8a8a',
+          progressColor: styles.getPropertyValue('--text-main').trim() || '#202020',
+          height: 60,
+          barWidth: 2,
+          barGap: 1,
+        })
+        // MediaElement volume is capped at 1; WebAudio gain can boost quiet interview recordings.
+        wavesurfer.on('ready', () => {
+          if (cancelled) return
+          wavesurfer?.setVolume(3)
+          wavesurfer?.setPlaybackRate(playbackRate)
+          setAudioReady(true)
+        })
+        wavesurfer.on('finish', () => setIsPlaying(false))
+        void invoke<ArrayBuffer | number[]>('read_saved_recording', { path: recordingPath })
+          .then((bytes) => {
+            if (cancelled) return
+            const source = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+            const copy = new ArrayBuffer(source.byteLength)
+            new Uint8Array(copy).set(source)
+            const audio = new Blob([copy], { type: 'audio/wav' })
+            return wavesurfer?.loadBlob(audio)
+          })
+          .catch((error) => {
+            if (cancelled) return
+            setAudioReady(false)
+            setAudioError(true)
+            console.warn('Unable to load saved interview recording', error)
+          })
+        wavesurferRef.current = wavesurfer
+      } catch (error) {
+        if (!cancelled) {
+          setAudioError(true)
+          console.warn('Unable to load saved interview recording', error)
+        }
+      }
     }
+
+    const frame = window.requestAnimationFrame(startReplay)
 
     return () => {
       cancelled = true
+      window.cancelAnimationFrame(frame)
       try {
         wavesurfer?.pause()
       } catch {

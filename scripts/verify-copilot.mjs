@@ -177,10 +177,12 @@ check(llm.includes('recent interview turns') && llm.includes('Prefer Candidate s
 check(session.includes('maybeRestartAnswerForSealedMicrophone') && session.includes('PRE_DELTA_RESTART_MS'), 'Copilot can restart an interviewer answer if the microphone seals before the first model token')
 check(!page.includes('saveSession = async') && page.includes('copilot.archive.autoSaveHint'), 'the page no longer requires a manual session-save action')
 check(
-  historyPage.includes('convertFileSrc(selected.recordingPath)')
-    && !historyPage.includes('data:audio/wav;base64')
-    && tauriConfig.includes('$APPDATA/recordings/**'),
-  'history replay loads the saved WAV file through the scoped asset protocol',
+  rustAudio.includes('read_saved_recording')
+    && rustLib.includes('read_saved_recording')
+    && historyPage.includes("invoke<ArrayBuffer | number[]>('read_saved_recording'")
+    && historyPage.includes('loadBlob(')
+    && !historyPage.includes('convertFileSrc('),
+  'history replay loads saved WAV bytes through native IPC instead of the asset protocol',
 )
 check(defaultCapability.includes('sql:allow-execute'), 'SQLite write operations are explicitly allowed')
 check(
@@ -1768,6 +1770,69 @@ const { deriveReadiness } = loadTypeScriptModule('src/lib/readiness.ts', ['deriv
 check(deriveReadiness({ loading: true }).status === 'loading', 'readiness stays loading until settings exist')
 check(deriveReadiness({ settings: { aiModel: "groq-llama-3.1", sttProvider: "deepgram" }, keys: { groq: true } }).issues.some((issue) => issue.code === "missing-stt-key"), 'LLM-only setup still reports missing STT')
 check(!deriveReadiness({ settings: { aiModel: "groq-llama-3.1", sttProvider: "deepgram" }, keys: { groq: true } }).canStartCopilot, 'missing STT cannot start Copilot')
+check(
+  /if \(!trimmed && !clear\) return/.test(settingsPage)
+    && settingsPage.includes("saveProviderKey(provider, '', { clear: true })")
+    && !/onBlur=\{\(e\) => saveProviderKey\(provider, e\.target\.value\)\}/.test(settingsPage),
+  'blank Settings key fields keep the saved key on blur',
+)
+
+const { encryptSecret, decryptSecret } = loadTypeScriptModule('src/lib/secretCrypto.ts', ['encryptSecret', 'decryptSecret'])
+function createKeyStoreHarness({
+  keychain = new Map(),
+  secrets = new Map(),
+  keychainLoadError = false,
+  keychainSaveError = false,
+} = {}) {
+  const api = loadTypeScriptModule(
+    'src/lib/keyStore.ts',
+    ['setApiKey', 'getApiKey', 'getLlmApiKey'],
+    {
+      invoke: async (cmd, args) => {
+        if (cmd === 'save_secure_secret') {
+          if (keychainSaveError) throw new Error('keychain save failed')
+          keychain.set(args.key, args.value)
+          return
+        }
+        if (cmd === 'load_secure_secret') {
+          if (keychainLoadError) throw new Error('keychain load failed')
+          return keychain.get(args.key) ?? null
+        }
+        if (cmd === 'delete_secure_secret') {
+          keychain.delete(args.key)
+          return
+        }
+        throw new Error(`unexpected invoke ${cmd}`)
+      },
+      migrateLegacyJsonStoresIfNeeded: async () => {},
+      saveSecret: async (key, value) => { secrets.set(key, value) },
+      loadSecret: async (key) => secrets.get(key) ?? null,
+      deleteSecret: async (key) => { secrets.delete(key) },
+      clearSecrets: async (keys) => { for (const key of keys) secrets.delete(key) },
+      encryptSecret,
+      decryptSecret,
+    },
+  )
+  return { api, keychain, secrets }
+}
+
+{
+  const saved = createKeyStoreHarness()
+  await saved.api.setApiKey('GEMINI_API_KEY', ' AIza-saved ')
+  check(saved.secrets.has('GEMINI_API_KEY') && saved.keychain.size === 0, 'saving a Gemini key writes SQLite secrets and not the keychain')
+  const later = createKeyStoreHarness({ secrets: saved.secrets })
+  check(
+    await later.api.getLlmApiKey('gemini') === 'AIza-saved',
+    'Copilot reads a saved Gemini key from SQLite secrets',
+  )
+  const leftover = createKeyStoreHarness({ keychain: new Map([['GEMINI_API_KEY', 'AIza-keychain']]) })
+  check(
+    await leftover.api.getLlmApiKey('gemini') === 'AIza-keychain'
+      && leftover.secrets.has('GEMINI_API_KEY')
+      && leftover.keychain.size === 0,
+    'a leftover keychain Gemini key is imported into SQLite and then deleted',
+  )
+}
 check(panel.includes('copilot.clearConfirm'), 'Clear requires confirmation when the session has content')
 check(historyPage.includes('parseHistoryFeedback'), 'History renders saved scoring details')
 check(settingsStore.includes('useMicWithSystem: false'), 'real Copilot defaults to system audio without microphone')

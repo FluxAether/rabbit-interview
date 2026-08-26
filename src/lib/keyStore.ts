@@ -33,16 +33,6 @@ async function loadFromKeychain(key: ApiKeyName): Promise<string | null> {
   }
 }
 
-async function saveToKeychain(key: ApiKeyName, value: string): Promise<boolean> {
-  try {
-    await invoke('save_secure_secret', { key, value })
-    return true
-  } catch (error) {
-    console.warn('Secure secret save failed', error)
-    return false
-  }
-}
-
 async function deleteFromKeychain(key: ApiKeyName): Promise<void> {
   try {
     await invoke('delete_secure_secret', { key })
@@ -55,37 +45,29 @@ export async function setApiKey(key: ApiKeyName, value: string): Promise<void> {
   await ensureMigrated();
   const trimmed = value.trim();
   if (!trimmed) {
+    await deleteSecret(key);
     await deleteFromKeychain(key);
-    await deleteSecret(key);
-    return;
-  }
-  const storedSecurely = await saveToKeychain(key, trimmed);
-  if (storedSecurely) {
-    await deleteSecret(key);
     return;
   }
   await saveSecret(key, encryptSecret(trimmed));
+  await deleteFromKeychain(key);
 }
 
 export async function getApiKey(key: ApiKeyName): Promise<string | null> {
   await ensureMigrated();
-  const secure = await loadFromKeychain(key);
-  if (secure) {
-    await deleteSecret(key).catch(() => {});
-    return secure;
-  }
-  const legacy = decryptSecret(await loadSecret(key));
-  if (!legacy) return null;
-  if (await saveToKeychain(key, legacy)) {
-    await deleteSecret(key).catch(() => {});
-  }
-  return legacy;
+  const stored = decryptSecret(await loadSecret(key));
+  if (stored) return stored;
+  const leftover = await loadFromKeychain(key);
+  if (!leftover) return null;
+  await saveSecret(key, encryptSecret(leftover));
+  await deleteFromKeychain(key);
+  return leftover;
 }
 
 export async function clearApiKeys(): Promise<void> {
   await ensureMigrated();
-  await Promise.all(ALL_KEYS.map((key) => deleteFromKeychain(key)));
   await clearSecrets(ALL_KEYS);
+  await Promise.all(ALL_KEYS.map((key) => deleteFromKeychain(key)));
 }
 
 export async function loadApiKeys(): Promise<{
