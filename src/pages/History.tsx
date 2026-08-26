@@ -6,6 +6,7 @@ import WaveSurfer from 'wavesurfer.js'
 import { loadHistoryCounts, loadHistoryPage } from '../lib/db'
 import { exportHistoryRecordsPdf } from '../lib/historyExport'
 import { useTranslation } from '../i18n'
+import { parseHistoryFeedback } from '../lib/historyFeedback'
 
 type HistoryChatRole = 'interviewer' | 'assistant' | 'me'
 type HistoryTab = 'copilot' | 'mock'
@@ -59,7 +60,13 @@ function parseTranscript(transcript: string, mode: string): HistoryChatMessage[]
 
 const PAGE_SIZE = 10
 
-export default function History() {
+export default function History({
+  onLaunchCopilot,
+  onNavigateToMock,
+}: {
+  onLaunchCopilot?: () => void
+  onNavigateToMock?: () => void
+} = {}) {
   const t = useTranslation()
   const [search, setSearch] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -305,7 +312,7 @@ export default function History() {
           />
         </label>
 
-        <div className="mb-4 flex gap-5 border-b border-[var(--border-color)]">
+        <div className="mb-4 flex gap-5 border-b border-[var(--border-color)]" role="tablist" aria-label={t('history.title')}>
           {tabs.map((tab) => {
             const active = tab.id === activeTab
             return (
@@ -318,6 +325,7 @@ export default function History() {
                 }}
                 role="tab"
                 aria-selected={active}
+                aria-controls={`history-panel-${tab.id}`}
                 className={`border-b-2 px-1 py-2 text-sm transition-colors ${
                   active
                     ? 'border-[var(--text-main)] font-medium text-[var(--text-main)]'
@@ -333,7 +341,7 @@ export default function History() {
           })}
         </div>
 
-        <div className="divide-y divide-[var(--border-color)] overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]">
+        <div id={`history-panel-${activeTab}`} role="tabpanel" className="divide-y divide-[var(--border-color)] overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]">
           {records.map((item) => (
             <div key={item.id ?? `${item.date}-${item.role}`} className="flex items-center justify-between gap-5 px-4 py-3 text-sm hover:bg-[var(--bg-hover)]">
               <div className="grid min-w-0 flex-1 grid-cols-[8rem_minmax(0,1fr)] items-center gap-4">
@@ -386,7 +394,15 @@ export default function History() {
             <div className="p-8 text-center text-sm text-[var(--text-muted)]">
               {searchQuery.trim()
                 ? t('history.noResults')
-                : t(activeTab === 'mock' ? 'history.empty.mock' : 'history.empty.copilot')}
+                : (
+                  <div className="space-y-3">
+                    <div>{t(activeTab === 'mock' ? 'history.empty.mock' : 'history.empty.copilot')}</div>
+                    <div className="flex justify-center gap-2">
+                      <button type="button" className="rounded-md border border-[var(--border-color)] px-3 py-1.5" onClick={onLaunchCopilot}>{t('nav.copilot')}</button>
+                      <button type="button" className="rounded-md border border-[var(--border-color)] px-3 py-1.5" onClick={onNavigateToMock}>{t('nav.mock')}</button>
+                    </div>
+                  </div>
+                )}
             </div>
           )}
         </div>
@@ -430,6 +446,19 @@ export default function History() {
             <div className="mb-3 text-sm text-[var(--text-muted)]">
               {t('misc.score')}: <span className="font-semibold text-[var(--text-main)]">{selected.score ?? t('history.notScored')}</span> • {t('history.replayModal.duration')}: {Math.floor(selected.duration/60)}:{String(selected.duration % 60).padStart(2, '0')}
             </div>
+            {(() => {
+              const feedback = parseHistoryFeedback(selected.detailsJson, selected.score)
+              if (!feedback) return null
+              return (
+                <div className="mb-3 rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm">
+                  {feedback.quality && <div className="mb-1 text-xs uppercase tracking-wide text-[var(--text-muted)]">{feedback.quality}</div>}
+                  {feedback.summary && <p className="mb-2">{feedback.summary}</p>}
+                  {feedback.strengths.length > 0 && <div className="mb-1">{t('history.strengths')}: {feedback.strengths.join(' · ')}</div>}
+                  {feedback.improvements.length > 0 && <div className="mb-1">{t('history.improvements')}: {feedback.improvements.join(' · ')}</div>}
+                  {feedback.archivePartial && <div className="text-xs text-[var(--warning)]">{t('history.partialArchive')}</div>}
+                </div>
+              )
+            })()}
 
             <div className="mb-3 max-h-[320px] min-h-48 overflow-auto rounded-md bg-[var(--bg-subtle)] p-3 text-sm">
               {selectedMessages.length === 0 ? (

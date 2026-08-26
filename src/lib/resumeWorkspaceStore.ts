@@ -83,6 +83,9 @@ export function normalizeResumeWorkspace(value: unknown): ResumeWorkspace {
     analysisOriginalFingerprint: typeof saved.analysisOriginalFingerprint === 'string' ? saved.analysisOriginalFingerprint : '',
     analysisJobDescriptionFingerprint: typeof saved.analysisJobDescriptionFingerprint === 'string' ? saved.analysisJobDescriptionFingerprint : '',
     analysisSource,
+    targetRole: typeof saved.targetRole === 'string' ? saved.targetRole.trim().slice(0, 160) : '',
+    targetCompany: typeof saved.targetCompany === 'string' ? saved.targetCompany.trim().slice(0, 160) : '',
+    profileUpdatedAt: typeof saved.profileUpdatedAt === 'string' ? saved.profileUpdatedAt : '',
     ...keywordMatch,
   }
 }
@@ -99,6 +102,9 @@ export function toPersistedResumeWorkspace(workspace: ResumeWorkspace): Omit<Res
     analysisOriginalFingerprint: workspace.analysisOriginalFingerprint,
     analysisJobDescriptionFingerprint: workspace.analysisJobDescriptionFingerprint,
     analysisSource: workspace.analysisSource,
+    targetRole: workspace.targetRole,
+    targetCompany: workspace.targetCompany,
+    profileUpdatedAt: workspace.profileUpdatedAt,
   }
 }
 
@@ -107,7 +113,9 @@ export function hasResumeWorkspaceContent(workspace: ResumeWorkspace): boolean {
     workspace.original.trim()
     || workspace.optimized.trim()
     || workspace.jobDescription.trim()
-    || workspace.sourceFileName,
+    || workspace.sourceFileName
+    || workspace.targetRole?.trim()
+    || workspace.targetCompany?.trim(),
   )
 }
 

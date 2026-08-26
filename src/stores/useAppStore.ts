@@ -61,6 +61,9 @@ export interface AppState {
   resumeAnalysisOriginalFingerprint: string
   resumeAnalysisJobDescriptionFingerprint: string
   resumeAnalysisSource: ResumeAnalysisSource
+  resumeTargetRole: string
+  resumeTargetCompany: string
+  resumeProfileUpdatedAt: string
   resumeHydrated: boolean
   resumePersistenceError: boolean
   hydrateResumeWorkspace: (workspace: ResumeWorkspace) => void
@@ -86,6 +89,9 @@ function resumeStateFromWorkspace(workspace: ResumeWorkspace) {
     resumeAnalysisOriginalFingerprint: workspace.analysisOriginalFingerprint,
     resumeAnalysisJobDescriptionFingerprint: workspace.analysisJobDescriptionFingerprint,
     resumeAnalysisSource: workspace.analysisSource,
+    resumeTargetRole: workspace.targetRole || '',
+    resumeTargetCompany: workspace.targetCompany || '',
+    resumeProfileUpdatedAt: workspace.profileUpdatedAt || '',
   }
 }
 
@@ -103,6 +109,9 @@ export function selectResumeWorkspace(state: AppState): ResumeWorkspace {
     analysisOriginalFingerprint: state.resumeAnalysisOriginalFingerprint,
     analysisJobDescriptionFingerprint: state.resumeAnalysisJobDescriptionFingerprint,
     analysisSource: state.resumeAnalysisSource,
+    targetRole: state.resumeTargetRole,
+    targetCompany: state.resumeTargetCompany,
+    profileUpdatedAt: state.resumeProfileUpdatedAt,
   }
 }
 
@@ -124,6 +133,8 @@ export const useAppStore = create<AppState>((set) => ({
     sttProvider: 'deepgram',
     sttModel: 'nova-3',
     sttLanguage: 'zh-CN',
+    useSystemAudio: true,
+    useMicWithSystem: false,
   },
 
   copilot: createInitialSnapshot(),
@@ -147,6 +158,9 @@ export const useAppStore = create<AppState>((set) => ({
   resumeAnalysisOriginalFingerprint: '',
   resumeAnalysisJobDescriptionFingerprint: '',
   resumeAnalysisSource: '',
+  resumeTargetRole: '',
+  resumeTargetCompany: '',
+  resumeProfileUpdatedAt: '',
   resumeHydrated: false,
   resumePersistenceError: false,
   hydrateResumeWorkspace: (workspace) => set({ ...resumeStateFromWorkspace(workspace), resumeHydrated: true }),

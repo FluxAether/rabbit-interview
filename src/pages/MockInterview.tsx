@@ -41,7 +41,7 @@ const labels = {
 }
 
 export default function MockInterview() {
-  const { settings, resumeOriginal, resumeOptimized, jobDescription, addHistory } = useAppStore()
+  const { settings, resumeOriginal, resumeOptimized, jobDescription, resumeTargetRole, resumeTargetCompany, addHistory } = useAppStore()
   const t = useTranslation()
   const language = (settings.language || 'zh-CN') as 'zh-CN' | 'zh-TW' | 'en-US'
   const copy = labels[language]
@@ -50,6 +50,8 @@ export default function MockInterview() {
     const initial = createMockInterviewSnapshot(language)
     initial.config.resumeContext = workspaceResume
     initial.config.jobDescription = jobDescription
+    initial.config.role = resumeTargetRole
+    initial.config.company = resumeTargetCompany
     return initial
   })
   const [voiceSnapshot, setVoiceSnapshot] = useState<MockInterviewVoiceSnapshot>(() => createMockInterviewVoiceSnapshot())
@@ -134,6 +136,8 @@ export default function MockInterview() {
     updateConfig({
       resumeContext: workspaceResume,
       jobDescription: jobDescription,
+      role: resumeTargetRole || session.config.role,
+      company: resumeTargetCompany || session.config.company,
     })
   }
 

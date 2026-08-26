@@ -1,14 +1,18 @@
 import { ArrowDown, ArrowUp, Users, TrendingUp, ClipboardCheck, Rocket, Settings as SettingsIcon } from 'lucide-react'
 import { FileText, Mic, ChevronRight } from 'lucide-react'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
 import { computeDashboardStats } from '../lib/dashboardStats'
+import { deriveReadiness, primarySettingsTab, type SettingsTab } from '../lib/readiness'
+import { getApiKey } from '../lib/keyStore'
+import { invoke } from '@tauri-apps/api/core'
+import type { AudioCapabilities } from '../lib/copilotSession'
 
 interface DashboardProps {
   onLaunchCopilot: () => void
   onViewHistory: () => void
-  onNavigateToSettings?: () => void
+  onNavigateToSettings?: (tab?: SettingsTab) => void
   onNavigateToMock?: () => void
   onNavigateToResume?: () => void
 }
@@ -50,12 +54,42 @@ function DeltaBadge({ value, unit }: { value: number | null; unit: string }) {
 export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateToSettings, onNavigateToMock, onNavigateToResume }: DashboardProps) {
   const history = useAppStore((state) => state.history)
   const historyStatus = useAppStore((state) => state.historyStatus)
+  const settings = useAppStore((state) => state.settings)
+  const targetRole = useAppStore((state) => state.resumeTargetRole)
+  const targetCompany = useAppStore((state) => state.resumeTargetCompany)
   const t = useTranslation()
   const stats = useMemo(
     () => historyStatus === 'ready' ? computeDashboardStats(history) : null,
     [history, historyStatus],
   )
   const unavailableMetric = historyStatus === 'loading' ? '…' : '-'
+  const [readinessLabel, setReadinessLabel] = useState('loading')
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('ai')
+
+  useEffect(() => {
+    let cancelled = false
+    void Promise.all([
+      getApiKey('GROQ_API_KEY'),
+      getApiKey('OPENAI_API_KEY'),
+      getApiKey('ANTHROPIC_API_KEY'),
+      getApiKey('GEMINI_API_KEY'),
+      getApiKey('DEEPGRAM_API_KEY'),
+      invoke<AudioCapabilities>('get_audio_capabilities').catch(() => null),
+    ]).then(([groq, openai, anthropic, gemini, deepgram, capabilities]) => {
+      if (cancelled) return
+      const readiness = deriveReadiness({
+        settings: { aiModel: settings.aiModel, sttProvider: settings.sttProvider },
+        keys: { groq: !!groq, openai: !!openai, anthropic: !!anthropic, gemini: !!gemini, deepgram: !!deepgram },
+        useSystemAudio: settings.useSystemAudio ?? true,
+        useMicrophone: settings.useMicWithSystem ?? false,
+        capabilities,
+        capabilitiesError: !capabilities,
+      })
+      setReadinessLabel(readiness.status)
+      setSettingsTab(primarySettingsTab(readiness))
+    })
+    return () => { cancelled = true }
+  }, [settings.aiModel, settings.sttProvider, settings.useSystemAudio, settings.useMicWithSystem])
 
   const launch = () => {
     onLaunchCopilot()
@@ -72,13 +106,38 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
 
           <button
             type="button"
-            onClick={onNavigateToSettings}
+            onClick={() => onNavigateToSettings?.()}
             className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
             aria-label={t("nav.settings")}
           >
             <SettingsIcon className="h-4 w-4" />
           </button>
         </div>
+
+        <section className="mb-6 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="text-sm font-semibold">{t('dashboard.readiness.title')}</div>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">
+                {targetRole || targetCompany
+                  ? `${targetCompany ? targetCompany + ' · ' : ''}${targetRole || t('dashboard.readiness.noRole')}`
+                  : t('dashboard.readiness.noProfile')}
+              </div>
+              <div className="mt-2 text-xs font-medium">{t(`dashboard.readiness.${readinessLabel}`)}</div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => onNavigateToSettings?.(settingsTab)} className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-xs hover:bg-[var(--bg-hover)]">
+                {t('dashboard.readiness.fix')}
+              </button>
+              <button type="button" onClick={onNavigateToResume} className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-xs hover:bg-[var(--bg-hover)]">
+                {t('dashboard.readiness.profile')}
+              </button>
+              <button type="button" onClick={launch} className="rounded-md bg-[var(--action)] px-3 py-1.5 text-xs font-medium text-[var(--action-text)]">
+                {t('common.launch')}
+              </button>
+            </div>
+          </div>
+        </section>
 
         <section className="mb-6 grid grid-cols-1 divide-y divide-[var(--border-color)] overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           <div className="p-5">
@@ -258,7 +317,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
             <div className="space-y-2.5 text-xs">
               <button
                 type="button"
-                onClick={onNavigateToSettings}
+                onClick={() => onNavigateToSettings?.(settingsTab)}
                 className="flex w-full items-center justify-between rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-2 text-left hover:bg-[var(--bg-hover)] transition-colors"
               >
                 <span>{t('dashboard.onboarding.step1')}</span>

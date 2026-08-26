@@ -16,7 +16,11 @@ import {
 import { loadAppSettings, saveAppSettings } from "../lib/settingsStore"
 import { useAppStore } from "../stores/useAppStore"
 
-export default function StealthCopilot() {
+export default function StealthCopilot({
+  onOpenSettings,
+}: {
+  onOpenSettings?: (tab: 'ai' | 'stt' | 'shortcuts_privacy') => void
+} = {}) {
   const t = useTranslation()
   const copilot = useAppStore((state) => state.copilot)
   const [devices, setDevices] = useState<string[]>([])
@@ -27,6 +31,7 @@ export default function StealthCopilot() {
   const [windowStatus, setWindowStatus] = useState<CopilotWindowStatus | null>(null)
   const [audioSettingsOpen, setAudioSettingsOpen] = useState(false)
   const [audioReady, setAudioReady] = useState(false)
+  const [capabilitiesError, setCapabilitiesError] = useState(false)
   const running = copilot.phase === "starting" || copilot.phase === "listening" || copilot.phase === "stopping"
 
   useEffect(() => {
@@ -39,7 +44,10 @@ export default function StealthCopilot() {
   }, [audioSettingsOpen])
 
   const loadDevices = async (preferredDevice = selectedDevice) => {
-    const values: string[] = await invoke<string[]>("list_audio_devices").catch(() => [])
+    const values: string[] = await invoke<string[]>("list_audio_devices").catch(() => {
+      setCapabilitiesError(true)
+      return []
+    })
     setDevices(values)
     setSelectedDevice(values.includes(preferredDevice) ? preferredDevice : preferredDevice || values[0] || "")
   }
@@ -52,18 +60,24 @@ export default function StealthCopilot() {
       else unsubscribeWindowStatus = cleanup
     })
     void Promise.all([
-      invoke<AudioCapabilities>("get_audio_capabilities").then(setCapabilities),
+      invoke<AudioCapabilities>("get_audio_capabilities").then((value) => {
+        setCapabilities(value)
+        setCapabilitiesError(false)
+      }),
       getCopilotWindowStatus().then(setWindowStatus),
       loadAppSettings().then((settings) => {
         setUseSystemAudio(settings.useSystemAudio ?? true)
-        setUseMicrophone(settings.useMicWithSystem ?? true)
+        setUseMicrophone(settings.useMicWithSystem ?? false)
         setSelectedDevice(settings.micDevice || "")
       }),
     ]).then(() => {
       if (!cancelled) setAudioReady(true)
     }).catch((error) => {
       console.warn("Unable to load Copilot capabilities", error)
-      if (!cancelled) setAudioReady(true)
+      if (!cancelled) {
+        setCapabilitiesError(true)
+        setAudioReady(false)
+      }
     })
     return () => {
       cancelled = true
@@ -251,7 +265,7 @@ export default function StealthCopilot() {
             <Mic className="h-3.5 w-3.5" />
             <span>{t("copilot.microphone")}:</span>
             <span className={useMicrophone && (capabilities?.microphone_available ?? true) ? "font-semibold text-[var(--success)]" : "text-[var(--text-muted)]"}>
-              {!audioReady ? t("copilot.statusUnknown") : useMicrophone && (capabilities?.microphone_available ?? true) ? t("copilot.enabled") : t("copilot.disabled")}
+              {!audioReady || capabilitiesError ? t("copilot.statusUnknown") : useMicrophone && capabilities?.microphone_available ? t("copilot.enabled") : t("copilot.disabled")}
             </span>
           </div>
           {selectedDevice && (
@@ -266,6 +280,13 @@ export default function StealthCopilot() {
             {t("copilot.archive.autoSaveHint")}
           </span>
         </div>
+        {(capabilitiesError || (!audioReady && !running)) && onOpenSettings && (
+          <div className="mb-2 flex gap-2 text-xs">
+            <button type="button" className="rounded-md border border-[var(--border-color)] px-2 py-1" onClick={() => onOpenSettings('ai')}>{t('copilot.fixAi')}</button>
+            <button type="button" className="rounded-md border border-[var(--border-color)] px-2 py-1" onClick={() => onOpenSettings('stt')}>{t('copilot.fixStt')}</button>
+            <button type="button" className="rounded-md border border-[var(--border-color)] px-2 py-1" onClick={() => onOpenSettings('shortcuts_privacy')}>{t('copilot.fixAudio')}</button>
+          </div>
+        )}
 
         {/* Core Copilot Panel */}
         <div className="min-h-0 flex-1">

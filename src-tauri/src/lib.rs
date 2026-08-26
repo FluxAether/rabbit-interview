@@ -1,5 +1,6 @@
 mod audio;
 mod copilot_window;
+mod secure_store;
 mod speech;
 mod stt;
 
@@ -17,6 +18,7 @@ use stt::apple::{
     get_apple_stt_status, get_microphone_permission_status, request_microphone_permission_command,
     start_apple_stt, stop_apple_stt, test_apple_stt,
 };
+use secure_store::{delete_secure_secret, load_secure_secret, save_secure_secret};
 use tauri::Emitter;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
@@ -70,6 +72,9 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut}
             test_apple_stt,
             get_microphone_permission_status,
             request_microphone_permission_command,
+            load_secure_secret,
+            save_secure_secret,
+            delete_secure_secret,
         ])
         .setup(|app| {
             // Register the actual hotkey combinations.

@@ -550,7 +550,13 @@ export default function CopilotPanel({
 
         <button
           type="button"
-          onClick={() => void sendCopilotCommand({ type: "clear" })}
+          onClick={() => {
+            const hasContent = Boolean(copilot.question || copilot.messages.length || copilot.suggestions.length)
+            if (copilot.archiveStatus === "saving") return
+            if (hasContent && !window.confirm(t("copilot.clearConfirm"))) return
+            void sendCopilotCommand({ type: "clear" })
+          }}
+          disabled={copilot.archiveStatus === "saving"}
           className="flex items-center gap-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
         >
           <Trash2 className="h-3.5 w-3.5" /> {t("copilot.clear")}

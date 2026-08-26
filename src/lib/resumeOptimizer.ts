@@ -56,6 +56,9 @@ export interface ResumeWorkspace {
   analysisOriginalFingerprint: string
   analysisJobDescriptionFingerprint: string
   analysisSource: ResumeAnalysisSource
+  targetRole: string
+  targetCompany: string
+  profileUpdatedAt: string
 }
 
 const RESUME_SUGGESTION_CATEGORIES: ResumeSuggestionCategory[] = ['format', 'clarity', 'impact', 'keywords']
@@ -225,6 +228,9 @@ export function createEmptyResumeWorkspace(): ResumeWorkspace {
     analysisOriginalFingerprint: '',
     analysisJobDescriptionFingerprint: '',
     analysisSource: '',
+    targetRole: '',
+    targetCompany: '',
+    profileUpdatedAt: '',
   }
 }
 

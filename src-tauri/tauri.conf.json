@@ -24,7 +24,13 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": {
+        "default-src": "'self' ipc: http://ipc.localhost",
+        "img-src": "'self' asset: http://asset.localhost data: blob:",
+        "media-src": "'self' asset: http://asset.localhost blob:",
+        "connect-src": "'self' ipc: http://ipc.localhost https://api.groq.com https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com wss://api.deepgram.com wss://generativelanguage.googleapis.com https://github.com https://objects.githubusercontent.com",
+        "style-src": "'self' 'unsafe-inline'"
+      },
       "assetProtocol": {
         "enable": true,
         "scope": ["$APPDATA/recordings/**"]
@@ -59,7 +65,7 @@
    "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2MTVBQ0M1QjUyRkM0NjEKUldSaHhDKzF4YXdWOXFpaE9tV2NYOFF4SjFSclZVMlVpMjhaYXRWdDVKS1NzTnhTSC96ODh6MlYK",
       "endpoints": [
-        "https://github.com/FluxAether/rabbit-interview/releases/latest/download/latest.json"
+        "https://github.com/thomas92118/rabbit-interview/releases/latest/download/latest.json"
       ]
    }
  }

@@ -1,4 +1,6 @@
 import type { InterviewRecord } from "../stores/useAppStore"
+import { isDashboardEligible, type SessionQuality } from "./sessionQuality"
+import { parseHistoryFeedback } from "./historyFeedback"
 
 export interface DashboardStats {
   interviewCount: number
@@ -10,6 +12,7 @@ export interface DashboardStats {
 }
 
 type InterviewLike = Pick<InterviewRecord, "date" | "score">
+  & Partial<Pick<InterviewRecord, "detailsJson">>
 
 function parseInterviewDate(date: string): Date | null {
   if (!date) return null
@@ -41,6 +44,8 @@ function collectMonthStats(records: InterviewLike[], targetMonth: number) {
   const scores: number[] = []
 
   for (const record of records) {
+    const quality = parseHistoryFeedback(record.detailsJson)?.quality as SessionQuality | null
+    if (quality && !isDashboardEligible(quality)) continue
     const date = parseInterviewDate(record.date)
     if (!date || monthIndex(date) !== targetMonth) continue
     interviewCount += 1
@@ -65,12 +70,16 @@ export function computeDashboardStats(
   const previousMonth = currentMonth - 1
   const current = collectMonthStats(records, currentMonth)
   const previous = collectMonthStats(records, previousMonth)
-  const scoredScores = records.flatMap((record) =>
+  const eligible = records.filter((record) => {
+    const quality = parseHistoryFeedback(record.detailsJson)?.quality as SessionQuality | null
+    return !quality || isDashboardEligible(quality)
+  })
+  const scoredScores = eligible.flatMap((record) =>
     typeof record.score === "number" && Number.isFinite(record.score) ? [record.score] : [],
   )
 
   return {
-    interviewCount: records.length,
+    interviewCount: eligible.length,
     averageScore: averageScore(scoredScores),
     scoredCount: scoredScores.length,
     interviewDeltaPct: percentDelta(current.interviewCount, previous.interviewCount),

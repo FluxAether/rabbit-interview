@@ -463,9 +463,19 @@ if (sessionState) {
   )
 }
 
+const { formatSessionTitle } = loadTypeScriptModule(
+  'src/lib/interviewProfile.ts',
+  ['formatSessionTitle'],
+  { createEmptyResumeWorkspace: () => ({ original: '', optimized: '', jobDescription: '', suggestions: [], sourceFileName: '', requirements: [], targetKeywords: [], matchedKeywords: [], missingKeywords: [], analysisOriginalFingerprint: '', analysisJobDescriptionFingerprint: '', analysisSource: '', targetRole: '', targetCompany: '', profileUpdatedAt: '' }), resumeTextFingerprint: () => 'fp' },
+)
+const { classifySessionQuality } = loadTypeScriptModule(
+  'src/lib/sessionQuality.ts',
+  ['classifySessionQuality'],
+)
 const { createCopilotInterviewRecord, generateCopilotSessionTitle } = loadTypeScriptModule(
   'src/lib/copilotArchive.ts',
   ['createCopilotInterviewRecord', 'generateCopilotSessionTitle'],
+  { formatSessionTitle, classifySessionQuality },
 )
 const archivedRecord = createCopilotInterviewRecord(
   [
@@ -480,8 +490,8 @@ check(
   archivedRecord.transcript === 'Interviewer: Tell me about yourself.\nAI: I build reliable desktop systems.'
     && archivedRecord.duration === 42
     && archivedRecord.recordingPath === '/tmp/interview.wav'
-    && archivedRecord.role === 'Tell me about yourself.'
-    && archivedRecord.company === 'Stealth Copilot'
+    && archivedRecord.role === 'Tell me about yourself. · 2026-07-20'
+    && archivedRecord.company === 'Copilot'
     && archivedRecord.score === null,
   'automatic archive records contain the complete transcript, duration, and recording path',
 )
@@ -1199,6 +1209,15 @@ function createCopilotSessionHost(sessionId) {
         answerStatus: 'idle',
         activeAnswerId: null,
       }),
+      createEmptyResumeWorkspace: () => ({ original: '', optimized: '', jobDescription: '', suggestions: [], sourceFileName: '', requirements: [], targetKeywords: [], matchedKeywords: [], missingKeywords: [], analysisOriginalFingerprint: '', analysisJobDescriptionFingerprint: '', analysisSource: '', targetRole: '', targetCompany: '', profileUpdatedAt: '' }),
+      interviewProfileFromWorkspace: (workspace) => workspace,
+      createSessionIdentity: () => ({ mode: 'copilot', targetRole: '', targetCompany: '', startedAt: '', profileUpdatedAt: '', isTestSession: false }),
+      buildInterviewContext: () => '',
+      createRecoverySnapshot: () => null,
+      SESSION_RECOVERY_KEY: 'copilot_recovery_v1',
+      deleteSetting: async () => {},
+      saveSetting: async () => {},
+      saveInterview: async () => 1,
       closeDeepgramStream: () => {},
       ...copilotEndpoint,
       ...copilotTurnDetector,
@@ -1743,6 +1762,16 @@ restartOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
 await restartHarness.timers.runTimeout(1_500)
 check(restartCalls.length === 0, 'a microphone seal does not restart after the model has started streaming')
 
+
+
+const { deriveReadiness } = loadTypeScriptModule('src/lib/readiness.ts', ['deriveReadiness'])
+check(deriveReadiness({ loading: true }).status === 'loading', 'readiness stays loading until settings exist')
+check(deriveReadiness({ settings: { aiModel: "groq-llama-3.1", sttProvider: "deepgram" }, keys: { groq: true } }).issues.some((issue) => issue.code === "missing-stt-key"), 'LLM-only setup still reports missing STT')
+check(!deriveReadiness({ settings: { aiModel: "groq-llama-3.1", sttProvider: "deepgram" }, keys: { groq: true } }).canStartCopilot, 'missing STT cannot start Copilot')
+check(panel.includes('copilot.clearConfirm'), 'Clear requires confirmation when the session has content')
+check(historyPage.includes('parseHistoryFeedback'), 'History renders saved scoring details')
+check(settingsStore.includes('useMicWithSystem: false'), 'real Copilot defaults to system audio without microphone')
+check(tauriConfig.includes('thomas92118/rabbit-interview'), 'updater points at the current origin repository')
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)
 if (failed > 0) process.exit(1)

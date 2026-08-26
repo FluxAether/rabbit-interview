@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core'
 import {
   clearSecrets,
   deleteSecret,
@@ -23,10 +24,43 @@ async function ensureMigrated(): Promise<void> {
   await migrateLegacyJsonStoresIfNeeded(encryptSecret);
 }
 
+async function loadFromKeychain(key: ApiKeyName): Promise<string | null> {
+  try {
+    const value = await invoke<string | null>('load_secure_secret', { key })
+    return value?.trim() ? value : null
+  } catch {
+    return null
+  }
+}
+
+async function saveToKeychain(key: ApiKeyName, value: string): Promise<boolean> {
+  try {
+    await invoke('save_secure_secret', { key, value })
+    return true
+  } catch (error) {
+    console.warn('Secure secret save failed', error)
+    return false
+  }
+}
+
+async function deleteFromKeychain(key: ApiKeyName): Promise<void> {
+  try {
+    await invoke('delete_secure_secret', { key })
+  } catch (error) {
+    console.warn('Secure secret delete failed', error)
+  }
+}
+
 export async function setApiKey(key: ApiKeyName, value: string): Promise<void> {
   await ensureMigrated();
   const trimmed = value.trim();
   if (!trimmed) {
+    await deleteFromKeychain(key);
+    await deleteSecret(key);
+    return;
+  }
+  const storedSecurely = await saveToKeychain(key, trimmed);
+  if (storedSecurely) {
     await deleteSecret(key);
     return;
   }
@@ -35,11 +69,22 @@ export async function setApiKey(key: ApiKeyName, value: string): Promise<void> {
 
 export async function getApiKey(key: ApiKeyName): Promise<string | null> {
   await ensureMigrated();
-  return decryptSecret(await loadSecret(key));
+  const secure = await loadFromKeychain(key);
+  if (secure) {
+    await deleteSecret(key).catch(() => {});
+    return secure;
+  }
+  const legacy = decryptSecret(await loadSecret(key));
+  if (!legacy) return null;
+  if (await saveToKeychain(key, legacy)) {
+    await deleteSecret(key).catch(() => {});
+  }
+  return legacy;
 }
 
 export async function clearApiKeys(): Promise<void> {
   await ensureMigrated();
+  await Promise.all(ALL_KEYS.map((key) => deleteFromKeychain(key)));
   await clearSecrets(ALL_KEYS);
 }
 

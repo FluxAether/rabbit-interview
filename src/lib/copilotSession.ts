@@ -12,7 +12,7 @@ import {
 } from './llm'
 import { loadAppSettings } from './settingsStore'
 import { openMicrophoneSettings, tryRequestMicrophone } from './permissions'
-import { saveInterview } from './db'
+import { deleteSetting, loadSetting, saveInterview, saveSetting } from './db'
 import {
   createInitialSnapshot,
   reduceCopilotSnapshot,
@@ -20,8 +20,12 @@ import {
   type CopilotSnapshotAction,
 } from './copilotSessionState'
 import { useAppStore, type Suggestion } from '../stores/useAppStore'
+import { createEmptyResumeWorkspace } from './resumeOptimizer'
+import { buildInterviewContext, createSessionIdentity, interviewProfileFromWorkspace } from './interviewProfile'
+import { createRecoverySnapshot, parseRecoverySnapshot, SESSION_RECOVERY_KEY } from './sessionRecovery'
 import { mergeContinuationText, textSimilarity } from './copilotText'
 import { createCopilotInterviewRecord, type SavedRecording } from './copilotArchive'
+import { canGenerateSuggestion, deriveLicenseState, parseLicensePayload } from './license'
 import { buildRecentTurnsContext, collectCopilotTurns, scoreCopilotSession, type CopilotSessionScore } from './copilotScoring'
 import {
   getInterviewerCommitDelay,
@@ -66,6 +70,7 @@ export interface CopilotStartConfig {
   useSystemAudio?: boolean
   useMicrophone?: boolean
   deviceName?: string | null
+  isTestSession?: boolean
 }
 
 type CopilotAudioSource = 'system' | 'microphone'
@@ -171,11 +176,18 @@ class CopilotSessionHost {
   private recentAssistantAt = 0
   private recentMicrophoneText = ''
   private recentMicrophoneAt = 0
+  private identity = createSessionIdentity('copilot', interviewProfileFromWorkspace(createEmptyResumeWorkspace()), false)
+  private recoveryTimer: ReturnType<typeof globalThis.setTimeout> | null = null
 
   async mount(): Promise<void> {
     this.commandUnlisten = await listen<CopilotSessionCommand>(COMMAND_EVENT, (event) => {
       void this.handle(event.payload)
     })
+    const recovered = parseRecoverySnapshot(await loadSetting(SESSION_RECOVERY_KEY).catch(() => null))
+    if (recovered?.messages.length) {
+      this.identity = recovered.identity
+      this.transition({ type: 'archive-error', notice: 'copilot.archive.recoveryAvailable' })
+    }
     await this.publish(true)
   }
 
@@ -237,11 +249,18 @@ class CopilotSessionHost {
       recording?.path ?? null,
       new Date(),
       score,
+      {
+        targetRole: this.identity.targetRole,
+        targetCompany: this.identity.targetCompany,
+        isTestSession: this.identity.isTestSession,
+        archivePartial: Boolean(recordingError || scoreError),
+      },
     )
 
     try {
       const id = await saveInterview(record)
       useAppStore.getState().addHistory({ ...record, id })
+      await deleteSetting(SESSION_RECOVERY_KEY).catch(() => {})
       if (recordingError || scoreError) {
         const parts = []
         if (recordingError) parts.push(`recording could not be saved: ${recordingError}`)
@@ -405,6 +424,24 @@ class CopilotSessionHost {
       useAppStore.getState().setCopilotSnapshot(this.snapshot)
     }
     await emit(SNAPSHOT_EVENT, this.snapshot)
+    this.scheduleRecoverySave()
+  }
+
+  private scheduleRecoverySave(): void {
+    if (this.identity.isTestSession) return
+    if (this.recoveryTimer != null) return
+    this.recoveryTimer = globalThis.setTimeout(() => {
+      this.recoveryTimer = null
+      const snapshot = createRecoverySnapshot(
+        this.identity,
+        this.snapshot.messages,
+        this.snapshot.question,
+        this.snapshot.startedAt ?? Date.now(),
+      )
+      if (!snapshot) return
+      void saveSetting(SESSION_RECOVERY_KEY, JSON.stringify(snapshot)).catch(() => {})
+    }, 800)
+    ;(this.recoveryTimer as { unref?: () => void }).unref?.()
   }
 
   private async handle(command: CopilotSessionCommand): Promise<void> {
@@ -482,6 +519,28 @@ class CopilotSessionHost {
     this.recentMicrophoneAt = 0
     this.limitReached = false
     this.clearLimitTimer()
+    const store = useAppStore.getState()
+    this.identity = createSessionIdentity(
+      'copilot',
+      interviewProfileFromWorkspace({
+        original: store.resumeOriginal,
+        optimized: store.resumeOptimized,
+        jobDescription: store.jobDescription,
+        suggestions: store.resumeSuggestions,
+        sourceFileName: store.resumeSourceFileName,
+        requirements: store.resumeRequirements,
+        targetKeywords: store.resumeTargetKeywords,
+        matchedKeywords: store.resumeMatchedKeywords,
+        missingKeywords: store.resumeMissingKeywords,
+        analysisOriginalFingerprint: store.resumeAnalysisOriginalFingerprint,
+        analysisJobDescriptionFingerprint: store.resumeAnalysisJobDescriptionFingerprint,
+        analysisSource: store.resumeAnalysisSource,
+        targetRole: store.resumeTargetRole,
+        targetCompany: store.resumeTargetCompany,
+        profileUpdatedAt: store.resumeProfileUpdatedAt,
+      }),
+      Boolean(config.isTestSession),
+    )
 
     try {
       const [settings, capabilities] = await Promise.all([
@@ -491,8 +550,8 @@ class CopilotSessionHost {
       if (!this.isCurrent(sessionId)) return
 
       const systemRequested = config.useSystemAudio ?? settings.useSystemAudio ?? true
+      const microphoneRequested = config.useMicrophone ?? settings.useMicWithSystem ?? false
       const useSystemAudio = systemRequested && capabilities.system_audio_available
-      const microphoneRequested = config.useMicrophone ?? settings.useMicWithSystem ?? true
       const useMicrophone = microphoneRequested
 
       this.transition({
@@ -927,7 +986,7 @@ class CopilotSessionHost {
   }
 
   private buildContext(question: string): string {
-    const { resumeOriginal, jobDescription } = useAppStore.getState()
+    const store = useAppStore.getState()
     const skipIds = new Set<number>()
     if (this.transcripts.microphone.openMessageId != null) {
       skipIds.add(this.transcripts.microphone.openMessageId)
@@ -939,11 +998,23 @@ class CopilotSessionHost {
       ? this.snapshot.messages.filter((message) => !skipIds.has(message.id))
       : this.snapshot.messages
     const recentTurns = buildRecentTurnsContext(collectCopilotTurns(messages), question)
-    return [
-      resumeOriginal ? `Resume:\n${resumeOriginal.slice(0, 6_000)}` : '',
-      jobDescription ? `Job description:\n${jobDescription.slice(0, 4_000)}` : '',
-      recentTurns,
-    ].filter(Boolean).join('\n\n')
+    return buildInterviewContext(interviewProfileFromWorkspace({
+      original: store.resumeOriginal,
+      optimized: store.resumeOptimized,
+      jobDescription: store.jobDescription,
+      suggestions: store.resumeSuggestions,
+      sourceFileName: store.resumeSourceFileName,
+      requirements: store.resumeRequirements,
+      targetKeywords: store.resumeTargetKeywords,
+      matchedKeywords: store.resumeMatchedKeywords,
+      missingKeywords: store.resumeMissingKeywords,
+      analysisOriginalFingerprint: store.resumeAnalysisOriginalFingerprint,
+      analysisJobDescriptionFingerprint: store.resumeAnalysisJobDescriptionFingerprint,
+      analysisSource: store.resumeAnalysisSource,
+      targetRole: store.resumeTargetRole,
+      targetCompany: store.resumeTargetCompany,
+      profileUpdatedAt: store.resumeProfileUpdatedAt,
+    }), recentTurns)
   }
 
   private async answer(
@@ -953,6 +1024,12 @@ class CopilotSessionHost {
     interrupt = false,
   ): Promise<void> {
     if (!this.isCurrent(sessionId)) return
+    const usedSeconds = Math.max(0, Math.floor(((this.snapshot.startedAt ? Date.now() - this.snapshot.startedAt : 0) / 1000)))
+    const license = deriveLicenseState(parseLicensePayload((await loadSetting('season_pass_license').catch(() => null)) ?? ''), usedSeconds)
+    if (!canGenerateSuggestion(license)) {
+      this.transition({ type: 'recoverable-error', sessionId, error: 'copilot.paywall.exhausted' })
+      return
+    }
     if (this.activeAnswer) {
       if (!interrupt && requestType === 'interviewer-question') {
         this.pendingInterviewerQuestion = [question, this.pendingInterviewerQuestion]

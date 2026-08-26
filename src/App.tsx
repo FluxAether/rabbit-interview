@@ -16,6 +16,8 @@ import {
   mountCopilotSessionHost,
   sendCopilotCommand,
 } from './lib/copilotSession'
+import { invoke } from '@tauri-apps/api/core'
+import type { AudioCapabilities } from './lib/copilotSession'
 import { createEmptyResumeWorkspace } from './lib/resumeOptimizer'
 import {
   getCopilotWindowStatus,
@@ -25,11 +27,14 @@ import {
   type CopilotWindowStatus,
 } from './lib/copilotWindow'
 import { loadAppSettings, type AppSettings } from './lib/settingsStore'
+import { deriveReadiness, type SettingsTab } from './lib/readiness'
+import type { Page, SettingsIntent } from './lib/navigation'
+import { getApiKey } from './lib/keyStore'
 import { encryptSecret } from './lib/secretCrypto'
 import { loadResumeWorkspace, persistResumeWorkspace } from './lib/resumeWorkspaceStore'
 import { selectResumeWorkspace, useAppStore } from './stores/useAppStore'
 
-export type Page = 'dashboard' | 'copilot' | 'mock' | 'resume' | 'history' | 'settings'
+export type { Page, SettingsIntent }
 
 const navItems = [
   { id: 'dashboard' as Page, labelKey: 'nav.dashboard', icon: LayoutDashboard },
@@ -45,11 +50,13 @@ function Sidebar({
   onNavigate,
   collapsed,
   onToggleCollapse,
+  engineReady,
 }: {
   currentPage: Page
   onNavigate: (page: Page) => void
   collapsed: boolean
   onToggleCollapse: () => void
+  engineReady: boolean
 }) {
   const t = useTranslation()
   const settings = useAppStore((state) => state.settings)
@@ -141,20 +148,20 @@ function Sidebar({
           >
             <div className="min-w-0">
               <div className="text-[10px] uppercase font-semibold tracking-wider text-[var(--text-muted)]">AI Engine</div>
-              <div className="truncate font-mono text-[11px] text-[var(--text-main)]">{activeModel}</div>
-            </div>
-            <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--success)]" />
-          </button>
-        ) : (
+            <div className="truncate font-mono text-[11px] text-[var(--text-main)]">{activeModel}</div>
+          </div>
+            <span className={`h-2 w-2 shrink-0 rounded-full ${engineReady ? 'bg-[var(--success)]' : 'bg-[var(--warning)]'}`} />
+        </button>
+      ) : (
           <button
             type="button"
             onClick={() => onNavigate('settings')}
             title={`AI Engine: ${activeModel}`}
             className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
           >
-            <span className="h-2 w-2 rounded-full bg-[var(--success)]" />
-          </button>
-        )}
+            <span className={`h-2 w-2 rounded-full ${engineReady ? 'bg-[var(--success)]' : 'bg-[var(--warning)]'}`} />
+        </button>
+      )}
       </div>
     </aside>
   )
@@ -167,6 +174,8 @@ export default function App() {
   const setHistoryLoadError = useAppStore((state) => state.setHistoryLoadError)
   const hydrateResumeWorkspace = useAppStore((state) => state.hydrateResumeWorkspace)
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
+  const [settingsIntent, setSettingsIntent] = useState<SettingsIntent | null>(null)
+  const [engineReady, setEngineReady] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 960px)').matches)
   const [userCollapsed, setUserCollapsed] = useState(false)
   const [windowStatus, setWindowStatus] = useState<CopilotWindowStatus | null>(null)
@@ -301,6 +310,9 @@ export default function App() {
         && state.resumeAnalysisOriginalFingerprint === previous.resumeAnalysisOriginalFingerprint
         && state.resumeAnalysisJobDescriptionFingerprint === previous.resumeAnalysisJobDescriptionFingerprint
         && state.resumeAnalysisSource === previous.resumeAnalysisSource
+        && state.resumeTargetRole === previous.resumeTargetRole
+        && state.resumeTargetCompany === previous.resumeTargetCompany
+        && state.resumeProfileUpdatedAt === previous.resumeProfileUpdatedAt
       ) return
       schedulePersistence()
     })
@@ -332,6 +344,45 @@ export default function App() {
     }
   }, [floating])
 
+  useEffect(() => {
+    if (floating) return
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const current = useAppStore.getState().settings
+        const [groq, openai, anthropic, gemini, deepgram] = await Promise.all([
+          getApiKey('GROQ_API_KEY'),
+          getApiKey('OPENAI_API_KEY'),
+          getApiKey('ANTHROPIC_API_KEY'),
+          getApiKey('GEMINI_API_KEY'),
+          getApiKey('DEEPGRAM_API_KEY'),
+        ])
+        const capabilities = await invoke<AudioCapabilities>('get_audio_capabilities').catch(() => null)
+        if (cancelled) return
+        const readiness = deriveReadiness({
+          settings: { aiModel: current.aiModel, sttProvider: current.sttProvider },
+          keys: { groq: !!groq, openai: !!openai, anthropic: !!anthropic, gemini: !!gemini, deepgram: !!deepgram },
+          useSystemAudio: current.useSystemAudio ?? true,
+          useMicrophone: current.useMicWithSystem ?? false,
+          capabilities,
+          capabilitiesError: !capabilities,
+        })
+        setEngineReady(readiness.status === 'ready' || readiness.status === 'degraded')
+      } catch {
+        if (!cancelled) setEngineReady(false)
+      }
+    }
+    void refresh()
+    const unsubscribe = useAppStore.subscribe((state, previous) => {
+      if (state.settings === previous.settings) return
+      void refresh()
+    })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [floating, settings.aiModel, settings.sttProvider, settings.useSystemAudio, settings.useMicWithSystem])
+
   if (floating) {
     const hide = async () => {
       const status = await hideCopilotWindow()
@@ -352,19 +403,32 @@ export default function App() {
   }
 
   const renderPage = () => {
+    const openSettings = (tab: SettingsTab, returnTo?: Page) => {
+      setSettingsIntent({ tab, returnTo })
+      setCurrentPage('settings')
+    }
     switch (currentPage) {
-      case 'copilot': return <StealthCopilot />
+      case 'copilot': return <StealthCopilot onOpenSettings={(tab) => openSettings(tab, 'copilot')} />
       case 'mock': return <MockInterview />
       case 'resume': return <ResumeOptimizer />
-      case 'history': return <History />
-      case 'settings': return <Settings />
+      case 'history': return <History onLaunchCopilot={() => setCurrentPage('copilot')} onNavigateToMock={() => setCurrentPage('mock')} />
+      case 'settings': return (
+        <Settings
+          initialTab={settingsIntent?.tab}
+          returnTo={settingsIntent?.returnTo}
+          onReturn={(page) => {
+            setSettingsIntent(null)
+            setCurrentPage(page)
+          }}
+        />
+      )
       default: return (
         <Dashboard
           onLaunchCopilot={() => setCurrentPage('copilot')}
           onNavigateToMock={() => setCurrentPage('mock')}
           onNavigateToResume={() => setCurrentPage('resume')}
           onViewHistory={() => setCurrentPage('history')}
-          onNavigateToSettings={() => setCurrentPage('settings')}
+          onNavigateToSettings={(tab) => openSettings(tab || 'ai', 'dashboard')}
         />
       )
     }
@@ -376,6 +440,7 @@ export default function App() {
         currentPage={currentPage}
         onNavigate={setCurrentPage}
         collapsed={sidebarCollapsed}
+        engineReady={engineReady}
         onToggleCollapse={() => {
           setUserCollapsed(true)
           setSidebarCollapsed((c) => !c)

@@ -50,7 +50,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sttModel: 'nova-3',
   sttLanguage: 'zh-CN',
   useSystemAudio: true,
-  useMicWithSystem: true,
+  useMicWithSystem: false,
   copilotFontSize: 'base',
 };
 
@@ -93,6 +93,9 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
     saved?.copilotFontSize === 'sm' || saved?.copilotFontSize === 'base' || saved?.copilotFontSize === 'lg'
       ? saved.copilotFontSize
       : DEFAULT_SETTINGS.copilotFontSize!;
+  const useMicWithSystem = saved?.useMicWithSystem === undefined
+    ? DEFAULT_SETTINGS.useMicWithSystem
+    : Boolean(saved.useMicWithSystem);
   return {
     ...DEFAULT_SETTINGS,
     ...saved,
@@ -101,6 +104,7 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
     sttProvider,
     sttModel,
     copilotFontSize,
+    useMicWithSystem,
   } as AppSettings;
 }
 

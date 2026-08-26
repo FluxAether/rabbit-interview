@@ -60,6 +60,8 @@ export default function ResumeOptimizer() {
     resumeAnalysisOriginalFingerprint,
     resumeAnalysisJobDescriptionFingerprint,
     resumeAnalysisSource,
+    resumeTargetRole,
+    resumeTargetCompany,
     resumeHydrated,
     resumePersistenceError,
     updateResumeWorkspace,
@@ -486,6 +488,22 @@ export default function ResumeOptimizer() {
           <div className="mb-4 flex items-center justify-between text-sm font-medium">
             <span className="flex items-center gap-2"><FileText className="h-4 w-4" /> {t("resume.jd.title")}</span>
             <span className="text-xs font-normal text-[var(--text-muted)]">{jobDescription.length}/5000</span>
+          </div>
+          <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <input
+              value={resumeTargetRole}
+              onChange={(event) => updateResumeWorkspace({ targetRole: event.target.value, profileUpdatedAt: new Date().toISOString() })}
+              className="rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-2 text-sm outline-none"
+              placeholder={t('resume.targetRole')}
+              aria-label={t('resume.targetRole')}
+            />
+            <input
+              value={resumeTargetCompany}
+              onChange={(event) => updateResumeWorkspace({ targetCompany: event.target.value, profileUpdatedAt: new Date().toISOString() })}
+              className="rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-2 text-sm outline-none"
+              placeholder={t('resume.targetCompany')}
+              aria-label={t('resume.targetCompany')}
+            />
           </div>
           <textarea
             value={jobDescription}

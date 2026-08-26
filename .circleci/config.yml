@@ -1,7 +1,8 @@
 # Matches .github/workflows/release.yml: v* tag -> macOS+Windows installers -> GitHub Release.
-# CircleCI `release` context vars required:
-#   GH_TOKEN or GITHUB_TOKEN  (GitHub PAT with repo contents:write)
-#   TAURI_SIGNING_PRIVATE_KEY
+# CircleCI contexts required:
+#   `tauri-signing`: TAURI_SIGNING_PRIVATE_KEY and, if encrypted,
+#                    TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+#   `github-release`: GH_TOKEN or GITHUB_TOKEN (GitHub PAT with repo contents:write)
 version: 2.1
 
 orbs:
@@ -93,7 +94,7 @@ jobs:
           command: |
             set -euo pipefail
             test -n "${TAURI_SIGNING_PRIVATE_KEY:-}" || {
-              echo "Set TAURI_SIGNING_PRIVATE_KEY in the CircleCI release context" >&2
+              echo "Set TAURI_SIGNING_PRIVATE_KEY in the CircleCI tauri-signing context" >&2
               exit 1
             }
       - run:
@@ -154,7 +155,7 @@ jobs:
           name: Check updater signing key
           command: |
             if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
-              Write-Error "Set TAURI_SIGNING_PRIVATE_KEY in the CircleCI release context"
+              Write-Error "Set TAURI_SIGNING_PRIVATE_KEY in the CircleCI tauri-signing context"
               exit 1
             }
       - run:
@@ -175,13 +176,13 @@ jobs:
           name: Setup Node 20
           command: |
             $ErrorActionPreference = "Stop"
-            $major = ""
-            try { $major = node -p "process.versions.node.split('.')[0]" } catch {}
-            if ($major -ne "20") {
-              choco install nodejs-lts --version=20.19.0 -y
-            }
+            nvm install 20.19.0
+            nvm use 20.19.0
             $nodeBin = "C:\Program Files\nodejs"
             $env:Path = "$nodeBin;$env:Path"
+            if ((node -p "process.versions.node.split('.')[0]") -ne "20") {
+              throw "Expected Node 20"
+            }
             node -v
             npm -v
       - run:
@@ -284,21 +285,22 @@ workflows:
   release:
     jobs:
       - build-macos:
-          context: release
+          context: tauri-signing
           filters:
             tags:
               only: /^v.*/
             branches:
               ignore: /.*/
       - build-windows:
-          context: release
+          context: tauri-signing
           filters:
             tags:
               only: /^v.*/
             branches:
               ignore: /.*/
       - publish:
-          context: release
+          context: github-release
+          serial-group: << pipeline.project.slug >>/release
           requires:
             - build-macos
             - build-windows

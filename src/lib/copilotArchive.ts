@@ -1,6 +1,8 @@
 import type { InterviewRecord } from '../stores/useAppStore'
 import type { CopilotMessage } from './copilotSessionState'
 import type { CopilotSessionScore } from './copilotScoring'
+import { formatSessionTitle } from './interviewProfile'
+import { classifySessionQuality, type SessionQuality } from './sessionQuality'
 
 const ROLE_LABELS: Record<CopilotMessage['role'], string> = {
   interviewer: 'Interviewer',
@@ -35,11 +37,32 @@ export function createCopilotInterviewRecord(
   recordingPath: string | null,
   now = new Date(),
   score: CopilotSessionScore | null = null,
+  options: {
+    targetRole?: string
+    targetCompany?: string
+    isTestSession?: boolean
+    endedUnexpectedly?: boolean
+    archivePartial?: boolean
+  } = {},
 ): InterviewRecord {
+  const interviewerQuestionCount = messages.filter((message) => message.role === 'interviewer' && message.text.trim()).length
+  const suggestionCount = messages.filter((message) => message.role === 'assistant' && message.text.trim()).length
+  const quality: SessionQuality = classifySessionQuality({
+    isTestSession: options.isTestSession,
+    endedUnexpectedly: options.endedUnexpectedly,
+    interviewerQuestionCount,
+    suggestionCount,
+    durationSeconds: duration,
+  })
+  const fallbackTitle = generateCopilotSessionTitle(messages)
+  const role = formatSessionTitle({
+    targetRole: options.targetRole || fallbackTitle,
+    targetCompany: options.targetCompany || '',
+  }, fallbackTitle, now)
   return {
     date: now.toISOString().slice(0, 16).replace('T', ' '),
-    role: generateCopilotSessionTitle(messages),
-    company: 'Stealth Copilot',
+    role,
+    company: options.targetCompany?.trim() || 'Copilot',
     score: score?.overallScore ?? null,
     transcript: messages
       .map((message) => `${ROLE_LABELS[message.role]}: ${message.text}`)
@@ -47,10 +70,13 @@ export function createCopilotInterviewRecord(
     duration,
     mode: 'copilot',
     recordingPath,
-    detailsJson: score
-      ? JSON.stringify({
-          score,
-        })
-      : null,
+    detailsJson: JSON.stringify({
+      score,
+      quality,
+      isTestSession: Boolean(options.isTestSession),
+      archivePartial: Boolean(options.archivePartial || options.endedUnexpectedly),
+      interviewerQuestionCount,
+      suggestionCount,
+    }),
   }
 }
