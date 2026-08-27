@@ -3,7 +3,7 @@ import { loadApiKeys, getLlmApiKey } from './keyStore';
 import { useAppStore } from '../stores/useAppStore';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
-import { GEMINI_LIVE_TRANSLATE_MODEL } from './settingsStore';
+import { GEMINI_LIVE_TRANSCRIBE_MODEL, GEMINI_LIVE_TRANSLATE_MODEL } from './settingsStore';
 
 let cachedKeys: Awaited<ReturnType<typeof loadApiKeys>> | null = null;
 
@@ -399,6 +399,7 @@ export interface DeepgramStream extends WebSocket {
   __geminiSetupComplete?: boolean;
   __geminiSetupResolve?: () => void;
   __geminiSetupReject?: (error: Error) => void;
+  __geminiModel?: string;
   __geminiInputLanguage?: string;
   __geminiAppLanguage?: string;
   __geminiFinalSeen?: boolean;
@@ -536,16 +537,19 @@ function geminiTargetLanguage(appLanguage: string): 'zh-Hans' | 'zh-Hant' | 'en'
   return 'en';
 }
 
-function geminiSetup(inputLanguage: string, appLanguage: string) {
+function geminiSetup(model: string, inputLanguage: string, appLanguage: string) {
+  const generationConfig = model === GEMINI_LIVE_TRANSCRIBE_MODEL
+    ? { responseModalities: ['TEXT'] }
+    : {
+        responseModalities: ['AUDIO'],
+        translationConfig: {
+          targetLanguageCode: geminiTargetLanguage(appLanguage),
+          echoTargetLanguage: true,
+        },
+      };
   const setup: Record<string, unknown> = {
-    model: `models/${GEMINI_LIVE_TRANSLATE_MODEL}`,
-    generationConfig: {
-      responseModalities: ['AUDIO'],
-      translationConfig: {
-        targetLanguageCode: geminiTargetLanguage(appLanguage),
-        echoTargetLanguage: true,
-      },
-    },
+    model: `models/${model}`,
+    generationConfig,
     inputAudioTranscription: inputLanguage === 'multi'
       ? {}
       : { languageCodes: [inputLanguage] },
@@ -583,6 +587,7 @@ function attachGeminiHandlers(ws: DeepgramStream) {
   ws.onopen = () => {
     try {
       ws.send(JSON.stringify(geminiSetup(
+        ws.__geminiModel || GEMINI_LIVE_TRANSLATE_MODEL,
         ws.__geminiInputLanguage || 'multi',
         ws.__geminiAppLanguage || 'en-US',
       )));
@@ -703,6 +708,7 @@ async function reconnectGeminiStream(ws: DeepgramStream): Promise<void> {
     ws.__deepgramOptions,
     ws.__geminiInputLanguage,
     ws.__geminiAppLanguage,
+    ws.__geminiModel,
   ) as DeepgramStream;
   if (ws.__deepgramClosedByClient || !ws.__deepgramManaged) {
     closeDeepgramStream(next);
@@ -724,6 +730,7 @@ async function rotateGeminiStream(ws: DeepgramStream): Promise<void> {
       ws.__deepgramOptions,
       ws.__geminiInputLanguage,
       ws.__geminiAppLanguage,
+      ws.__geminiModel,
     ) as DeepgramStream;
     if (ws.__deepgramClosedByClient || !ws.__deepgramManaged) {
       closeDeepgramStream(next);
@@ -748,6 +755,7 @@ async function openGeminiLiveSocket(
   options: DeepgramStreamOptions = {},
   inputLanguage?: string,
   appLanguage?: string,
+  sttModel?: string,
 ): Promise<WebSocket> {
   const key = apiKey ?? (await getKeys(true)).gemini;
   if (!key) {
@@ -755,11 +763,15 @@ async function openGeminiLiveSocket(
   }
 
   const { settings } = useAppStore.getState();
+  const configuredModel = sttModel || (settings?.sttModel as string);
   const ws = new WebSocket(`${GEMINI_LIVE_ENDPOINT}?key=${encodeURIComponent(key)}`) as DeepgramStream;
   ws.__sttProvider = 'gemini';
   ws.__deepgramOptions = { ...options };
   ws.__deepgramOnTranscript = onTranscript;
   ws.__deepgramOnError = onError;
+  ws.__geminiModel = configuredModel === GEMINI_LIVE_TRANSCRIBE_MODEL
+    ? GEMINI_LIVE_TRANSCRIBE_MODEL
+    : GEMINI_LIVE_TRANSLATE_MODEL;
   ws.__geminiInputLanguage = inputLanguage || options.language || (settings?.sttLanguage as string) || 'multi';
   ws.__geminiAppLanguage = appLanguage || (settings?.language as string) || 'en-US';
   ws.__geminiSetupComplete = false;

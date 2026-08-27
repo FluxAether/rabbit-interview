@@ -77,6 +77,7 @@ check(
 )
 check(
   settingsPage.includes('Google AI Studio')
+    && settingsPage.includes('GEMINI_LIVE_TRANSCRIBE_MODEL')
     && settingsPage.includes('GEMINI_LIVE_TRANSLATE_MODEL')
     && settingsPage.includes("updateSttConfig('gemini'")
     && /testGeminiLiveConnection\(\s*targetKey,\s*sttLanguage,\s*language\s*\)/.test(settingsPage),
@@ -319,7 +320,14 @@ const normalizedGeminiSettings = await loadAppSettings()
 check(
   normalizedGeminiSettings.sttProvider === 'gemini'
     && normalizedGeminiSettings.sttModel === 'gemini-3.5-live-translate-preview',
-  'Gemini STT settings normalize to the only supported Live Translate model',
+  'unknown Gemini STT models normalize to Live Translate',
+)
+storedSettings = JSON.stringify({ sttProvider: 'gemini', sttModel: 'gemini-3.5-transcribe-live' })
+const normalizedGeminiTranscribeSettings = await loadAppSettings()
+check(
+  normalizedGeminiTranscribeSettings.sttProvider === 'gemini'
+    && normalizedGeminiTranscribeSettings.sttModel === 'gemini-3.5-transcribe-live',
+  'Gemini Transcribe Live selection is preserved',
 )
 storedSettings = JSON.stringify({ sttProvider: 'unknown', sttModel: 'unknown' })
 const normalizedUnknownSettings = await loadAppSettings()
@@ -328,10 +336,10 @@ check(
     && normalizedUnknownSettings.sttModel === 'nova-3',
   'unknown STT settings fall back to Deepgram nova-3',
 )
-await saveAppSettings({ sttProvider: 'gemini', sttModel: 'gemini-3.5-live-translate-preview' })
+await saveAppSettings({ sttProvider: 'gemini', sttModel: 'gemini-3.5-transcribe-live' })
 check(
   JSON.parse(savedSettings).sttProvider === 'gemini'
-    && JSON.parse(savedSettings).sttModel === 'gemini-3.5-live-translate-preview'
+    && JSON.parse(savedSettings).sttModel === 'gemini-3.5-transcribe-live'
     && DEFAULT_SETTINGS.sttProvider === 'deepgram'
     && DEFAULT_SETTINGS.sttModel === 'nova-3',
   'Google STT selection persists without changing the Deepgram default',
@@ -1071,6 +1079,7 @@ function createGeminiSttHarness(settings, keys = { gemini: 'stored-google-key' }
       getLlmApiKey: async () => null,
       useAppStore: { getState: () => ({ settings }) },
       WebSocket: FakeWebSocket,
+      GEMINI_LIVE_TRANSCRIBE_MODEL: 'gemini-3.5-transcribe-live',
       GEMINI_LIVE_TRANSLATE_MODEL: 'gemini-3.5-live-translate-preview',
       globalThis: timers.global,
     },
@@ -1359,7 +1368,7 @@ const geminiEvents = []
 const geminiSocketChanges = []
 const gemini = createGeminiSttHarness({
   sttProvider: 'gemini',
-  sttModel: 'gemini-3.5-live-translate-preview',
+  sttModel: 'gemini-3.5-transcribe-live',
   sttLanguage: 'zh-CN',
   language: 'zh-CN',
 })
@@ -1385,7 +1394,9 @@ gemini.api.sendAudioChunk(geminiSocket, new Float32Array([0.5]))
 check(
   !geminiReady
     && geminiSocket.sent.length === sentBeforeSetup
-    && fixedLanguageSetup.setup.generationConfig.translationConfig.targetLanguageCode === 'zh-Hans'
+    && fixedLanguageSetup.setup.model === 'models/gemini-3.5-transcribe-live'
+    && fixedLanguageSetup.setup.generationConfig.responseModalities?.join(',') === 'TEXT'
+    && !('translationConfig' in fixedLanguageSetup.setup.generationConfig)
     && fixedLanguageSetup.setup.inputAudioTranscription.languageCodes?.join(',') === 'zh-CN'
     && !('systemInstruction' in fixedLanguageSetup.setup),
   'Gemini capture applies the fixed input-language hint and gates audio until setupComplete',
@@ -1501,9 +1512,12 @@ check(
   'Gemini goAway keeps the active socket until its replacement is ready',
 )
 rotatedSocket.open()
+const rotatedSetup = JSON.parse(rotatedSocket.sent[0])
 check(
-  geminiSocket.readyState === FakeWebSocket.OPEN && geminiSocketChanges.at(-1) === geminiSocket,
-  'Gemini goAway does not swap after only the replacement transport opens',
+  geminiSocket.readyState === FakeWebSocket.OPEN
+    && geminiSocketChanges.at(-1) === geminiSocket
+    && rotatedSetup.setup.model === 'models/gemini-3.5-transcribe-live',
+  'Gemini goAway preserves the selected model and does not swap after only the replacement transport opens',
 )
 rotatedSocket.receive({ setupComplete: {} })
 await flushTasks()

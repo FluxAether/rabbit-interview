@@ -9,6 +9,7 @@ export type SttLanguage = 'zh-CN' | 'zh-TW' | 'en-US' | 'multi';
 export type SttProvider = 'deepgram' | 'gemini' | 'apple';
 export type CopilotFontSize = 'sm' | 'base' | 'lg';
 
+export const GEMINI_LIVE_TRANSCRIBE_MODEL = 'gemini-3.5-transcribe-live';
 export const GEMINI_LIVE_TRANSLATE_MODEL = 'gemini-3.5-live-translate-preview';
 export const APPLE_STT_MODEL = 'speech-transcriber';
 
@@ -81,7 +82,9 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
       ? 'apple'
       : 'deepgram';
   const sttModel = sttProvider === 'gemini'
-    ? GEMINI_LIVE_TRANSLATE_MODEL
+    ? saved?.sttModel === GEMINI_LIVE_TRANSCRIBE_MODEL
+      ? GEMINI_LIVE_TRANSCRIBE_MODEL
+      : GEMINI_LIVE_TRANSLATE_MODEL
     : sttProvider === 'apple'
       ? APPLE_STT_MODEL
       : savedSttProvider !== undefined && savedSttProvider !== 'deepgram'

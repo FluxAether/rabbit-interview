@@ -30,6 +30,7 @@ import { useTranslation } from '../i18n'
 import { LANGUAGE_OPTIONS, SupportedLanguage, DEFAULT_LANGUAGE } from '../i18n/types'
 import {
   APPLE_STT_MODEL,
+  GEMINI_LIVE_TRANSCRIBE_MODEL,
   GEMINI_LIVE_TRANSLATE_MODEL,
   saveAppSettings,
   type AppSettings as PersistedSettings,
@@ -1348,10 +1349,11 @@ export default function Settings({
                       <div className="flex items-center gap-2">
                         <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
                         <select
-                          value={GEMINI_LIVE_TRANSLATE_MODEL}
-                          disabled
-                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm disabled:opacity-100"
+                          value={sttProvider === 'gemini' ? sttModel : GEMINI_LIVE_TRANSLATE_MODEL}
+                          onChange={(e) => updateSttConfig('gemini', e.target.value)}
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                         >
+                          <option value={GEMINI_LIVE_TRANSCRIBE_MODEL}>{GEMINI_LIVE_TRANSCRIBE_MODEL}</option>
                           <option value={GEMINI_LIVE_TRANSLATE_MODEL}>{GEMINI_LIVE_TRANSLATE_MODEL}</option>
                         </select>
                       </div>
