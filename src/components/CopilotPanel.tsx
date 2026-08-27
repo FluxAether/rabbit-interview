@@ -5,6 +5,7 @@ import { useTranslation } from "../i18n"
 import { sendCopilotCommand } from "../lib/copilotSession"
 import { setCopilotWindowOpacity, type CopilotWindowStatus } from "../lib/copilotWindow"
 import { protectionMessageKey } from "../lib/copilotWindowState"
+import { orderCopilotMessagesForDisplay, type CopilotMessage } from "../lib/copilotSessionState"
 import { loadAppSettings, saveAppSettings, type CopilotFontSize } from "../lib/settingsStore"
 import { useAppStore } from "../stores/useAppStore"
 
@@ -24,6 +25,23 @@ function extractKeyTakeaways(text: string): string[] {
     .map((l) => l.trim().replace(/^[•\-*]\s*/, ""))
     .filter((l) => l.length > 5)
   return lines.slice(0, 3)
+}
+
+function groupCopilotMessages(messages: CopilotMessage[]): CopilotMessage[][] {
+  const groups: CopilotMessage[][] = []
+  for (const message of orderCopilotMessagesForDisplay(messages)) {
+    const previous = groups[groups.length - 1]
+    if (
+      message.role === "assistant"
+      && previous
+      && (previous[0].role === "interviewer" || previous[0].source === "follow-up")
+    ) {
+      previous.push(message)
+      continue
+    }
+    groups.push([message])
+  }
+  return groups
 }
 
 export default function CopilotPanel({
@@ -349,109 +367,104 @@ export default function CopilotPanel({
             </div>
           ) : (
             <div className="space-y-4">
-              {copilot.messages.map((message) => {
-                const mine = message.role === "me"
-                const assistant = message.role === "assistant"
-                const keyTakeaways = assistant ? extractKeyTakeaways(message.text) : []
-                const isTakeawayCollapsed = collapsedTakeaways[message.id] ?? false
+              {groupCopilotMessages(copilot.messages).map((group) => (
+                <div key={group.map((message) => message.id).join("-")} className="space-y-1">
+                  {group.map((message) => {
+                    const mine = message.role === "me"
+                    const assistant = message.role === "assistant"
+                    const keyTakeaways = assistant ? extractKeyTakeaways(message.text) : []
+                    const isTakeawayCollapsed = collapsedTakeaways[message.id] ?? false
 
-                return (
-                  <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                    <article className={assistant ? "w-full" : "max-w-[88%]"}>
-                      <div
-                        className={`mb-1 flex items-center gap-2 px-1 text-[11px] font-medium text-[var(--text-muted)] ${
-                          mine ? "justify-end" : ""
-                        }`}
-                      >
-                        <span>{roleLabels[message.role]}</span>
-                        {message.createdAt ? (
-                          <span className="text-[10px] font-normal tabular-nums text-[var(--text-muted)]">
-                            {formatClock(message.createdAt)}
-                          </span>
-                        ) : null}
-                      </div>
+                    return (
+                      <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                        <article className="max-w-[88%]">
+                          <div
+                            className={`mb-1 flex items-center gap-2 px-1 text-[11px] font-medium text-[var(--text-muted)] ${
+                              mine ? "justify-end" : ""
+                            }`}
+                          >
+                            <span>{roleLabels[message.role]}</span>
+                            {message.createdAt ? (
+                              <span className="text-[10px] font-normal tabular-nums text-[var(--text-muted)]">
+                                {formatClock(message.createdAt)}
+                              </span>
+                            ) : null}
+                          </div>
 
-                      {/* Main Content Box */}
-                      <div
-                        className={`flex flex-col gap-3 ${fontSizeClass} leading-7 transition-colors ${
-                          mine
-                            ? "rounded-lg bg-[var(--bg-subtle)] px-3.5 py-2.5 text-[var(--text-main)]"
-                            : assistant
-                              ? floating
-                                ? "rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-3.5 text-[var(--text-main)]"
-                                : "bg-transparent px-1 py-2 text-[var(--text-main)]"
-                              : "rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-[var(--text-main)]"
-                        }`}
-                      >
-                        {/* Highlighted Takeaways for AI Assistant */}
-                        {assistant && keyTakeaways.length > 0 && (
-                          <div className={`rounded-lg border border-[var(--border-color)] bg-[var(--bg-subtle)] p-2.5 text-[var(--text-main)] ${takeawaySizeClass}`}>
-                            <div
-                              className="flex items-center justify-between font-semibold text-[var(--text-main)]"
-                            >
-                              <div className="flex items-center gap-1.5">
-                                <Sparkles className="h-3.5 w-3.5 text-[var(--text-muted)]" />
-                                {t("copilot.keyPoints")}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => toggleTakeawayCollapse(message.id)}
-                                className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
-                                title={isTakeawayCollapsed ? t("copilot.expandPoints") : t("copilot.collapsePoints")}
-                              >
-                                {isTakeawayCollapsed ? (
-                                  <ChevronDown className="h-3.5 w-3.5" />
-                                ) : (
-                                  <ChevronUp className="h-3.5 w-3.5" />
+                          <div
+                            className={`flex flex-col gap-3 ${fontSizeClass} leading-7 transition-colors ${
+                              mine
+                                ? "rounded-lg bg-[var(--bg-subtle)] px-3.5 py-2.5 text-[var(--text-main)]"
+                                : "rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-[var(--text-main)]"
+                            }`}
+                          >
+                            {assistant && keyTakeaways.length > 0 && (
+                              <div className={`rounded-lg border border-[var(--border-color)] bg-[var(--bg-subtle)] p-2.5 text-[var(--text-main)] ${takeawaySizeClass}`}>
+                                <div className="flex items-center justify-between font-semibold text-[var(--text-main)]">
+                                  <div className="flex items-center gap-1.5">
+                                    <Sparkles className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                                    {t("copilot.keyPoints")}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleTakeawayCollapse(message.id)}
+                                    className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
+                                    title={isTakeawayCollapsed ? t("copilot.expandPoints") : t("copilot.collapsePoints")}
+                                  >
+                                    {isTakeawayCollapsed ? (
+                                      <ChevronDown className="h-3.5 w-3.5" />
+                                    ) : (
+                                      <ChevronUp className="h-3.5 w-3.5" />
+                                    )}
+                                  </button>
+                                </div>
+                                {!isTakeawayCollapsed && (
+                                  <ul className="mt-1.5 space-y-1 pl-1">
+                                    {keyTakeaways.map((point, idx) => (
+                                      <li key={idx} className="flex items-start gap-1.5">
+                                        <span className="font-bold text-[var(--text-muted)]">•</span>
+                                        <span className="leading-relaxed">{point}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
                                 )}
-                              </button>
+                              </div>
+                            )}
+
+                            <div className="min-w-0 flex-1 whitespace-pre-wrap text-[var(--text-main)]">
+                              {message.text}
                             </div>
-                            {!isTakeawayCollapsed && (
-                              <ul className="mt-1.5 space-y-1 pl-1">
-                                {keyTakeaways.map((point, idx) => (
-                                  <li key={idx} className="flex items-start gap-1.5">
-                                    <span className="font-bold text-[var(--text-muted)]">•</span>
-                                    <span className="leading-relaxed">{point}</span>
-                                  </li>
-                                ))}
-                              </ul>
+
+                            {assistant && (
+                              <div className="mt-1 flex items-center justify-between border-t border-[var(--border-color)] pt-2 text-xs">
+                                <span className="text-[10px] text-[var(--text-muted)]">{t("copilot.suggestedHint")}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopy(message.id, message.text)}
+                                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
+                                  aria-label={t("copilot.copySuggestion")}
+                                >
+                                  {copiedId === message.id ? (
+                                    <>
+                                      <Check className="h-3 w-3 text-[var(--success)]" />
+                                      <span className="text-[var(--success)]">{t("copilot.copied")}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Clipboard className="h-3 w-3" />
+                                      <span>{t("copilot.copySuggestion")}</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             )}
                           </div>
-                        )}
-
-                        <div className="min-w-0 flex-1 whitespace-pre-wrap text-[var(--text-main)]">
-                          {message.text}
-                        </div>
-
-                        {/* Copy Helper for Assistant */}
-                        {assistant && (
-                          <div className="mt-1 flex items-center justify-between border-t border-[var(--border-color)] pt-2 text-xs">
-                            <span className="text-[10px] text-[var(--text-muted)]">{t("copilot.suggestedHint")}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleCopy(message.id, message.text)}
-                              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
-                              aria-label={t("copilot.copySuggestion")}
-                            >
-                              {copiedId === message.id ? (
-                                <>
-                                  <Check className="h-3 w-3 text-[var(--success)]" />
-                                  <span className="text-[var(--success)]">{t("copilot.copied")}</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Clipboard className="h-3 w-3" />
-                                  <span>{t("copilot.copySuggestion")}</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        )}
+                        </article>
                       </div>
-                    </article>
-                  </div>
-                )
-              })}
+                    )
+                  })}
+                </div>
+              ))}
             </div>
           )}
         </div>

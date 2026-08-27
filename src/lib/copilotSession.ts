@@ -33,6 +33,7 @@ import {
   isNewInterviewQuestion,
   shouldHoldOpenUtterance,
   shouldInterruptForInterviewerContinuation,
+  shouldQueueSeparateInterviewerQuestion,
 } from './interviewerTurnDetector'
 import { MAX_RECORDING_SECONDS } from './recordingLimits'
 import {
@@ -165,7 +166,8 @@ class CopilotSessionHost {
   private sampleRate = 16_000
   private captureId: number | null = null
   private activeAnswer: ActiveAnswer | null = null
-  private pendingInterviewerQuestion = ''
+  private answering = false
+  private pendingInterviewerQuestions: string[] = []
   private interviewerQuestionTimer: ReturnType<typeof globalThis.setTimeout> | null = null
   private stopPromise: Promise<void> | null = null
   private limitTimer: ReturnType<typeof globalThis.setTimeout> | null = null
@@ -302,7 +304,18 @@ class CopilotSessionHost {
       globalThis.clearTimeout(this.interviewerQuestionTimer)
       this.interviewerQuestionTimer = null
     }
-    this.pendingInterviewerQuestion = ''
+    this.pendingInterviewerQuestions = []
+  }
+
+  private enqueueInterviewerQuestion(text: string): void {
+    const normalized = text.trim()
+    if (!normalized) return
+    const pendingTail = this.pendingInterviewerQuestions[this.pendingInterviewerQuestions.length - 1] ?? ''
+    if (pendingTail && !shouldQueueSeparateInterviewerQuestion(pendingTail, normalized)) {
+      this.pendingInterviewerQuestions[this.pendingInterviewerQuestions.length - 1] = [pendingTail, normalized].filter(Boolean).join(' ')
+      return
+    }
+    this.pendingInterviewerQuestions.push(normalized)
   }
 
   private scheduleInterviewerAnswer(
@@ -313,29 +326,26 @@ class CopilotSessionHost {
     if (!this.isCurrent(sessionId)) return
     const normalized = text.trim()
     const active = this.activeAnswer
-
-    if (normalized && active && shouldInterruptForInterviewerContinuation(
+    if (!normalized) return
+    if (active && shouldInterruptForInterviewerContinuation(
       active.question,
       normalized,
       Date.now() - active.startedAt,
     )) {
-      this.pendingInterviewerQuestion = [
-        active.question,
-        this.pendingInterviewerQuestion,
-        normalized,
-      ].filter(Boolean).join(' ')
+      this.pendingInterviewerQuestions = [
+        [active.question, normalized].filter(Boolean).join(' '),
+        ...this.pendingInterviewerQuestions,
+      ]
       this.cancelActiveAnswer(sessionId)
-    } else if (normalized) {
-      this.pendingInterviewerQuestion = [this.pendingInterviewerQuestion, normalized]
-        .filter(Boolean)
-        .join(' ')
+    } else {
+      this.enqueueInterviewerQuestion(normalized)
     }
 
-    if (!this.pendingInterviewerQuestion) return
+    if (!this.pendingInterviewerQuestions.length) return
     if (this.interviewerQuestionTimer !== null) {
       globalThis.clearTimeout(this.interviewerQuestionTimer)
     }
-    const delay = getInterviewerCommitDelay(this.pendingInterviewerQuestion, boundary)
+    const delay = getInterviewerCommitDelay(this.pendingInterviewerQuestions[0], boundary)
     this.interviewerQuestionTimer = globalThis.setTimeout(() => {
       this.interviewerQuestionTimer = null
       void this.flushPendingInterviewerAnswer(sessionId)
@@ -343,9 +353,13 @@ class CopilotSessionHost {
   }
 
   private async flushPendingInterviewerAnswer(sessionId: number): Promise<void> {
-    if (!this.isCurrent(sessionId) || !this.pendingInterviewerQuestion || this.activeAnswer) return
-    const question = this.pendingInterviewerQuestion
-    this.pendingInterviewerQuestion = ''
+    if (!this.isCurrent(sessionId) || !this.pendingInterviewerQuestions.length || this.activeAnswer || this.answering) return
+    this.answering = true
+    const question = this.pendingInterviewerQuestions.shift() ?? ''
+    if (!question) {
+      this.answering = false
+      return
+    }
     this.transition({ type: 'question', sessionId, question })
     await this.answer(sessionId, question, 'interviewer-question')
   }
@@ -353,9 +367,10 @@ class CopilotSessionHost {
   private resumePendingInterviewerAnswer(sessionId: number): void {
     if (
       !this.isCurrent(sessionId)
-      || !this.pendingInterviewerQuestion
+      || !this.pendingInterviewerQuestions.length
       || this.interviewerQuestionTimer !== null
       || this.activeAnswer
+      || this.answering
     ) return
     this.interviewerQuestionTimer = globalThis.setTimeout(() => {
       this.interviewerQuestionTimer = null
@@ -406,13 +421,14 @@ class CopilotSessionHost {
     this.transition({ type: 'drop-message', sessionId, messageId: message.id })
     const system = this.transcripts.system
     if (system.openMessageId === message.id) this.resetOpenUtterance(system)
-    if (this.pendingInterviewerQuestion === message.text) {
-      this.clearPendingInterviewerQuestion()
-    } else if (this.pendingInterviewerQuestion.endsWith(message.text)) {
-      this.pendingInterviewerQuestion = this.pendingInterviewerQuestion
-        .slice(0, -message.text.length)
-        .trim()
-    }
+    this.pendingInterviewerQuestions = this.pendingInterviewerQuestions.flatMap((question) => {
+      if (question === message.text) return []
+      if (question.endsWith(message.text)) {
+        const trimmed = question.slice(0, -message.text.length).trim()
+        return trimmed ? [trimmed] : []
+      }
+      return [question]
+    })
     if (this.activeAnswer && this.isMicrophoneEcho(this.activeAnswer.question, message.text)) {
       this.cancelActiveAnswer(sessionId)
     }
@@ -1024,20 +1040,21 @@ class CopilotSessionHost {
     interrupt = false,
   ): Promise<void> {
     if (!this.isCurrent(sessionId)) return
-    const usedSeconds = Math.max(0, Math.floor(((this.snapshot.startedAt ? Date.now() - this.snapshot.startedAt : 0) / 1000)))
-    const license = deriveLicenseState(parseLicensePayload((await loadSetting('season_pass_license').catch(() => null)) ?? ''), usedSeconds)
-    if (!canGenerateSuggestion(license)) {
-      this.transition({ type: 'recoverable-error', sessionId, error: 'copilot.paywall.exhausted' })
-      return
-    }
     if (this.activeAnswer) {
       if (!interrupt && requestType === 'interviewer-question') {
-        this.pendingInterviewerQuestion = [question, this.pendingInterviewerQuestion]
-          .filter(Boolean)
-          .join(' ')
+        this.enqueueInterviewerQuestion(question)
         return
       }
       this.cancelActiveAnswer(sessionId)
+    }
+    this.answering = true
+    const usedSeconds = Math.max(0, Math.floor(((this.snapshot.startedAt ? Date.now() - this.snapshot.startedAt : 0) / 1000)))
+    const license = deriveLicenseState(parseLicensePayload((await loadSetting('season_pass_license').catch(() => null)) ?? ''), usedSeconds)
+    if (!canGenerateSuggestion(license)) {
+      this.answering = false
+      this.transition({ type: 'recoverable-error', sessionId, error: 'copilot.paywall.exhausted' })
+      this.resumePendingInterviewerAnswer(sessionId)
+      return
     }
 
     this.lastRequestType = requestType
@@ -1154,11 +1171,9 @@ class CopilotSessionHost {
         error: error instanceof Error ? error.message : String(error),
       })
     } finally {
-      const wasActive = this.activeAnswer?.controller === controller
-      if (wasActive) {
+      if (this.activeAnswer?.controller === controller) {
         this.activeAnswer = null
-      }
-      if (wasActive || controller.signal.aborted) {
+        this.answering = false
         this.resumePendingInterviewerAnswer(sessionId)
       }
     }

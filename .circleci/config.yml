@@ -50,27 +50,25 @@ commands:
               local name="${source##*/}"
               cp "$source" "release-assets/${name// /.}"
             }
-            while IFS= read -r asset; do
-              copy_normalized "$asset"
-            done < <(find "$BUNDLE" -type f \( \
-              -name "*.dmg" -o \
-              -name "*.app.tar.gz" -o \
-              -name "*.app.tar.gz.sig" -o \
-              -name "*.msi" -o \
-              -name "*.msi.sig" -o \
-              -name "*.exe" -o \
-              -name "*.exe.sig" \
-            \))
             if [ "<< parameters.platform_os >>" = "darwin" ]; then
+              while IFS= read -r asset; do
+                copy_normalized "$asset"
+              done < <(find "$BUNDLE" -type f \( -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" \))
               INSTALLER="$(find "$BUNDLE" -type f -name "*.dmg" -print -quit)"
               test -n "$INSTALLER"
               cp "$INSTALLER" release-assets/RabbitInterview-macOS-universal.dmg
               test -f src-tauri/target/audiotee-checksums.txt
               cp src-tauri/target/audiotee-checksums.txt release-assets/
             else
+              while IFS= read -r asset; do
+                copy_normalized "$asset"
+              done < <(find "$BUNDLE" -type f \( -name "*.msi" -o -name "*.msi.sig" \))
               INSTALLER="$(find "$BUNDLE" -type f -path "*/nsis/*-setup.exe" -print -quit)"
               test -n "$INSTALLER"
               cp "$INSTALLER" release-assets/RabbitInterview-Windows-x64.exe
+              if [ -f "${INSTALLER}.sig" ]; then
+                cp "${INSTALLER}.sig" release-assets/RabbitInterview-Windows-x64.exe.sig
+              fi
             fi
             cp "updater-fragment-<< parameters.platform_os >>.json" release-assets/
             test -n "$(find release-assets -type f -print -quit)"
@@ -253,7 +251,13 @@ jobs:
           name: Upload and publish source release
           command: |
             set -euo pipefail
-            NOTES=$(printf "%s\n\n%s\n\n%s" \
+            NOTES=$(printf "%s\n\n%s\n\n%s\n\n%s" \
+              "### 🚀 快速下载 / Quick Downloads" \
+              "| 操作系统 / Platform | 推荐安装包 / Recommended Package | 说明 / Description |
+| :--- | :--- | :--- |
+| **macOS** (Universal) | [RabbitInterview-macOS-universal.dmg](https://github.com/${GH_REPO}/releases/download/${CIRCLE_TAG}/RabbitInterview-macOS-universal.dmg) | 支持 Apple Silicon (M系列) 与 Intel 架构，拖入 Applications 即可 |
+| **Windows** (64-bit) | [RabbitInterview-Windows-x64.exe](https://github.com/${GH_REPO}/releases/download/${CIRCLE_TAG}/RabbitInterview-Windows-x64.exe) | 标准安装向导程序 |
+| **Windows MSI** (64-bit) | \`*.msi\` | 企业静默分发 / GPO 部署专用 |" \
               "测试版。" \
               "当前 macOS 包没有 Developer ID 与公证，Windows 包没有 Authenticode 签名，安装时可能出现系统安全警告。请从本 Release 下载，并核对 SHA256SUMS.txt。" \
               "使用实时语音需要 Deepgram API Key，回答建议需要任一受支持的模型 API Key。仅在面试或测评规则允许辅助工具时使用。")

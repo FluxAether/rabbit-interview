@@ -67,3 +67,15 @@ export function shouldInterruptForInterviewerContinuation(
   return isLikelyIncompleteInterviewPrompt(activeQuestion)
     || CONTINUATION_START_PATTERN.test(normalized)
 }
+
+export function shouldQueueSeparateInterviewerQuestion(
+  currentQuestion: string,
+  nextText: string,
+): boolean {
+  const current = currentQuestion.trim()
+  const next = nextText.trim()
+  if (!current || !next) return false
+  if (isNewInterviewQuestion(next)) return true
+  if (shouldInterruptForInterviewerContinuation(current, next, 0)) return false
+  return isCompleteInterviewPrompt(current) && isCompleteInterviewPrompt(next)
+}

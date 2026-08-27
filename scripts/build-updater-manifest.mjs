@@ -110,7 +110,7 @@ function fragmentWindows(target, version, notes, baseUrl) {
   if (!installer) die('windows updater installer (.exe/.msi) not found')
   const sigPath = `${installer}.sig`
   const sig = readSig(sigPath)
-  const assetName = path.basename(installer).replaceAll(' ', '.')
+  const assetName = 'RabbitInterview-Windows-x64.exe'
   const url = `${baseUrl}/${assetName}`
   return {
     version,

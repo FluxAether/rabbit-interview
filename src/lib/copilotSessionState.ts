@@ -99,6 +99,68 @@ function upsertMessage(messages: CopilotMessage[], message: CopilotMessage): Cop
   return [...messages, message]
 }
 
+function isFollowUp(message: CopilotMessage): boolean {
+  return message.role === 'me' && message.source === 'follow-up'
+}
+
+function isDisplayAnchor(message: CopilotMessage): boolean {
+  return message.role === 'interviewer' || isFollowUp(message)
+}
+
+/** Keep stored order intact. For display, pin each AI reply under its question. */
+export function orderCopilotMessagesForDisplay(messages: CopilotMessage[]): CopilotMessage[] {
+  if (messages.length < 2) return messages
+
+  const replies = new Map<number, CopilotMessage[]>()
+  const orphans: CopilotMessage[] = []
+  const unanswered: CopilotMessage[] = []
+  let lastAnchor: CopilotMessage | null = null
+
+  for (const message of messages) {
+    if (isDisplayAnchor(message)) {
+      unanswered.push(message)
+      continue
+    }
+    if (message.role !== 'assistant') continue
+
+    let anchor: CopilotMessage | null = unanswered[0] ?? lastAnchor
+    if (anchor?.role === 'interviewer') {
+      const followUp = [...unanswered].reverse().find(isFollowUp)
+      if (followUp) anchor = followUp
+    }
+    if (!anchor) {
+      orphans.push(message)
+      continue
+    }
+    const queuedAt = unanswered.findIndex((item) => item.id === anchor.id)
+    if (queuedAt >= 0) unanswered.splice(0, queuedAt + 1)
+    lastAnchor = anchor
+    const bucket = replies.get(anchor.id)
+    if (bucket) bucket.push(message)
+    else replies.set(anchor.id, [message])
+  }
+
+  const ordered: CopilotMessage[] = []
+  const placed = new Set<number>()
+  const push = (message: CopilotMessage) => {
+    if (placed.has(message.id)) return
+    placed.add(message.id)
+    ordered.push(message)
+  }
+
+  for (const message of messages) {
+    if (message.role === 'assistant') continue
+    push(message)
+    if (!isDisplayAnchor(message)) continue
+    for (const reply of replies.get(message.id) ?? []) push(reply)
+  }
+  for (const message of orphans) push(message)
+  for (const message of messages) {
+    if (message.role === 'assistant') push(message)
+  }
+  return ordered
+}
+
 export function reduceCopilotSnapshot(
   snapshot: CopilotSnapshot,
   action: CopilotSnapshotAction,

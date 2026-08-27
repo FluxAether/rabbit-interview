@@ -65,6 +65,8 @@ const { recordingBytes } = loadTypeScriptModule('src/lib/recordingBytes.ts', ['r
 
 check(session.length > 0, 'single Copilot session host exists')
 check(panel.length > 0 && app.includes('CopilotPanel') && page.includes('CopilotPanel'), 'main and floating views share CopilotPanel')
+check(panel.includes('orderCopilotMessagesForDisplay') && panel.includes('groupCopilotMessages(copilot.messages)'), 'live chat renders AI replies under the matching interviewer question')
+check(!panel.includes('assistant ? "w-full"') && !panel.includes('bg-transparent px-1 py-2'), 'AI replies use compact chat bubbles instead of a full-width document block')
 check(page.includes('values.includes(preferredDevice) ? preferredDevice : preferredDevice || values[0] ||'), 'saved microphone is kept until a device list is available')
 check(!page.includes('return loadDevices(settings.micDevice'), 'Copilot page load does not enumerate microphones before permission')
 check(!app.includes('startDeepgramStream') && !page.includes('startDeepgramStream'), 'views do not own STT connections')
@@ -211,6 +213,18 @@ check(
   'interviewer turns use adaptive commit timing and continuation-aware interruption',
 )
 check(
+  turnDetector.includes('shouldQueueSeparateInterviewerQuestion')
+    && session.includes('pendingInterviewerQuestions')
+    && session.includes('enqueueInterviewerQuestion')
+    && !session.includes('pendingInterviewerQuestion = [question, this.pendingInterviewerQuestion]'),
+  'complete interviewer questions queue separately instead of merging into one prompt',
+)
+check(
+  llm.includes('Answer every interviewer question')
+    && llm.includes('do not skip any'),
+  'the model is instructed to answer every interviewer question instead of skipping extras',
+)
+check(
   llm.includes("'speech-final' | 'utterance-end'")
     && session.includes("update.endpoint === 'utterance-end'"),
   'Deepgram speech-final and utterance-end signals remain distinct through turn detection',
@@ -331,9 +345,9 @@ check(
 )
 
 if (sessionState) {
-  const { createInitialSnapshot, reduceCopilotSnapshot } = loadTypeScriptModule(
+  const { createInitialSnapshot, reduceCopilotSnapshot, orderCopilotMessagesForDisplay } = loadTypeScriptModule(
     'src/lib/copilotSessionState.ts',
-    ['createInitialSnapshot', 'reduceCopilotSnapshot'],
+    ['createInitialSnapshot', 'reduceCopilotSnapshot', 'orderCopilotMessagesForDisplay'],
   )
   const initial = createInitialSnapshot()
   const starting = reduceCopilotSnapshot(initial, { type: 'start', sessionId: 7 })
@@ -479,6 +493,42 @@ if (sessionState) {
       && retainedHistory.messages[0]?.text === 'turn 1'
       && retainedHistory.messages[80]?.text === 'turn 81',
     'chat snapshot keeps the full current session instead of dropping messages after 80',
+  )
+  const msg = (id, role, source, text) => ({ id, role, source, text, createdAt: id })
+  const displayRoles = (messages) => orderCopilotMessagesForDisplay(messages).map((message) => `${message.role}:${message.id}`).join(',')
+  check(
+    displayRoles([
+      msg(1, 'interviewer', 'system-stt', 'Q'),
+      msg(2, 'me', 'microphone-stt', 'said'),
+      msg(3, 'assistant', 'llm', 'A'),
+    ]) === 'interviewer:1,assistant:3,me:2',
+    'display pins the AI reply under the interviewer question',
+  )
+  check(
+    displayRoles([
+      msg(1, 'interviewer', 'system-stt', 'Q1'),
+      msg(2, 'interviewer', 'system-stt', 'Q2'),
+      msg(3, 'assistant', 'llm', 'A1'),
+      msg(4, 'assistant', 'llm', 'A2'),
+    ]) === 'interviewer:1,assistant:3,interviewer:2,assistant:4',
+    'display pairs delayed answers with the earliest unanswered question',
+  )
+  check(
+    displayRoles([
+      msg(1, 'interviewer', 'system-stt', 'Q'),
+      msg(2, 'assistant', 'llm', 'A'),
+      msg(3, 'me', 'follow-up', 'shorter'),
+      msg(4, 'assistant', 'llm', 'A2'),
+    ]) === 'interviewer:1,assistant:2,me:3,assistant:4',
+    'display keeps a completed answer under the original question when a follow-up arrives later',
+  )
+  check(
+    displayRoles([
+      msg(1, 'interviewer', 'system-stt', 'Q'),
+      msg(2, 'me', 'follow-up', 'shorter'),
+      msg(3, 'assistant', 'llm', 'A'),
+    ]) === 'interviewer:1,me:2,assistant:3',
+    'display pins an answer after a follow-up to that follow-up',
   )
 }
 
@@ -836,6 +886,7 @@ const {
   isLikelyIncompleteInterviewPrompt,
   shouldHoldOpenUtterance,
   shouldInterruptForInterviewerContinuation,
+  shouldQueueSeparateInterviewerQuestion,
 } = loadTypeScriptModule(
   'src/lib/interviewerTurnDetector.ts',
   [
@@ -843,6 +894,7 @@ const {
     'isLikelyIncompleteInterviewPrompt',
     'shouldHoldOpenUtterance',
     'shouldInterruptForInterviewerContinuation',
+    'shouldQueueSeparateInterviewerQuestion',
   ],
 )
 check(
@@ -873,6 +925,21 @@ check(
     1_000,
   ),
   'explicit new questions do not interrupt the current answer as continuations',
+)
+check(
+  shouldQueueSeparateInterviewerQuestion(
+    '请介绍一下你上一个项目。',
+    '你最大的缺点是什么？',
+  )
+    && shouldQueueSeparateInterviewerQuestion(
+      '你最大的缺点是什么？',
+      '为什么想加入我们公司？',
+    )
+    && !shouldQueueSeparateInterviewerQuestion(
+      '请介绍一下你上一个项目。',
+      '另外，请结合一个具体故障举例。',
+    ),
+  'three complete interviewer questions stay separate instead of merging into one prompt',
 )
 check(
   shouldHoldOpenUtterance('请介绍一下你上一个项目')
