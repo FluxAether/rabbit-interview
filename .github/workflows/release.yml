@@ -182,13 +182,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          NOTES=$(printf "%s\n\n%s\n\n%s\n\n%s" \
+          TABLE=$(printf "%s\n%s\n%s\n%s\n%s" \
+            "| 操作系统 / Platform | 推荐安装包 / Recommended Package | 说明 / Description |" \
+            "| :--- | :--- | :--- |" \
+            "| **macOS** (Universal) | [RabbitInterview-macOS-universal.dmg](https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/RabbitInterview-macOS-universal.dmg) | 支持 Apple Silicon (M系列) 与 Intel 架构，拖入 Applications 即可 |" \
+            "| **Windows** (64-bit) | [RabbitInterview-Windows-x64.exe](https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/RabbitInterview-Windows-x64.exe) | 标准安装向导程序 |" \
+            "| **Windows MSI** (64-bit) | \`*.msi\` | 企业静默分发 / GPO 部署专用 |")
+          NOTES=$(printf "%s\n\n%s\n\n%s\n\n%s\n\n%s" \
             "### 🚀 快速下载 / Quick Downloads" \
-            "| 操作系统 / Platform | 推荐安装包 / Recommended Package | 说明 / Description |
-| :--- | :--- | :--- |
-| **macOS** (Universal) | [RabbitInterview-macOS-universal.dmg](https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/RabbitInterview-macOS-universal.dmg) | 支持 Apple Silicon (M系列) 与 Intel 架构，拖入 Applications 即可 |
-| **Windows** (64-bit) | [RabbitInterview-Windows-x64.exe](https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/RabbitInterview-Windows-x64.exe) | 标准安装向导程序 |
-| **Windows MSI** (64-bit) | \`*.msi\` | 企业静默分发 / GPO 部署专用 |" \
+            "$TABLE" \
+            "测试版。" \
             "当前 macOS 包没有 Developer ID 与公证，Windows 包没有 Authenticode 签名，安装时可能出现系统安全警告。请从本 Release 下载，并核对 SHA256SUMS.txt。" \
             "使用实时语音需要 Deepgram API Key，回答建议需要任一受支持的模型 API Key。仅在面试或测评规则允许辅助工具时使用。")
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
