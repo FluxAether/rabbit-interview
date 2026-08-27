@@ -61,6 +61,7 @@ const appleSttRust = source('src-tauri/src/stt/apple.rs')
 const cargo = source('src-tauri/Cargo.toml')
 const defaultCapability = source('src-tauri/capabilities/default.json')
 const tauriConfig = source('src-tauri/tauri.conf.json')
+const { recordingBytes } = loadTypeScriptModule('src/lib/recordingBytes.ts', ['recordingBytes'])
 
 check(session.length > 0, 'single Copilot session host exists')
 check(panel.length > 0 && app.includes('CopilotPanel') && page.includes('CopilotPanel'), 'main and floating views share CopilotPanel')
@@ -177,12 +178,28 @@ check(llm.includes('recent interview turns') && llm.includes('Prefer Candidate s
 check(session.includes('maybeRestartAnswerForSealedMicrophone') && session.includes('PRE_DELTA_RESTART_MS'), 'Copilot can restart an interviewer answer if the microphone seals before the first model token')
 check(!page.includes('saveSession = async') && page.includes('copilot.archive.autoSaveHint'), 'the page no longer requires a manual session-save action')
 check(
+  recordingBytes(new Uint8Array([82, 73, 70, 70])).byteLength === 4
+    && recordingBytes(new Uint8Array([82, 73, 70, 70]).buffer)[0] === 82
+    && recordingBytes([82, 73, 70, 70]).byteLength === 4
+    && recordingBytes([82, 73, 70, 70])[3] === 70
+    && recordingBytes([]).byteLength === 0,
+  'history replay copies IPC WAV bytes from ArrayBuffer, Uint8Array, or number arrays',
+)
+check(
   rustAudio.includes('read_saved_recording')
     && rustLib.includes('read_saved_recording')
     && historyPage.includes("invoke<ArrayBuffer | number[]>('read_saved_recording'")
+    && source('src/lib/recordingBytes.ts').includes('Uint8Array.from(bytes)')
+    && historyPage.includes('recordingBytes(bytes)')
+    && historyPage.includes("wavesurfer.on('error'")
     && historyPage.includes('loadBlob(')
     && !historyPage.includes('convertFileSrc('),
   'history replay loads saved WAV bytes through native IPC instead of the asset protocol',
+)
+check(
+  tauriConfig.includes('"connect-src":')
+    && /"connect-src": "[^"]*blob:[^"]*"/.test(tauriConfig),
+  'history WaveSurfer blob playback is allowed by CSP connect-src',
 )
 check(defaultCapability.includes('sql:allow-execute'), 'SQLite write operations are explicitly allowed')
 check(

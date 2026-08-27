@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { recordingBytes } from '../lib/recordingBytes'
 import { Clipboard } from 'lucide-react'
 import type { InterviewRecord } from '../stores/useAppStore'
 import WaveSurfer from 'wavesurfer.js'
@@ -183,13 +184,19 @@ export default function History({
           wavesurfer?.setPlaybackRate(playbackRate)
           setAudioReady(true)
         })
+        wavesurfer.on('error', (error) => {
+          if (cancelled) return
+          setAudioReady(false)
+          setAudioError(true)
+          console.warn('Unable to load saved interview recording', error)
+        })
         wavesurfer.on('finish', () => setIsPlaying(false))
         void invoke<ArrayBuffer | number[]>('read_saved_recording', { path: recordingPath })
           .then((bytes) => {
             if (cancelled) return
-            const source = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
-            const copy = new ArrayBuffer(source.byteLength)
-            new Uint8Array(copy).set(source)
+            const source = recordingBytes(bytes)
+            if (source.byteLength === 0) throw new Error('Saved recording was empty')
+            const copy = source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength)
             const audio = new Blob([copy], { type: 'audio/wav' })
             return wavesurfer?.loadBlob(audio)
           })
