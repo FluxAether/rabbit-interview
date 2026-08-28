@@ -61,7 +61,8 @@ function CopilotWaveform({ amplitude, active }: { amplitude: number; active: boo
       for (let index = 0; index < count; index += 1) {
         const position = index / Math.max(1, count - 1)
         const baseLevel = waveformSampleLevel(index, count, amplitudeRef.current, activeRef.current)
-        const level = reducedMotion ? baseLevel * 0.58 : baseLevel
+        const displayLevel = Math.min(1, baseLevel * 1.35)
+        const level = reducedMotion ? displayLevel * 0.58 : displayLevel
         const dot = level < 0.055
         const sampleHeight = dot ? 2 : Math.max(4, level * (height - 4))
         const highlighted = activeRef.current && position >= 0.34 && position <= 0.68
@@ -107,7 +108,7 @@ function CopilotWaveform({ amplitude, active }: { amplitude: number; active: boo
     drawRef.current()
   }, [amplitude, active])
 
-  return <canvas ref={canvasRef} className="mb-2 h-10 w-full shrink-0" aria-hidden="true" />
+  return <canvas ref={canvasRef} className="mb-2 h-[64px] w-full shrink-0" aria-hidden="true" />
 }
 
 // Extract key takeaways (first 1-3 bullet points or key sentences) from assistant text

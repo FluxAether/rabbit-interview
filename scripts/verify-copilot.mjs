@@ -82,6 +82,12 @@ check(
     && panel.includes('--success'),
   'Copilot waveform is responsive, Retina-sharp, motion-aware, and uses the success token',
 )
+check(
+  panel.includes('const displayLevel = Math.min(1, baseLevel * 1.35)')
+    && (panel.includes('h-16') || panel.includes('h-[64px]'))
+    && panel.includes('level * (height - 4)'),
+  'Copilot waveform uses a 64px canvas and a capped 35% display gain',
+)
 check(panel.includes('orderCopilotMessagesForDisplay') && panel.includes('groupCopilotMessages(copilot.messages)'), 'live chat renders AI replies under the matching interviewer question')
 check(
   panel.includes('sendCopilotCommand({ type: "retry", messageId: message.id })')
