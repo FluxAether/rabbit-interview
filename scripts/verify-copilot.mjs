@@ -69,8 +69,11 @@ check(panel.includes('orderCopilotMessagesForDisplay') && panel.includes('groupC
 check(
   panel.includes('sendCopilotCommand({ type: "retry", messageId: message.id })')
     && panel.includes('message.role === "interviewer"')
+    && panel.includes('isRegenerating')
+    && panel.includes('disabled={!running || isRegenerating}')
+    && panel.includes('animate-spin')
     && session.includes('regenerateAnswer'),
-  'interviewer bubbles provide a per-question regenerate button that dispatches message retry',
+  'interviewer bubbles provide a per-question regenerate button that shows spinning loading state while generating',
 )
 check(!panel.includes('assistant ? "w-full"') && !panel.includes('bg-transparent px-1 py-2'), 'AI replies use compact chat bubbles instead of a full-width document block')
 check(page.includes('values.includes(preferredDevice) ? preferredDevice : preferredDevice || values[0] ||'), 'saved microphone is kept until a device list is available')
@@ -417,7 +420,17 @@ if (sessionState) {
     continuing: true,
     suggestion: { id: 10, text: 'partial first answer continued', category: 'test' },
   })
-  const concurrentStreamingAnswer = reduceCopilotSnapshot(firstStreamingAnswer, {
+  const regenerateStart = reduceCopilotSnapshot(firstStreamingAnswer, {
+    type: 'regenerate-start',
+    sessionId: 7,
+    replyToId: 1,
+    answerId: 20,
+  })
+  check(
+    regenerateStart.generatingReplyToIds?.includes(1),
+    'regenerate-start marks the target interviewer question as generating',
+  )
+  const concurrentStreamingAnswer = reduceCopilotSnapshot(regenerateStart, {
     type: 'stream-answer',
     sessionId: 7,
     suggestion: { id: 20, text: 'background retry stream', category: 'test' },
@@ -426,6 +439,7 @@ if (sessionState) {
   })
   check(
     concurrentStreamingAnswer.activeAnswerId === 10
+      && concurrentStreamingAnswer.generatingReplyToIds?.includes(1)
       && concurrentStreamingAnswer.messages.some((m) => m.id === 10 && m.text === 'partial first answer')
       && concurrentStreamingAnswer.messages.some((m) => m.id === 20 && m.text === 'background retry stream' && m.replyToId === 1),
     'background stream preserves active foreground stream and adds anchored message',
@@ -441,9 +455,10 @@ if (sessionState) {
   })
   check(
     concurrentCompleteAnswer.activeAnswerId === 10
+      && !concurrentCompleteAnswer.generatingReplyToIds?.includes(1)
       && concurrentCompleteAnswer.suggestions[0]?.id === 10
       && concurrentCompleteAnswer.messages.some((m) => m.id === 20 && m.text === 'completed retry answer' && m.replyToId === 1),
-    'background completion does not reset active foreground answer or overwrite suggestions',
+    'background completion clears regenerating state without resetting active foreground answer',
   )
   const incompleteAnswer = reduceCopilotSnapshot(continuingAnswer, {
     type: 'incomplete-answer',

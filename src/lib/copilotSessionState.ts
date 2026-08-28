@@ -33,6 +33,7 @@ export interface CopilotSnapshot {
   revision: number
   sessionId: number | null
   startedAt: number | null
+  generatingReplyToIds: number[]
 }
 
 export type CopilotSnapshotAction =
@@ -46,10 +47,11 @@ export type CopilotSnapshotAction =
   | { type: 'message'; sessionId: number; message: CopilotMessage }
   | { type: 'drop-message'; sessionId: number; messageId: number }
   | { type: 'suggestion'; sessionId: number; suggestion: Suggestion }
+  | { type: 'regenerate-start'; sessionId: number; replyToId: number; answerId: number }
   | { type: 'stream-answer'; sessionId: number; suggestion: Suggestion; continuing?: boolean; replyToId?: number; background?: boolean }
   | { type: 'complete-answer'; sessionId: number; answerId: number; answer: string; suggestions: Suggestion[]; replyToId?: number; background?: boolean }
   | { type: 'incomplete-answer'; sessionId: number; answerId: number; text: string; reason: string; replyToId?: number; background?: boolean }
-  | { type: 'cancel-answer'; sessionId: number; answerId: number }
+  | { type: 'cancel-answer'; sessionId: number; answerId: number; replyToId?: number }
   | { type: 'archive-saving' }
   | { type: 'archive-saved'; notice: string }
   | { type: 'archive-error'; notice: string }
@@ -77,6 +79,7 @@ export function createInitialSnapshot(): CopilotSnapshot {
     revision: 0,
     sessionId: null,
     startedAt: null,
+    generatingReplyToIds: [],
   }
 }
 
@@ -193,6 +196,7 @@ export function reduceCopilotSnapshot(
       error: null,
       sessionId: action.sessionId,
       startedAt: Date.now(),
+      generatingReplyToIds: [],
       revision: snapshot.revision + 1,
     }
   }
@@ -217,6 +221,7 @@ export function reduceCopilotSnapshot(
       amplitude: 0,
       audioMode: 'stopping',
       sessionId: null,
+      generatingReplyToIds: [],
       revision: snapshot.revision + 1,
     }
   }
@@ -246,6 +251,7 @@ export function reduceCopilotSnapshot(
       archiveStatus: 'idle',
       archiveNotice: null,
       error: null,
+      generatingReplyToIds: [],
       revision: snapshot.revision + 1,
     }
   }
@@ -296,6 +302,7 @@ export function reduceCopilotSnapshot(
       answerStatus: 'idle',
       answerNotice: null,
       sessionId: null,
+      generatingReplyToIds: [],
       revision: snapshot.revision + 1,
     }
   }
@@ -353,6 +360,15 @@ export function reduceCopilotSnapshot(
         revision: snapshot.revision + 1,
       }
     }
+    case 'regenerate-start': {
+      const current = snapshot.generatingReplyToIds || []
+      if (current.includes(action.replyToId)) return snapshot
+      return {
+        ...snapshot,
+        generatingReplyToIds: [...current, action.replyToId],
+        revision: snapshot.revision + 1,
+      }
+    }
     case 'stream-answer': {
       const previousActiveId = snapshot.activeAnswerId
       const baseMessages = (!action.background && previousActiveId !== null && previousActiveId !== action.suggestion.id)
@@ -402,10 +418,15 @@ export function reduceCopilotSnapshot(
             replyToId: action.replyToId ?? existing?.replyToId,
           })
         : baseMessages
+      const currentGenerating = snapshot.generatingReplyToIds || []
+      const generatingReplyToIds = action.replyToId != null
+        ? currentGenerating.filter((id) => id !== action.replyToId)
+        : currentGenerating
       if (action.background) {
         return {
           ...snapshot,
           messages,
+          generatingReplyToIds,
           error: null,
           revision: snapshot.revision + 1,
         }
@@ -414,6 +435,7 @@ export function reduceCopilotSnapshot(
         ...snapshot,
         suggestions,
         messages,
+        generatingReplyToIds,
         activeAnswerId: null,
         answerStatus: 'idle',
         answerNotice: null,
@@ -436,10 +458,15 @@ export function reduceCopilotSnapshot(
         createdAt: snapshot.messages.find((message) => message.id === action.answerId)?.createdAt ?? Date.now(),
         replyToId: action.replyToId ?? snapshot.messages.find((message) => message.id === action.answerId)?.replyToId,
       })
+      const currentGenerating = snapshot.generatingReplyToIds || []
+      const generatingReplyToIds = action.replyToId != null
+        ? currentGenerating.filter((id) => id !== action.replyToId)
+        : currentGenerating
       if (action.background) {
         return {
           ...snapshot,
           messages,
+          generatingReplyToIds,
           revision: snapshot.revision + 1,
         }
       }
@@ -447,6 +474,7 @@ export function reduceCopilotSnapshot(
         ...snapshot,
         suggestions: [suggestion],
         messages,
+        generatingReplyToIds,
         activeAnswerId: action.answerId,
         answerStatus: 'incomplete',
         answerNotice: action.reason,
@@ -457,11 +485,19 @@ export function reduceCopilotSnapshot(
       const isForeground = snapshot.activeAnswerId === action.answerId
       const hasMessage = snapshot.messages.some((m) => m.id === action.answerId)
       const hasSuggestion = snapshot.suggestions.some((s) => s.id === action.answerId)
-      if (!isForeground && !hasMessage && !hasSuggestion) return snapshot
+      const currentGenerating = snapshot.generatingReplyToIds || []
+      const targetMsg = snapshot.messages.find((m) => m.id === action.answerId)
+      const replyToIdToRemove = action.replyToId ?? targetMsg?.replyToId
+      const isGeneratingToRemove = replyToIdToRemove != null && currentGenerating.includes(replyToIdToRemove)
+      if (!isForeground && !hasMessage && !hasSuggestion && !isGeneratingToRemove) return snapshot
+      const generatingReplyToIds = replyToIdToRemove != null
+        ? currentGenerating.filter((id) => id !== replyToIdToRemove)
+        : currentGenerating
       return {
         ...snapshot,
         suggestions: hasSuggestion ? snapshot.suggestions.filter((suggestion) => suggestion.id !== action.answerId) : snapshot.suggestions,
         messages: hasMessage ? snapshot.messages.filter((message) => message.id !== action.answerId) : snapshot.messages,
+        generatingReplyToIds,
         activeAnswerId: isForeground ? null : snapshot.activeAnswerId,
         answerStatus: isForeground ? 'idle' : snapshot.answerStatus,
         answerNotice: isForeground ? null : snapshot.answerNotice,

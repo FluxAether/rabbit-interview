@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent } from "react"
-import { ArrowDown, Check, ChevronDown, ChevronUp, Clipboard, Download, EyeOff, Mic, RefreshCw, Shield, Sparkles, Square, Trash2, ZoomIn, ZoomOut } from "lucide-react"
+import { ArrowDown, Check, ChevronDown, ChevronUp, Clipboard, Download, EyeOff, Loader2, Mic, RefreshCw, Shield, Sparkles, Square, Trash2, ZoomIn, ZoomOut } from "lucide-react"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { useTranslation } from "../i18n"
 import { sendCopilotCommand } from "../lib/copilotSession"
@@ -372,6 +372,7 @@ export default function CopilotPanel({
                   {group.map((message) => {
                     const mine = message.role === "me"
                     const assistant = message.role === "assistant"
+                    const isRegenerating = copilot.generatingReplyToIds?.includes(message.id) ?? false
                     const keyTakeaways = assistant ? extractKeyTakeaways(message.text) : []
                     const isTakeawayCollapsed = collapsedTakeaways[message.id] ?? false
 
@@ -440,13 +441,17 @@ export default function CopilotPanel({
                                 <button
                                   type="button"
                                   onClick={() => void sendCopilotCommand({ type: "retry", messageId: message.id })}
-                                  disabled={!running}
+                                  disabled={!running || isRegenerating}
                                   className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-40"
                                   aria-label={t("copilot.retry")}
                                   title={t("copilot.retry")}
                                   data-no-drag
                                 >
-                                  <RefreshCw className="h-3 w-3" />
+                                  {isRegenerating ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="h-3 w-3" />
+                                  )}
                                   <span>{t("copilot.retry")}</span>
                                 </button>
                               </div>

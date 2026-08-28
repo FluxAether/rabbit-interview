@@ -1234,6 +1234,12 @@ class CopilotSessionHost {
     const idBase = sessionId * 1_000_000 + answerSequence * 100
     this.backgroundAnswers.set(idBase, controller)
     const category = String(useAppStore.getState().settings?.aiModel || 'AI')
+    this.transition({
+      type: 'regenerate-start',
+      sessionId,
+      replyToId,
+      answerId: idBase,
+    })
 
     try {
       const context = this.buildContext(question, replyToId)
@@ -1321,7 +1327,7 @@ class CopilotSessionHost {
       }
     } catch (error) {
       if (controller.signal.aborted || !this.isCurrent(sessionId)) return
-      this.transition({ type: 'cancel-answer', sessionId, answerId: idBase })
+      this.transition({ type: 'cancel-answer', sessionId, answerId: idBase, replyToId })
       this.transition({
         type: 'recoverable-error',
         sessionId,
