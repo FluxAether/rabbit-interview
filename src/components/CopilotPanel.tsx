@@ -121,9 +121,11 @@ function extractKeyTakeaways(text: string): string[] {
   return lines.slice(0, 3)
 }
 
-function groupCopilotMessages(messages: CopilotMessage[]): CopilotMessage[][] {
+function groupCopilotMessages(messages: CopilotMessage[], showMyBubbles = true): CopilotMessage[][] {
   const groups: CopilotMessage[][] = []
-  for (const message of orderCopilotMessagesForDisplay(messages)) {
+  const ordered = orderCopilotMessagesForDisplay(messages)
+  const filtered = showMyBubbles ? ordered : ordered.filter((message) => message.role !== "me")
+  for (const message of filtered) {
     const previous = groups[groups.length - 1]
     if (
       message.role === "assistant"
@@ -152,6 +154,8 @@ export default function CopilotPanel({
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [fontSize, setFontSize] = useState<CopilotFontSize>("base")
   const [fontSizeReady, setFontSizeReady] = useState(false)
+  const [showMyBubbles, setShowMyBubbles] = useState(true)
+  const [showMyBubblesReady, setShowMyBubblesReady] = useState(false)
   const [opacity, setOpacity] = useState<number>(100)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [collapsedTakeaways, setCollapsedTakeaways] = useState<Record<number, boolean>>({})
@@ -242,7 +246,7 @@ export default function CopilotPanel({
     if (isAtBottom && messagesRef.current) {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight
     }
-  }, [copilot.messages, isAtBottom])
+  }, [copilot.messages, showMyBubbles, isAtBottom])
 
   useEffect(() => {
     let cancelled = false
@@ -252,12 +256,18 @@ export default function CopilotPanel({
         if (settings.copilotFontSize === "sm" || settings.copilotFontSize === "base" || settings.copilotFontSize === "lg") {
           setFontSize(settings.copilotFontSize)
         }
+        if (typeof settings.copilotShowMyBubbles === "boolean") {
+          setShowMyBubbles(settings.copilotShowMyBubbles)
+        }
       })
       .catch((error) => {
-        console.warn("Unable to load Copilot font size", error)
+        console.warn("Unable to load Copilot settings", error)
       })
       .finally(() => {
-        if (!cancelled) setFontSizeReady(true)
+        if (!cancelled) {
+          setFontSizeReady(true)
+          setShowMyBubblesReady(true)
+        }
       })
     return () => {
       cancelled = true
@@ -313,6 +323,18 @@ export default function CopilotPanel({
     setCollapsedTakeaways((prev) => ({ ...prev, [id]: !prev[id] }))
   }
 
+  const toggleShowMyBubbles = () => {
+    const next = !showMyBubbles
+    setShowMyBubbles(next)
+    void saveAppSettings({ copilotShowMyBubbles: next }).catch((error) => {
+      console.warn("Unable to save Copilot showMyBubbles setting", error)
+    })
+  }
+
+  const visibleMessages = showMyBubbles
+    ? copilot.messages
+    : copilot.messages.filter((m) => m.role !== "me")
+
   return (
     <section
       className={`floating-panel flex min-h-0 w-full flex-col border border-[var(--border-color)] bg-[var(--bg-surface)] p-3 text-sm text-[var(--text-main)] shadow-none transition-opacity duration-150 ${
@@ -340,8 +362,36 @@ export default function CopilotPanel({
           </div>
         </div>
 
-        {/* Toolbar: Font Size, Opacity (floating mode) & Duration */}
+        {/* Toolbar: Show/Hide My Bubbles, Font Size, Opacity (floating mode) & Duration */}
         <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
+          <div
+            className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-2 py-1 text-xs"
+            title={showMyBubbles ? t("copilot.hideMyBubbles") : t("copilot.showMyBubbles")}
+            data-no-drag
+          >
+            <span className="text-[10px] font-medium text-[var(--text-muted)] select-none">
+              {t("copilot.myBubbles")}
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showMyBubbles}
+              disabled={!showMyBubblesReady}
+              onClick={toggleShowMyBubbles}
+              className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-40 ${
+                showMyBubbles ? "bg-[var(--action)]" : "bg-[var(--bg-hover)] border border-[var(--border-color)]"
+              }`}
+              aria-label={showMyBubbles ? t("copilot.hideMyBubbles") : t("copilot.showMyBubbles")}
+              data-no-drag
+            >
+              <span
+                className={`pointer-events-none inline-block h-3 w-3 rounded-full bg-[var(--bg-surface)] shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
+                  showMyBubbles ? "translate-x-3.5 bg-white" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          </div>
+
           <div className="flex items-center rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-0.5 text-xs">
             <button
               type="button"
@@ -447,14 +497,14 @@ export default function CopilotPanel({
           className={`h-full overflow-y-auto overscroll-contain rounded-lg p-3 ${floating ? "bg-[var(--bg-sidebar)]" : "bg-[var(--bg-surface)]"}`}
           role="log" aria-relevant="additions"
         >
-          {copilot.messages.length === 0 ? (
+          {visibleMessages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center px-6 text-center text-xs text-[var(--text-muted)]">
               <Sparkles className="mb-2 h-7 w-7 opacity-40" />
               {t("copilot.chat.empty")}
             </div>
           ) : (
             <div className="space-y-4">
-              {groupCopilotMessages(copilot.messages).map((group) => (
+              {groupCopilotMessages(copilot.messages, showMyBubbles).map((group) => (
                 <div key={group.map((message) => message.id).join("-")} className="space-y-1">
                   {group.map((message) => {
                     const mine = message.role === "me"
@@ -589,7 +639,7 @@ export default function CopilotPanel({
         </div>
 
         {/* Floating Scroll to Bottom Button */}
-        {!isAtBottom && copilot.messages.length > 0 && (
+        {!isAtBottom && visibleMessages.length > 0 && (
           <button
             type="button"
             onClick={scrollToBottom}

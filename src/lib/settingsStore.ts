@@ -32,6 +32,8 @@ export interface AppSettings {
   micDevice?: string;
   // Stealth Copilot floating panel message font size
   copilotFontSize?: CopilotFontSize;
+  // Stealth Copilot show or hide user bubbles
+  copilotShowMyBubbles?: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -53,6 +55,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   useSystemAudio: true,
   useMicWithSystem: false,
   copilotFontSize: 'base',
+  copilotShowMyBubbles: true,
 };
 
 function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
@@ -99,6 +102,9 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
   const useMicWithSystem = saved?.useMicWithSystem === undefined
     ? DEFAULT_SETTINGS.useMicWithSystem
     : Boolean(saved.useMicWithSystem);
+  const copilotShowMyBubbles = saved?.copilotShowMyBubbles === undefined
+    ? DEFAULT_SETTINGS.copilotShowMyBubbles!
+    : Boolean(saved.copilotShowMyBubbles);
   return {
     ...DEFAULT_SETTINGS,
     ...saved,
@@ -108,6 +114,7 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
     sttModel,
     copilotFontSize,
     useMicWithSystem,
+    copilotShowMyBubbles,
   } as AppSettings;
 }
 

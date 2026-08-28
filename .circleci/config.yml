@@ -127,7 +127,7 @@ jobs:
       - run:
           name: Build macOS application
           no_output_timeout: 60m
-          command: npm run tauri build -- --target universal-apple-darwin --bundles app,dmg --config src-tauri/tauri.audiotee.conf.json
+          command: npm run tauri build -- --target universal-apple-darwin --bundles app,dmg --config src-tauri/tauri.audiotee.conf.json --config src-tauri/tauri.updater.conf.json
       - run:
           name: Verify bundled AudioTee
           command: |
@@ -198,7 +198,7 @@ jobs:
           no_output_timeout: 60m
           command: |
             $env:Path = "$(Join-Path $HOME '.cargo\bin');$env:Path"
-            npm run tauri build -- --target x86_64-pc-windows-msvc --bundles msi,nsis
+            npm run tauri build -- --target x86_64-pc-windows-msvc --bundles msi,nsis --config src-tauri/tauri.updater.conf.json
       - collect-release-assets:
           platform_os: windows
           target: x86_64-pc-windows-msvc

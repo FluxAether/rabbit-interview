@@ -88,7 +88,43 @@ check(
     && panel.includes('level * (height - 4)'),
   'Copilot waveform uses a 64px canvas and a capped 35% display gain',
 )
-check(panel.includes('orderCopilotMessagesForDisplay') && panel.includes('groupCopilotMessages(copilot.messages)'), 'live chat renders AI replies under the matching interviewer question')
+check(panel.includes('orderCopilotMessagesForDisplay') && panel.includes('groupCopilotMessages('), 'live chat renders AI replies under the matching interviewer question')
+check(
+  panel.includes('showMyBubbles')
+    && panel.includes('toggleShowMyBubbles')
+    && panel.includes('copilotShowMyBubbles')
+    && settingsStore.includes('copilotShowMyBubbles')
+    && translations.includes('copilot.showMyBubbles')
+    && translations.includes('copilot.hideMyBubbles'),
+  'Copilot panel provides a toggle to show and hide user bubbles and persists the setting',
+)
+{
+  const sampleMessages = [
+    { id: 1, role: 'interviewer', source: 'system-stt', text: 'Q1', createdAt: 1 },
+    { id: 2, role: 'me', source: 'microphone-stt', text: 'A1', createdAt: 2 },
+    { id: 3, role: 'assistant', source: 'llm', text: 'S1', createdAt: 3 },
+  ]
+  const groupFn = new Function('messages', 'showMyBubbles = true', 'orderCopilotMessagesForDisplay', `
+    const ordered = orderCopilotMessagesForDisplay(messages);
+    const filtered = showMyBubbles ? ordered : ordered.filter((m) => m.role !== 'me');
+    const groups = [];
+    for (const message of filtered) {
+      const previous = groups[groups.length - 1];
+      if (message.role === 'assistant' && previous && (previous[0].role === 'interviewer' || previous[0].source === 'follow-up')) {
+        previous.push(message);
+        continue;
+      }
+      groups.push([message]);
+    }
+    return groups;
+  `)
+  const shown = groupFn(sampleMessages, true, (m) => m).flat()
+  const hidden = groupFn(sampleMessages, false, (m) => m).flat()
+  check(
+    shown.length === 3 && hidden.length === 2 && !hidden.some((m) => m.role === 'me'),
+    'groupCopilotMessages filters out user bubbles when showMyBubbles is false',
+  )
+}
 check(
   panel.includes('sendCopilotCommand({ type: "retry", messageId: message.id })')
     && panel.includes('message.role === "interviewer"')
