@@ -2043,6 +2043,21 @@ check(panel.includes('copilot.clearConfirm'), 'Clear requires confirmation when 
 check(historyPage.includes('parseHistoryFeedback'), 'History renders saved scoring details')
 check(settingsStore.includes('useMicWithSystem: false'), 'real Copilot defaults to system audio without microphone')
 check(tauriConfig.includes('thomas92118/rabbit-interview'), 'updater points at the current origin repository')
+{
+  const licenseMod = loadTypeScriptModule('src/lib/license.ts', [
+    'PAYWALL_ENABLED',
+    'canGenerateSuggestion',
+    'shouldWarnPaywall',
+    'deriveLicenseState',
+  ])
+  const expiredState = licenseMod.deriveLicenseState(null, 999999)
+  check(
+    licenseMod.PAYWALL_ENABLED === false
+      && licenseMod.canGenerateSuggestion(expiredState) === true
+      && licenseMod.shouldWarnPaywall(expiredState) === false,
+    'paywall is paused so expired free copilot time still permits suggestions without warnings',
+  )
+}
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)
 if (failed > 0) process.exit(1)

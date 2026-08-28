@@ -1,6 +1,7 @@
 export const FREE_COPILOT_SECONDS = 10 * 60
 export const SEASON_PASS_DAYS = 90
 export const LICENSE_KIND = 'season-pass-90'
+export const PAYWALL_ENABLED = false
 
 export type LicenseStatus = 'free' | 'active' | 'expired' | 'invalid'
 
@@ -61,9 +62,13 @@ export function deriveLicenseState(
 }
 
 export function canGenerateSuggestion(state: LicenseState): boolean {
+  // ponytail: paywall paused; toggle PAYWALL_ENABLED when re-enabling monetization
+  if (!PAYWALL_ENABLED) return true
   return state.status === 'active' || state.remainingFreeSeconds > 0
 }
 
 export function shouldWarnPaywall(state: LicenseState): boolean {
+  // ponytail: paywall paused; toggle PAYWALL_ENABLED when re-enabling monetization
+  if (!PAYWALL_ENABLED) return false
   return state.status !== 'active' && state.remainingFreeSeconds > 0 && state.remainingFreeSeconds <= 120
 }
