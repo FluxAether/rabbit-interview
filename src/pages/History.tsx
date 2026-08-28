@@ -390,7 +390,7 @@ export default function History({
               <button
                   type="button"
                   onClick={() => setSelected(item)}
-                  className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--bg-subtle)]"
+                  className="max-w-40 truncate rounded-md border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--bg-subtle)]"
                 >
                   {t('common.viewDetails')} {item.role}
                 </button>
