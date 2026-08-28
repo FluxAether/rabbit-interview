@@ -273,6 +273,19 @@ check(
   'Copilot keeps one open utterance until semantic hold, utterance-end, or the sliding hard cap',
 )
 check(session.includes('MAX_AUTO_CONTINUATIONS') && session.includes('continuationAttempt < MAX_AUTO_CONTINUATIONS'), 'token-limited answers are automatically continued with a bounded retry count')
+check(
+  (session.match(/suggestion: \{ id: idBase, text: '', category \}/g) || []).length === 2
+    && panel.includes('const isGeneratingAnswer = assistant && !message.text')
+    && panel.includes('motion-reduce:animate-none')
+    && panel.includes('t("copilot.answer.generating")'),
+  'AI answer bubbles appear before the first model token with a motion-aware loading state',
+)
+check(
+  panel.includes('border-l-2 border-l-[var(--action)]')
+    && panel.includes('bg-[var(--action)]')
+    && panel.includes('bg-[var(--bg-hover)]'),
+  'interviewer, candidate, and AI bubbles use distinct visual treatments',
+)
 check(session.includes('textSimilarity') && session.includes('isLikelyEcho'), 'system-audio echo is filtered against recent AI and microphone text')
 check(session.includes("text.replace(/\\s/g, '').length < 12"), 'short interviewer acknowledgements are never discarded as echo')
 check(session.includes('isMinimumVoiceAnswer(text)') && session.includes('utteranceText(this.transcripts.microphone, true)'), 'live microphone text can suppress system-audio echoes before they are sealed')
@@ -422,7 +435,12 @@ if (sessionState) {
     answer: longAnswer,
     suggestions: [{ id: 4, text: 'Lead with a concise example.', category: 'test' }],
   })
-  const firstStreamingAnswer = reduceCopilotSnapshot(followUpMessage, {
+  const startingAnswer = reduceCopilotSnapshot(followUpMessage, {
+    type: 'stream-answer',
+    sessionId: 7,
+    suggestion: { id: 10, text: '', category: 'test' },
+  })
+  const firstStreamingAnswer = reduceCopilotSnapshot(startingAnswer, {
     type: 'stream-answer',
     sessionId: 7,
     suggestion: { id: 10, text: 'partial first answer', category: 'test' },
@@ -453,7 +471,14 @@ if (sessionState) {
     regenerateStart.generatingReplyToIds?.includes(1),
     'regenerate-start marks the target interviewer question as generating',
   )
-  const concurrentStreamingAnswer = reduceCopilotSnapshot(regenerateStart, {
+  const regeneratePlaceholder = reduceCopilotSnapshot(regenerateStart, {
+    type: 'stream-answer',
+    sessionId: 7,
+    suggestion: { id: 20, text: '', category: 'test' },
+    replyToId: 1,
+    background: true,
+  })
+  const concurrentStreamingAnswer = reduceCopilotSnapshot(regeneratePlaceholder, {
     type: 'stream-answer',
     sessionId: 7,
     suggestion: { id: 20, text: 'background retry stream', category: 'test' },
@@ -520,6 +545,19 @@ if (sessionState) {
   check(assistantMessage?.messages.every((message) => typeof message.createdAt === 'number'), 'chat messages always include a send timestamp')
   check(assistantMessage?.activeAnswerId === null, 'completed AI answers are marked final')
   check(
+    startingAnswer?.activeAnswerId === 10
+      && startingAnswer.answerStatus === 'generating'
+      && startingAnswer.messages.some((message) => message.id === 10 && message.role === 'assistant' && message.text === ''),
+    'starting an answer creates an empty AI bubble before any model text arrives',
+  )
+  check(
+    firstStreamingAnswer.messages.filter((message) => message.id === 10).length === 1
+      && firstStreamingAnswer.messages.find((message) => message.id === 10)?.text === 'partial first answer'
+      && firstStreamingAnswer.messages.find((message) => message.id === 10)?.createdAt
+        === startingAnswer.messages.find((message) => message.id === 10)?.createdAt,
+    'the first model text fills the existing AI bubble in place',
+  )
+  check(
     assistantMessage?.messages.find((message) => message.id === 4)?.text === longAnswer,
     'completed chat messages retain the full answer instead of the six-line suggestion preview',
   )
@@ -527,6 +565,14 @@ if (sessionState) {
     secondStreamingAnswer?.activeAnswerId === 11
       && secondStreamingAnswer.messages.filter((message) => message.role === 'assistant').map((message) => message.id).join(',') === '11',
     'starting a replacement stream cannot leave the previous partial AI answer in chat',
+  )
+  check(
+    regeneratePlaceholder.activeAnswerId === 10
+      && regeneratePlaceholder.generatingReplyToIds?.includes(1)
+      && regeneratePlaceholder.messages.some((message) => (
+        message.id === 20 && message.text === '' && message.replyToId === 1
+      )),
+    'regenerating an earlier answer creates an anchored loading bubble immediately',
   )
   check(
     cancelledStreamingAnswer?.activeAnswerId === null

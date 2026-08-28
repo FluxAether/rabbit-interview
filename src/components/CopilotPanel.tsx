@@ -459,6 +459,7 @@ export default function CopilotPanel({
                   {group.map((message) => {
                     const mine = message.role === "me"
                     const assistant = message.role === "assistant"
+                    const isGeneratingAnswer = assistant && !message.text
                     const isRegenerating = copilot.generatingReplyToIds?.includes(message.id) ?? false
                     const keyTakeaways = assistant ? extractKeyTakeaways(message.text) : []
                     const isTakeawayCollapsed = collapsedTakeaways[message.id] ?? false
@@ -471,7 +472,9 @@ export default function CopilotPanel({
                               mine ? "justify-end" : ""
                             }`}
                           >
-                            <span>{roleLabels[message.role]}</span>
+                            <span className={assistant ? "font-semibold text-[var(--text-main)]" : undefined}>
+                              {roleLabels[message.role]}
+                            </span>
                             {message.createdAt ? (
                               <span className="text-[10px] font-normal tabular-nums text-[var(--text-muted)]">
                                 {formatClock(message.createdAt)}
@@ -482,8 +485,10 @@ export default function CopilotPanel({
                           <div
                             className={`flex flex-col gap-3 ${fontSizeClass} leading-7 transition-colors ${
                               mine
-                                ? "rounded-lg bg-[var(--bg-subtle)] px-3.5 py-2.5 text-[var(--text-main)]"
-                                : "rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-[var(--text-main)]"
+                                ? "rounded-lg rounded-br-sm bg-[var(--action)] px-3.5 py-2.5 text-[var(--action-text)]"
+                                : assistant
+                                  ? "rounded-lg rounded-bl-sm border border-[var(--border-strong)] border-l-2 border-l-[var(--action)] bg-[var(--bg-hover)] px-3.5 py-2.5 text-[var(--text-main)]"
+                                  : "rounded-lg rounded-bl-sm border border-[var(--border-color)] bg-[var(--bg-surface)] px-3.5 py-2.5 text-[var(--text-main)]"
                             }`}
                           >
                             {assistant && keyTakeaways.length > 0 && (
@@ -519,8 +524,13 @@ export default function CopilotPanel({
                               </div>
                             )}
 
-                            <div className="min-w-0 flex-1 whitespace-pre-wrap text-[var(--text-main)]">
-                              {message.text}
+                            <div className="min-w-0 flex-1 whitespace-pre-wrap">
+                              {isGeneratingAnswer ? (
+                                <span className="inline-flex items-center gap-2 text-[var(--text-muted)]">
+                                  <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                                  {t("copilot.answer.generating")}
+                                </span>
+                              ) : message.text}
                             </div>
 
                             {message.role === "interviewer" && (
@@ -544,7 +554,7 @@ export default function CopilotPanel({
                               </div>
                             )}
 
-                            {assistant && (
+                            {assistant && !isGeneratingAnswer && (
                               <div className="mt-1 flex items-center justify-between border-t border-[var(--border-color)] pt-2 text-xs">
                                 <span className="text-[10px] text-[var(--text-muted)]">{t("copilot.suggestedHint")}</span>
                                 <button

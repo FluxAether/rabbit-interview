@@ -1107,6 +1107,11 @@ class CopilotSessionHost {
       emittedText: false,
     }
     const category = String(useAppStore.getState().settings?.aiModel || 'AI')
+    this.transition({
+      type: 'stream-answer',
+      sessionId,
+      suggestion: { id: idBase, text: '', category },
+    })
 
     try {
       const context = this.buildContext(question)
@@ -1239,6 +1244,13 @@ class CopilotSessionHost {
       sessionId,
       replyToId,
       answerId: idBase,
+    })
+    this.transition({
+      type: 'stream-answer',
+      sessionId,
+      suggestion: { id: idBase, text: '', category },
+      replyToId,
+      background: true,
     })
 
     try {
