@@ -66,6 +66,12 @@ const { recordingBytes } = loadTypeScriptModule('src/lib/recordingBytes.ts', ['r
 check(session.length > 0, 'single Copilot session host exists')
 check(panel.length > 0 && app.includes('CopilotPanel') && page.includes('CopilotPanel'), 'main and floating views share CopilotPanel')
 check(panel.includes('orderCopilotMessagesForDisplay') && panel.includes('groupCopilotMessages(copilot.messages)'), 'live chat renders AI replies under the matching interviewer question')
+check(
+  panel.includes('sendCopilotCommand({ type: "retry", messageId: message.id })')
+    && panel.includes('message.role === "interviewer"')
+    && session.includes('regenerateAnswer'),
+  'interviewer bubbles provide a per-question regenerate button that dispatches message retry',
+)
 check(!panel.includes('assistant ? "w-full"') && !panel.includes('bg-transparent px-1 py-2'), 'AI replies use compact chat bubbles instead of a full-width document block')
 check(page.includes('values.includes(preferredDevice) ? preferredDevice : preferredDevice || values[0] ||'), 'saved microphone is kept until a device list is available')
 check(!page.includes('return loadDevices(settings.micDevice'), 'Copilot page load does not enumerate microphones before permission')
@@ -411,6 +417,34 @@ if (sessionState) {
     continuing: true,
     suggestion: { id: 10, text: 'partial first answer continued', category: 'test' },
   })
+  const concurrentStreamingAnswer = reduceCopilotSnapshot(firstStreamingAnswer, {
+    type: 'stream-answer',
+    sessionId: 7,
+    suggestion: { id: 20, text: 'background retry stream', category: 'test' },
+    replyToId: 1,
+    background: true,
+  })
+  check(
+    concurrentStreamingAnswer.activeAnswerId === 10
+      && concurrentStreamingAnswer.messages.some((m) => m.id === 10 && m.text === 'partial first answer')
+      && concurrentStreamingAnswer.messages.some((m) => m.id === 20 && m.text === 'background retry stream' && m.replyToId === 1),
+    'background stream preserves active foreground stream and adds anchored message',
+  )
+  const concurrentCompleteAnswer = reduceCopilotSnapshot(concurrentStreamingAnswer, {
+    type: 'complete-answer',
+    sessionId: 7,
+    answerId: 20,
+    answer: 'completed retry answer',
+    suggestions: [{ id: 20, text: 'completed retry suggestion', category: 'test' }],
+    replyToId: 1,
+    background: true,
+  })
+  check(
+    concurrentCompleteAnswer.activeAnswerId === 10
+      && concurrentCompleteAnswer.suggestions[0]?.id === 10
+      && concurrentCompleteAnswer.messages.some((m) => m.id === 20 && m.text === 'completed retry answer' && m.replyToId === 1),
+    'background completion does not reset active foreground answer or overwrite suggestions',
+  )
   const incompleteAnswer = reduceCopilotSnapshot(continuingAnswer, {
     type: 'incomplete-answer',
     sessionId: 7,
@@ -537,6 +571,16 @@ if (sessionState) {
       msg(3, 'assistant', 'llm', 'A'),
     ]) === 'interviewer:1,me:2,assistant:3',
     'display pins an answer after a follow-up to that follow-up',
+  )
+  check(
+    displayRoles([
+      msg(1, 'interviewer', 'system-stt', 'Q1'),
+      msg(2, 'assistant', 'llm', 'A1'),
+      msg(3, 'interviewer', 'system-stt', 'Q2'),
+      msg(4, 'assistant', 'llm', 'A2'),
+      { id: 5, role: 'assistant', source: 'llm', text: 'A1_retry', createdAt: 5, replyToId: 1 },
+    ]) === 'interviewer:1,assistant:2,assistant:5,interviewer:3,assistant:4',
+    'display pins a regenerated reply under its matching earlier interviewer question below the original answer',
   )
 }
 
@@ -1929,6 +1973,32 @@ function createKeyStoreHarness({
       && leftover.secrets.has('GEMINI_API_KEY')
       && leftover.keychain.size === 0,
     'a leftover keychain Gemini key is imported into SQLite and then deleted',
+  )
+}
+{
+  const retryHostHarness = createCopilotSessionHost(12)
+  const retryHost = retryHostHarness.host
+  retryHost.snapshot.messages = [
+    { id: 1, role: 'interviewer', source: 'system-stt', text: 'Question 1', createdAt: 1 },
+    { id: 2, role: 'assistant', source: 'llm', text: 'Answer 1', createdAt: 2 },
+    { id: 3, role: 'interviewer', source: 'system-stt', text: 'Question 2', createdAt: 3 },
+  ]
+  const regeneratedCalls = []
+  retryHost.regenerateAnswer = async (sessionId, question, replyToId) => {
+    regeneratedCalls.push({ sessionId, question, replyToId })
+  }
+  await retryHost.dispatch({ type: 'retry', messageId: 1 })
+  check(
+    regeneratedCalls.length === 1
+      && regeneratedCalls[0].question === 'Question 1'
+      && regeneratedCalls[0].replyToId === 1,
+    'dispatching retry with interviewer messageId starts per-message background regeneration',
+  )
+  await retryHost.dispatch({ type: 'retry', messageId: 2 })
+  await retryHost.dispatch({ type: 'retry', messageId: 999 })
+  check(
+    regeneratedCalls.length === 1,
+    'retry with invalid or non-interviewer messageId is safely ignored',
   )
 }
 check(panel.includes('copilot.clearConfirm'), 'Clear requires confirmation when the session has content')

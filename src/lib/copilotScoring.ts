@@ -129,8 +129,8 @@ export function buildRecentTurnsContext(
   maxChars = RECENT_TURNS_MAX_CHARS,
 ): string {
   const normalizedCurrent = currentQuestion.trim()
-  const history = normalizedCurrent && turns.length > 0 && turns[turns.length - 1].question === normalizedCurrent
-    ? turns.slice(0, -1)
+  const history = normalizedCurrent
+    ? turns.filter((turn) => turn.question !== normalizedCurrent)
     : turns
   const recent = history.filter((turn) => usableCandidateSaid(turn.candidateSaid) || turn.suggestedAnswer).slice(-limit)
   if (recent.length === 0) return ''

@@ -132,7 +132,7 @@ export type CopilotSessionCommand =
   | { type: 'stop' }
   | { type: 'toggle'; config?: CopilotStartConfig }
   | { type: 'clear' }
-  | { type: 'retry' }
+  | { type: 'retry'; messageId?: number }
   | { type: 'follow-up'; text: string }
   | { type: 'request-snapshot' }
 
@@ -166,6 +166,7 @@ class CopilotSessionHost {
   private sampleRate = 16_000
   private captureId: number | null = null
   private activeAnswer: ActiveAnswer | null = null
+  private backgroundAnswers = new Map<number, AbortController>()
   private answering = false
   private pendingInterviewerQuestions: string[] = []
   private interviewerQuestionTimer: ReturnType<typeof globalThis.setTimeout> | null = null
@@ -388,6 +389,16 @@ class CopilotSessionHost {
     }
   }
 
+  private cancelBackgroundAnswers(sessionId: number | null): void {
+    for (const [answerId, controller] of this.backgroundAnswers.entries()) {
+      controller.abort()
+      if (sessionId !== null && this.isCurrent(sessionId)) {
+        this.transition({ type: 'cancel-answer', sessionId, answerId })
+      }
+    }
+    this.backgroundAnswers.clear()
+  }
+
   private isMicrophoneEcho(text: string, other: string): boolean {
     if (!other) return false
     const left = text.replace(/\s/g, '')
@@ -479,14 +490,28 @@ class CopilotSessionHost {
         const sessionId = this.snapshot.sessionId
         this.clearPendingInterviewerQuestion()
         this.cancelActiveAnswer(sessionId)
+        this.cancelBackgroundAnswers(sessionId)
         this.transition({ type: 'clear' })
         break
       }
       case 'retry':
-        if (this.snapshot.sessionId !== null && this.snapshot.question) {
-          const sessionId = this.snapshot.sessionId
-          this.clearPendingInterviewerQuestion()
-          void this.answer(sessionId, this.snapshot.question, this.lastRequestType, true)
+        if (this.snapshot.sessionId !== null) {
+          if (command.messageId != null) {
+            const targetMessage = this.snapshot.messages.find(
+              (m) => m.id === command.messageId && m.role === 'interviewer',
+            )
+            if (targetMessage && targetMessage.text.trim()) {
+              void this.regenerateAnswer(
+                this.snapshot.sessionId,
+                targetMessage.text.trim(),
+                targetMessage.id,
+              )
+            }
+          } else if (this.snapshot.question) {
+            const sessionId = this.snapshot.sessionId
+            this.clearPendingInterviewerQuestion()
+            void this.answer(sessionId, this.snapshot.question, this.lastRequestType, true)
+          }
         }
         break
       case 'follow-up':
@@ -522,6 +547,7 @@ class CopilotSessionHost {
 
     this.clearPendingInterviewerQuestion()
     this.cancelActiveAnswer(this.snapshot.sessionId)
+    this.cancelBackgroundAnswers(this.snapshot.sessionId)
     const sessionId = ++this.sessionSequence
     this.persistenceSessionId = globalThis.crypto.randomUUID()
     this.transition({ type: 'start', sessionId })
@@ -639,6 +665,7 @@ class CopilotSessionHost {
     if (sessionId != null) this.flushOpenUtterances(sessionId)
     this.clearPendingInterviewerQuestion()
     this.cancelActiveAnswer(sessionId)
+    this.cancelBackgroundAnswers(sessionId)
     const archiveSnapshot = this.snapshot
     const persistenceSessionId = this.persistenceSessionId
     this.transition({ type: 'stop' })
@@ -1001,7 +1028,7 @@ class CopilotSessionHost {
     )
   }
 
-  private buildContext(question: string): string {
+  private buildContext(question: string, excludeReplyToId?: number): string {
     const store = useAppStore.getState()
     const skipIds = new Set<number>()
     if (this.transcripts.microphone.openMessageId != null) {
@@ -1009,6 +1036,16 @@ class CopilotSessionHost {
     }
     if (this.snapshot.answerStatus !== 'idle' && this.snapshot.activeAnswerId != null) {
       skipIds.add(this.snapshot.activeAnswerId)
+    }
+    for (const answerId of this.backgroundAnswers.keys()) {
+      skipIds.add(answerId)
+    }
+    if (excludeReplyToId != null) {
+      for (const m of this.snapshot.messages) {
+        if (m.role === 'assistant' && (m.replyToId === excludeReplyToId || m.id === excludeReplyToId)) {
+          skipIds.add(m.id)
+        }
+      }
     }
     const messages = skipIds.size
       ? this.snapshot.messages.filter((message) => !skipIds.has(message.id))
@@ -1179,12 +1216,129 @@ class CopilotSessionHost {
     }
   }
 
+  private async regenerateAnswer(
+    sessionId: number,
+    question: string,
+    replyToId: number,
+  ): Promise<void> {
+    if (!this.isCurrent(sessionId)) return
+    const usedSeconds = Math.max(0, Math.floor(((this.snapshot.startedAt ? Date.now() - this.snapshot.startedAt : 0) / 1000)))
+    const license = deriveLicenseState(parseLicensePayload((await loadSetting('season_pass_license').catch(() => null)) ?? ''), usedSeconds)
+    if (!canGenerateSuggestion(license)) {
+      this.transition({ type: 'recoverable-error', sessionId, error: 'copilot.paywall.exhausted' })
+      return
+    }
+
+    const controller = new AbortController()
+    const answerSequence = ++this.answerSequence
+    const idBase = sessionId * 1_000_000 + answerSequence * 100
+    this.backgroundAnswers.set(idBase, controller)
+    const category = String(useAppStore.getState().settings?.aiModel || 'AI')
+
+    try {
+      const context = this.buildContext(question, replyToId)
+      let fullText = ''
+      let continuationAttempt = 0
+
+      while (!controller.signal.aborted && this.isCurrent(sessionId)) {
+        const attemptBaseText = fullText
+        const result = await generateSuggestionsStream(
+          question,
+          context,
+          {
+            onDelta: (_delta, accumulated) => {
+              if (!this.isCurrent(sessionId) || controller.signal.aborted) return
+              fullText = attemptBaseText
+                ? mergeContinuationText(attemptBaseText, accumulated)
+                : accumulated
+              this.transition({
+                type: 'stream-answer',
+                sessionId,
+                suggestion: { id: idBase, text: fullText, category },
+                continuing: continuationAttempt > 0,
+                replyToId,
+                background: true,
+              })
+            },
+          },
+          controller.signal,
+          'interviewer-question',
+          continuationAttempt > 0
+            ? { continuationText: attemptBaseText, continuationAttempt }
+            : {},
+        )
+
+        if (!this.isCurrent(sessionId) || controller.signal.aborted) return
+        fullText = attemptBaseText
+          ? mergeContinuationText(attemptBaseText, result.text)
+          : result.text
+        const madeProgress = fullText.length > attemptBaseText.length
+
+        if (result.status === 'complete' && fullText.trim() && (continuationAttempt === 0 || madeProgress)) {
+          this.transition({
+            type: 'complete-answer',
+            sessionId,
+            answerId: idBase,
+            answer: fullText,
+            suggestions: splitSuggestions(fullText, category, idBase),
+            replyToId,
+            background: true,
+          })
+          break
+        }
+
+        if (result.status === 'max-tokens' && continuationAttempt < MAX_AUTO_CONTINUATIONS && madeProgress) {
+          continuationAttempt += 1
+          this.transition({
+            type: 'stream-answer',
+            sessionId,
+            suggestion: { id: idBase, text: fullText, category },
+            continuing: true,
+            replyToId,
+            background: true,
+          })
+          continue
+        }
+
+        if (!fullText.trim()) {
+          throw new Error(`LLM stream ended without a complete answer (${result.finishReason || 'unknown reason'})`)
+        }
+        const reason = result.status === 'max-tokens'
+          ? 'copilot.answer.incomplete.maxTokens'
+          : result.finishReason === 'connection_lost'
+            ? 'copilot.answer.incomplete.connection'
+            : 'copilot.answer.incomplete.unknown'
+        this.transition({
+          type: 'incomplete-answer',
+          sessionId,
+          answerId: idBase,
+          text: fullText,
+          reason,
+          replyToId,
+          background: true,
+        })
+        break
+      }
+    } catch (error) {
+      if (controller.signal.aborted || !this.isCurrent(sessionId)) return
+      this.transition({ type: 'cancel-answer', sessionId, answerId: idBase })
+      this.transition({
+        type: 'recoverable-error',
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      this.backgroundAnswers.delete(idBase)
+    }
+  }
+
   private async fail(sessionId: number, error: string): Promise<void> {
     if (!this.isCurrent(sessionId)) return
     this.clearLimitTimer()
     this.flushOpenUtterances(sessionId)
     this.clearPendingInterviewerQuestion()
     this.cancelActiveAnswer(sessionId)
+    this.cancelBackgroundAnswers(sessionId)
     const archiveSnapshot = this.snapshot
     const persistenceSessionId = this.persistenceSessionId
     await this.stopOwnedCapture()

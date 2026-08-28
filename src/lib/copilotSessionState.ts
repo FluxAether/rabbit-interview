@@ -12,6 +12,7 @@ export interface CopilotMessage {
   source: CopilotMessageSource
   text: string
   createdAt: number
+  replyToId?: number
 }
 
 export interface CopilotSnapshot {
@@ -45,9 +46,9 @@ export type CopilotSnapshotAction =
   | { type: 'message'; sessionId: number; message: CopilotMessage }
   | { type: 'drop-message'; sessionId: number; messageId: number }
   | { type: 'suggestion'; sessionId: number; suggestion: Suggestion }
-  | { type: 'stream-answer'; sessionId: number; suggestion: Suggestion; continuing?: boolean }
-  | { type: 'complete-answer'; sessionId: number; answerId: number; answer: string; suggestions: Suggestion[] }
-  | { type: 'incomplete-answer'; sessionId: number; answerId: number; text: string; reason: string }
+  | { type: 'stream-answer'; sessionId: number; suggestion: Suggestion; continuing?: boolean; replyToId?: number; background?: boolean }
+  | { type: 'complete-answer'; sessionId: number; answerId: number; answer: string; suggestions: Suggestion[]; replyToId?: number; background?: boolean }
+  | { type: 'incomplete-answer'; sessionId: number; answerId: number; text: string; reason: string; replyToId?: number; background?: boolean }
   | { type: 'cancel-answer'; sessionId: number; answerId: number }
   | { type: 'archive-saving' }
   | { type: 'archive-saved'; notice: string }
@@ -91,6 +92,7 @@ function upsertMessage(messages: CopilotMessage[], message: CopilotMessage): Cop
       && messages[index].role === message.role
       && messages[index].source === message.source
       && messages[index].createdAt === message.createdAt
+      && messages[index].replyToId === message.replyToId
     ) return messages
     const next = messages.slice()
     next[index] = message
@@ -123,7 +125,11 @@ export function orderCopilotMessagesForDisplay(messages: CopilotMessage[]): Copi
     }
     if (message.role !== 'assistant') continue
 
-    let anchor: CopilotMessage | null = unanswered[0] ?? lastAnchor
+    let anchor: CopilotMessage | null = null
+    if (message.replyToId != null) {
+      anchor = messages.find((item) => item.id === message.replyToId && isDisplayAnchor(item)) ?? null
+    }
+    if (!anchor) anchor = unanswered[0] ?? lastAnchor
     if (anchor?.role === 'interviewer') {
       const followUp = [...unanswered].reverse().find(isFollowUp)
       if (followUp) anchor = followUp
@@ -349,7 +355,7 @@ export function reduceCopilotSnapshot(
     }
     case 'stream-answer': {
       const previousActiveId = snapshot.activeAnswerId
-      const baseMessages = previousActiveId !== null && previousActiveId !== action.suggestion.id
+      const baseMessages = (!action.background && previousActiveId !== null && previousActiveId !== action.suggestion.id)
         ? snapshot.messages.filter((message) => message.id !== previousActiveId)
         : snapshot.messages
       const existing = baseMessages.find((message) => message.id === action.suggestion.id)
@@ -359,7 +365,16 @@ export function reduceCopilotSnapshot(
         source: 'llm',
         text: action.suggestion.text,
         createdAt: existing?.createdAt ?? Date.now(),
+        replyToId: action.replyToId ?? existing?.replyToId,
       })
+      if (action.background) {
+        return {
+          ...snapshot,
+          messages,
+          error: null,
+          revision: snapshot.revision + 1,
+        }
+      }
       return {
         ...snapshot,
         suggestions: [action.suggestion],
@@ -373,7 +388,7 @@ export function reduceCopilotSnapshot(
     }
     case 'complete-answer': {
       const suggestions = action.suggestions.slice(-40)
-      const baseMessages = snapshot.activeAnswerId !== null && snapshot.activeAnswerId !== action.answerId
+      const baseMessages = (!action.background && snapshot.activeAnswerId !== null && snapshot.activeAnswerId !== action.answerId)
         ? snapshot.messages.filter((message) => message.id !== snapshot.activeAnswerId)
         : snapshot.messages
       const existing = baseMessages.find((message) => message.id === action.answerId)
@@ -384,8 +399,17 @@ export function reduceCopilotSnapshot(
             source: 'llm',
             text: action.answer,
             createdAt: existing?.createdAt ?? Date.now(),
+            replyToId: action.replyToId ?? existing?.replyToId,
           })
         : baseMessages
+      if (action.background) {
+        return {
+          ...snapshot,
+          messages,
+          error: null,
+          revision: snapshot.revision + 1,
+        }
+      }
       return {
         ...snapshot,
         suggestions,
@@ -404,16 +428,25 @@ export function reduceCopilotSnapshot(
         text: action.text,
         category: currentSuggestion?.category || 'AI',
       }
+      const messages = upsertMessage(snapshot.messages, {
+        id: action.answerId,
+        role: 'assistant',
+        source: 'llm',
+        text: action.text,
+        createdAt: snapshot.messages.find((message) => message.id === action.answerId)?.createdAt ?? Date.now(),
+        replyToId: action.replyToId ?? snapshot.messages.find((message) => message.id === action.answerId)?.replyToId,
+      })
+      if (action.background) {
+        return {
+          ...snapshot,
+          messages,
+          revision: snapshot.revision + 1,
+        }
+      }
       return {
         ...snapshot,
         suggestions: [suggestion],
-        messages: upsertMessage(snapshot.messages, {
-          id: action.answerId,
-          role: 'assistant',
-          source: 'llm',
-          text: action.text,
-          createdAt: snapshot.messages.find((message) => message.id === action.answerId)?.createdAt ?? Date.now(),
-        }),
+        messages,
         activeAnswerId: action.answerId,
         answerStatus: 'incomplete',
         answerNotice: action.reason,
@@ -421,14 +454,17 @@ export function reduceCopilotSnapshot(
       }
     }
     case 'cancel-answer': {
-      if (snapshot.activeAnswerId !== action.answerId) return snapshot
+      const isForeground = snapshot.activeAnswerId === action.answerId
+      const hasMessage = snapshot.messages.some((m) => m.id === action.answerId)
+      const hasSuggestion = snapshot.suggestions.some((s) => s.id === action.answerId)
+      if (!isForeground && !hasMessage && !hasSuggestion) return snapshot
       return {
         ...snapshot,
-        suggestions: snapshot.suggestions.filter((suggestion) => suggestion.id !== action.answerId),
-        messages: snapshot.messages.filter((message) => message.id !== action.answerId),
-        activeAnswerId: null,
-        answerStatus: 'idle',
-        answerNotice: null,
+        suggestions: hasSuggestion ? snapshot.suggestions.filter((suggestion) => suggestion.id !== action.answerId) : snapshot.suggestions,
+        messages: hasMessage ? snapshot.messages.filter((message) => message.id !== action.answerId) : snapshot.messages,
+        activeAnswerId: isForeground ? null : snapshot.activeAnswerId,
+        answerStatus: isForeground ? 'idle' : snapshot.answerStatus,
+        answerNotice: isForeground ? null : snapshot.answerNotice,
         revision: snapshot.revision + 1,
       }
     }

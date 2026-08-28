@@ -435,6 +435,23 @@ export default function CopilotPanel({
                               {message.text}
                             </div>
 
+                            {message.role === "interviewer" && (
+                              <div className="mt-1 flex items-center justify-end border-t border-[var(--border-color)] pt-1.5 text-xs">
+                                <button
+                                  type="button"
+                                  onClick={() => void sendCopilotCommand({ type: "retry", messageId: message.id })}
+                                  disabled={!running}
+                                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-40"
+                                  aria-label={t("copilot.retry")}
+                                  title={t("copilot.retry")}
+                                  data-no-drag
+                                >
+                                  <RefreshCw className="h-3 w-3" />
+                                  <span>{t("copilot.retry")}</span>
+                                </button>
+                              </div>
+                            )}
+
                             {assistant && (
                               <div className="mt-1 flex items-center justify-between border-t border-[var(--border-color)] pt-2 text-xs">
                                 <span className="text-[10px] text-[var(--text-muted)]">{t("copilot.suggestedHint")}</span>
