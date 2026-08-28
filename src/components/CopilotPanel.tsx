@@ -3,6 +3,7 @@ import { ArrowDown, Check, ChevronDown, ChevronUp, Clipboard, Download, EyeOff, 
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { useTranslation } from "../i18n"
 import { sendCopilotCommand } from "../lib/copilotSession"
+import { waveformSampleLevel } from "../lib/copilotWaveform"
 import { setCopilotWindowOpacity, type CopilotWindowStatus } from "../lib/copilotWindow"
 import { protectionMessageKey } from "../lib/copilotWindowState"
 import { orderCopilotMessagesForDisplay, type CopilotMessage } from "../lib/copilotSessionState"
@@ -15,6 +16,98 @@ interface CopilotPanelProps {
   onHide?: () => void
   onExportRecording?: () => void
   canExportRecording?: boolean
+}
+
+function CopilotWaveform({ amplitude, active }: { amplitude: number; active: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const amplitudeRef = useRef(amplitude)
+  const activeRef = useRef(active)
+  const drawRef = useRef<() => void>(() => {})
+
+  amplitudeRef.current = amplitude
+  activeRef.current = active
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const context = canvas?.getContext("2d")
+    if (!canvas || !context) return
+
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)")
+    let reducedMotion = motion.matches
+    let width = 1
+    let height = 1
+    let dpr = 1
+
+    const align = (value: number) => Math.round(value * dpr) / dpr
+    const draw = () => {
+      const styles = window.getComputedStyle(canvas)
+      const mainColor = styles.getPropertyValue("--text-main").trim() || "#18181b"
+      const mutedColor = styles.getPropertyValue("--text-muted").trim() || "#71717a"
+      const successColor = styles.getPropertyValue("--success").trim() || "#16a05d"
+      const borderColor = styles.getPropertyValue("--border-color").trim() || "#e4e4e7"
+      const horizontalPadding = Math.min(4, width / 4)
+      const drawableWidth = Math.max(1, width - horizontalPadding * 2)
+      const rawCount = Math.max(49, Math.min(161, Math.floor(width / 8)))
+      const count = rawCount % 2 === 0 ? rawCount + 1 : rawCount
+      const step = drawableWidth / Math.max(1, count - 1)
+      const barWidth = Math.max(1 / dpr, Math.round(1.5 * dpr) / dpr)
+      const midpoint = height / 2
+
+      context.clearRect(0, 0, width, height)
+      context.fillStyle = borderColor
+      context.globalAlpha = 0.16
+      context.fillRect(align(horizontalPadding + drawableWidth * 0.52), 3, 1 / dpr, height - 6)
+
+      for (let index = 0; index < count; index += 1) {
+        const position = index / Math.max(1, count - 1)
+        const baseLevel = waveformSampleLevel(index, count, amplitudeRef.current, activeRef.current)
+        const level = reducedMotion ? baseLevel * 0.58 : baseLevel
+        const dot = level < 0.055
+        const sampleHeight = dot ? 2 : Math.max(4, level * (height - 4))
+        const highlighted = activeRef.current && position >= 0.34 && position <= 0.68
+        const x = align(horizontalPadding + index * step - barWidth / 2)
+        const y = align(midpoint - sampleHeight / 2)
+
+        context.fillStyle = highlighted ? successColor : dot ? mutedColor : mainColor
+        context.globalAlpha = highlighted ? 0.92 : dot ? 0.5 : 0.7
+        context.fillRect(x, y, barWidth, align(sampleHeight))
+      }
+      context.globalAlpha = 1
+    }
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect()
+      dpr = Math.max(1, window.devicePixelRatio || 1)
+      width = Math.max(1, Math.round(rect.width))
+      height = Math.max(1, Math.round(rect.height))
+      canvas.width = Math.round(width * dpr)
+      canvas.height = Math.round(height * dpr)
+      context.setTransform(dpr, 0, 0, dpr, 0, 0)
+      draw()
+    }
+    const onMotionChange = () => {
+      reducedMotion = motion.matches
+      draw()
+    }
+    const observer = new ResizeObserver(resize)
+
+    drawRef.current = draw
+    observer.observe(canvas)
+    motion.addEventListener("change", onMotionChange)
+    resize()
+
+    return () => {
+      drawRef.current = () => {}
+      observer.disconnect()
+      motion.removeEventListener("change", onMotionChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    drawRef.current()
+  }, [amplitude, active])
+
+  return <canvas ref={canvasRef} className="mb-2 h-10 w-full shrink-0" aria-hidden="true" />
 }
 
 // Extract key takeaways (first 1-3 bullet points or key sentences) from assistant text
@@ -65,7 +158,6 @@ export default function CopilotPanel({
   const messagesRef = useRef<HTMLDivElement>(null)
   const running = copilot.phase === "starting" || copilot.phase === "listening"
   const busy = copilot.phase === "stopping"
-  const amplitude = Math.min(100, Math.round(copilot.amplitude * 140))
   const roleLabels = {
     interviewer: t("copilot.role.interviewer"),
     assistant: t("copilot.role.assistant"),
@@ -344,13 +436,7 @@ export default function CopilotPanel({
         </div>
       </header>
 
-      {/* Dynamic Audio Visualizer Bar */}
-      <div className="mb-2 flex h-1 items-center overflow-hidden rounded-full bg-[var(--bg-hover)]" aria-hidden="true">
-        <div
-          className={`h-full rounded-full transition-all duration-75 ${running ? "bg-[var(--success)]" : "bg-[var(--text-muted)]"}`}
-          style={{ width: `${amplitude}%` }}
-        />
-      </div>
+      <CopilotWaveform amplitude={copilot.amplitude} active={running} />
 
       {/* Chat & AI Suggestions Container */}
       <div className="relative min-h-0 flex-1">

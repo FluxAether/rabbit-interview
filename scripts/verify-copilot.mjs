@@ -62,9 +62,26 @@ const cargo = source('src-tauri/Cargo.toml')
 const defaultCapability = source('src-tauri/capabilities/default.json')
 const tauriConfig = source('src-tauri/tauri.conf.json')
 const { recordingBytes } = loadTypeScriptModule('src/lib/recordingBytes.ts', ['recordingBytes'])
+const { waveformSampleLevel } = loadTypeScriptModule('src/lib/copilotWaveform.ts', ['waveformSampleLevel'])
 
 check(session.length > 0, 'single Copilot session host exists')
 check(panel.length > 0 && app.includes('CopilotPanel') && page.includes('CopilotPanel'), 'main and floating views share CopilotPanel')
+const activeWaveformPeak = Math.max(...Array.from({ length: 101 }, (_, index) => waveformSampleLevel(index, 101, 1, true)))
+const idleWaveformPeak = Math.max(...Array.from({ length: 101 }, (_, index) => waveformSampleLevel(index, 101, 0, false)))
+check(
+  activeWaveformPeak > 0.75
+    && idleWaveformPeak < activeWaveformPeak * 0.1
+    && waveformSampleLevel(0, 101, 1, true) === 0,
+  'Copilot waveform keeps quiet tails while live amplitude drives a strong center peak',
+)
+check(
+  panel.includes('<canvas')
+    && panel.includes('ResizeObserver')
+    && panel.includes('window.devicePixelRatio')
+    && panel.includes('prefers-reduced-motion')
+    && panel.includes('--success'),
+  'Copilot waveform is responsive, Retina-sharp, motion-aware, and uses the success token',
+)
 check(panel.includes('orderCopilotMessagesForDisplay') && panel.includes('groupCopilotMessages(copilot.messages)'), 'live chat renders AI replies under the matching interviewer question')
 check(
   panel.includes('sendCopilotCommand({ type: "retry", messageId: message.id })')
