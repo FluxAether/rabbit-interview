@@ -1,0 +1,43 @@
+name: Gateway
+
+on:
+  pull_request:
+    paths:
+      - "server/**"
+      - ".github/workflows/gateway.yml"
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - ".github/workflows/gateway.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: rabbit_gateway
+          MYSQL_ROOT_PASSWORD: rabbit
+          TZ: UTC
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -prabbit"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - run: cargo test --manifest-path server/Cargo.toml
+      - run: cargo test --manifest-path server/Cargo.toml --test mysql_entitlement -- --ignored
+        env:
+          TEST_DATABASE_URL: mysql://root:rabbit@127.0.0.1:3306/rabbit_gateway
+      - run: cargo test --manifest-path server/Cargo.toml --test mysql_oidc -- --ignored
+        env:
+          TEST_DATABASE_URL: mysql://root:rabbit@127.0.0.1:3306/rabbit_gateway

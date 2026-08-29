@@ -32,7 +32,9 @@ import {
   APPLE_STT_MODEL,
   GEMINI_LIVE_TRANSCRIBE_MODEL,
   GEMINI_LIVE_TRANSLATE_MODEL,
+  HOSTED_STT_MODEL,
   saveAppSettings,
+  type AiAccessMode,
   type AppSettings as PersistedSettings,
   type SttLanguage,
   type SttProvider,
@@ -41,6 +43,7 @@ import type { SettingsTab } from '../lib/readiness'
 import type { Page } from '../lib/navigation'
 import { deriveLicenseState, parseLicensePayload } from '../lib/license'
 import { saveSetting } from '../lib/db'
+import { refreshHostedEntitlements, signInHosted, signOutHosted, useHostedAuth } from '../lib/hostedAuth'
 
 type TabType = SettingsTab
 
@@ -86,6 +89,7 @@ export default function Settings({
 } = {}) {
   const { settings, copilot, setLanguage: setStoreLanguage } = useAppStore()
   const t = useTranslation()
+  const hosted = useHostedAuth()
 
   const [activeTab, setActiveTab] = useState<TabType>(initialTab)
 
@@ -99,6 +103,8 @@ export default function Settings({
   const [downloadProgress, setDownloadProgress] = useState<number>(0)
   const [language, setLanguage] = useState<SupportedLanguage>(DEFAULT_LANGUAGE)
   const [aiModel, setAiModel] = useState('groq-llama-3.1')
+  const [aiAccessMode, setAiAccessMode] = useState<AiAccessMode>('byok')
+  const [hostedAction, setHostedAction] = useState(false)
   const [stealth, setStealth] = useState(true)
 
   // Per-provider model selections
@@ -257,6 +263,7 @@ export default function Settings({
     updateChannel,
     language,
     aiModel,
+    aiAccessMode,
     stealthEnabled: stealth,
     aiModels: {
       groq: groqModel,
@@ -304,7 +311,7 @@ export default function Settings({
     }
   }, [
     theme, autoUpdate, updateChannel,
-    language, aiModel, stealth,
+    language, aiModel, aiAccessMode, stealth,
     groqModel, openaiModel, anthropicModel, geminiModel,
     sttProvider, sttModel, sttLanguage,
   ])
@@ -359,6 +366,7 @@ export default function Settings({
 
     const currentAiModel = (settings.aiModel as string) || 'groq-llama-3.1'
     setAiModel(currentAiModel)
+    setAiAccessMode(settings.aiAccessMode === 'hosted' ? 'hosted' : 'byok')
 
     const aiModels = (settings.aiModels as Record<string, string>) || {}
     if (aiModels.groq) setGroqModel(aiModels.groq)
@@ -515,6 +523,23 @@ export default function Settings({
         sttModel: model,
       },
     }))
+  }
+
+  const updateAiAccessMode = (mode: AiAccessMode) => {
+    setAiAccessMode(mode)
+    useAppStore.setState((state) => ({ settings: { ...state.settings, aiAccessMode: mode } }))
+  }
+
+  const handleHostedAuth = async () => {
+    setHostedAction(true)
+    try {
+      if (hosted.status === 'signed-in') await signOutHosted()
+      else await signInHosted()
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setHostedAction(false)
+    }
   }
 
   // --- API Connectivity Testing ---
@@ -728,6 +753,7 @@ export default function Settings({
       const { clearResumeWorkspace } = await import('../lib/resumeWorkspaceStore')
       await clearAllLocalData()
       await clearApiKeys()
+      await signOutHosted()
       clearKeyCache()
       await clearResumeWorkspace()
       useAppStore.getState().loadHistory([])
@@ -738,6 +764,7 @@ export default function Settings({
         updateChannel: 'Stable',
         stealthEnabled: true,
         aiModel: 'groq-llama-3.1',
+        aiAccessMode: 'byok',
         language: DEFAULT_LANGUAGE,
         sttProvider: 'deepgram',
         sttModel: 'nova-3',
@@ -1064,6 +1091,47 @@ export default function Settings({
                 <div className="mb-1 font-semibold">{t('settings.aiModel')}</div>
                 <div className="mb-4 text-xs text-[var(--text-muted)]">{t('settings.aiModel.lowLatency')}</div>
 
+                <div className="mb-4 rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">{t('settings.hosted.title')}</div>
+                      <div className="mt-1 text-xs text-[var(--text-muted)]">{t('settings.hosted.desc')}</div>
+                    </div>
+                    <div className="flex rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-1">
+                      {(['byok', 'hosted'] as AiAccessMode[]).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => updateAiAccessMode(mode)}
+                          className={`rounded px-3 py-1 text-xs font-medium ${aiAccessMode === mode ? 'bg-[var(--action)] text-[var(--action-text)]' : 'text-[var(--text-muted)]'}`}
+                        >
+                          {t(`settings.hosted.${mode}`)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div className="text-[var(--text-muted)]">
+                      {hosted.status === 'signed-in' && hosted.entitlements
+                        ? t('settings.hosted.quota', {
+                            minutes: (hosted.entitlements.balances.STT_AUDIO_MS / 60_000).toFixed(1),
+                            tokens: hosted.entitlements.balances.LLM_TOKEN_UNITS.toLocaleString(),
+                          })
+                        : hosted.error || t(`settings.hosted.status.${hosted.status}`)}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {hosted.status === 'signed-in' && (
+                        <button type="button" disabled={hostedAction} onClick={() => { setHostedAction(true); void refreshHostedEntitlements().catch((error) => setSaveError(String(error))).finally(() => setHostedAction(false)) }} className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs hover:bg-[var(--bg-hover)] disabled:opacity-50">
+                          {t('settings.hosted.refresh')}
+                        </button>
+                      )}
+                      <button type="button" disabled={hostedAction || hosted.status === 'restoring'} onClick={() => void handleHostedAuth()} className="rounded-md bg-[var(--action)] px-3 py-1 text-xs font-medium text-[var(--action-text)] disabled:opacity-50">
+                        {hosted.status === 'signed-in' ? t('settings.hosted.signOut') : t('settings.hosted.signIn')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-4">
                   {/* Groq */}
                   <div
@@ -1267,6 +1335,28 @@ export default function Settings({
                 </div>
 
                 <div className="space-y-4">
+                  <div
+                    className={`rounded-md border p-4 transition-colors ${
+                      sttProvider === 'hosted'
+                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
+                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-semibold">{t('settings.hosted.sttTitle')}</div>
+                        <div className="mt-1 text-[11px] text-[var(--text-muted)]">{t('settings.hosted.sttDesc')}</div>
+                      </div>
+                      {sttProvider === 'hosted' ? (
+                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">{t('settings.active')}</span>
+                      ) : (
+                        <button type="button" onClick={() => updateSttConfig('hosted', HOSTED_STT_MODEL)} className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs hover:bg-[var(--bg-hover)]">
+                          {t('settings.useProvider', { name: t('settings.hosted.sttTitle') })}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
                   <div
                     className={`rounded-md border p-4 transition-colors ${
                       sttProvider === 'deepgram'

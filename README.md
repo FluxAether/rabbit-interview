@@ -91,12 +91,13 @@ Other platforms fall back to microphone-only mode. See **Settings → Audio Capt
 
 ## Privacy
 
-- No product account and no first-party backend for interview content.
-- Resume text, history, settings, and API keys live in local app data.
+- BYOK and Apple speech recognition work without a Rabbit account. Interview content stays on this device.
+- Optional hosted mode signs in through the Gateway OIDC Provider using Authorization Code + PKCE. The refresh token is stored in the OS keychain; access tokens stay in memory.
+- Resume text, history, settings, and BYOK API keys live in local app data.
 - Recordings are files under the app data directory, not in this git tree.
-- Speech and model calls go directly from the app to the providers you configure.
+- In BYOK mode, speech and model calls go directly from the app to the providers you configure.
 
-`.env` files, local AI tool directories, and generated sidecars are gitignored. Copy `.env.example` only if you need `TAURI_DEV_HOST`.
+`.env` files, local AI tool directories, and generated sidecars are gitignored. Copy `.env.example` for desktop and Gateway configuration.
 
 ## Releases
 
@@ -120,9 +121,10 @@ macOS notarization and Windows Authenticode signing are operator-specific; see `
 ```text
 src/                 React UI and feature logic
 src-tauri/           Tauri / Rust host, audio, speech, windows
+server/              Hosted Gateway and OIDC Provider
 docs/                Design notes and feature plans
 scripts/             Build, verify, and migration helpers
-.github/workflows/   Release workflow
+.github/workflows/   Release and Gateway workflows
 ```
 
 ## Tech Stack

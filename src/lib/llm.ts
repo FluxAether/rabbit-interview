@@ -10,7 +10,8 @@ let cachedKeys: Awaited<ReturnType<typeof loadApiKeys>> | null = null;
 const INTERVIEW_ANSWER_SYSTEM = 'You are an interview copilot. Answer every interviewer question in the prompt. If the interviewer asked more than one question, answer each one in order and do not skip any. Prefer Candidate said over Suggested answer; do not treat Suggested answer or Suggested but not used as something the candidate already said. Respond in the same language as the question. Be accurate, specific, concise, and professional. Give a complete answer of roughly 5 to 8 sentences, use plain paragraphs without Markdown headings, and always finish the final sentence.';
 const FOLLOW_UP_SYSTEM = 'You are an interview copilot handling a user follow-up. Answer the request directly using recent interview turns and provided context. Prefer Candidate said over Suggested answer. Do not treat the request itself as a new interviewer question. Use plain paragraphs without Markdown headings and always finish the final sentence.';
 
-type LlmProvider = 'groq' | 'openai' | 'anthropic' | 'gemini';
+type ByokLlmProvider = 'groq' | 'openai' | 'anthropic' | 'gemini';
+type LlmProvider = ByokLlmProvider | 'hosted';
 
 function answerTokenBudget(provider: LlmProvider, model: string): number {
   const normalizedModel = model.toLowerCase();
@@ -48,7 +49,7 @@ async function getKeys(forceReload = false) {
 const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 const SUPPORTED_GEMINI_MODELS = new Set(['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash']);
 
-function resolveProviderAndModel(aiModel: string): { provider: LlmProvider; model: string } {
+function resolveProviderAndModel(aiModel: string): { provider: ByokLlmProvider; model: string } {
   const configured = aiModel || 'llama-3.1-8b-instant';
   const m = configured.toLowerCase();
 
@@ -100,7 +101,7 @@ export interface SuggestionStreamOptions {
 }
 
 async function resolveConfiguredProvider(allowProviderFallback = true): Promise<{
-  provider: LlmProvider;
+  provider: ByokLlmProvider;
   model: string;
   apiKey: string;
 }> {
@@ -221,6 +222,9 @@ export async function generateSuggestionsStream(
   options: SuggestionStreamOptions = {},
 ): Promise<LlmStreamResult> {
   try {
+    if (useAppStore.getState().settings?.aiAccessMode === 'hosted') {
+      return generateHostedSuggestionsStream(question, context, handlers, signal, requestType, options);
+    }
     const { provider, model, apiKey } = await resolveConfiguredProvider();
     const isFollowUp = requestType === 'follow-up';
     const basePrompt = isFollowUp
@@ -333,6 +337,55 @@ export async function generateSuggestionsStream(
   }
 }
 
+async function generateHostedSuggestionsStream(
+  question: string,
+  context: string,
+  handlers: SuggestionStreamHandlers,
+  signal?: AbortSignal,
+  requestType: SuggestionRequestType = 'interviewer-question',
+  options: SuggestionStreamOptions = {},
+): Promise<LlmStreamResult> {
+  const requestId = crypto.randomUUID();
+  const { hostedFetch } = await import('./hostedAuth');
+  const cancel = () => {
+    void hostedFetch(`/v1/llm/answers/${requestId}`, { method: 'DELETE' }).catch(() => {});
+  };
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    const response = await hostedFetch('/v1/llm/answers', {
+      method: 'POST',
+      signal,
+      headers: {
+        'Accept': 'text/event-stream',
+        'Content-Type': 'application/json',
+        'Idempotency-Key': requestId,
+      },
+      body: JSON.stringify({
+        request_id: requestId,
+        request_type: requestType,
+        question,
+        context: { combined: context },
+        continuation_text: options.continuationText,
+      }),
+    });
+    return consumeSse(
+      response,
+      (payload) => {
+        if (payload?.code) throw new Error(payload.code);
+        return {
+          delta: typeof payload?.delta === 'string' ? payload.delta : null,
+          finishReason: payload?.finish_reason || null,
+        };
+      },
+      handlers,
+      'hosted',
+      'gemini-3.7-flash',
+    );
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+  }
+}
+
 // ==================== STT (Speech-to-Text) Streaming ====================
 const MAX_DEEPGRAM_BUFFERED_BYTES = 512 * 1024;
 const DEEPGRAM_CONNECT_TIMEOUT_MS = 10_000;
@@ -385,7 +438,7 @@ export interface DeepgramStreamOptions {
 }
 
 export interface DeepgramStream extends WebSocket {
-  __sttProvider?: 'deepgram' | 'gemini' | 'apple';
+  __sttProvider?: 'deepgram' | 'gemini' | 'apple' | 'hosted';
   __deepgramManaged?: boolean;
   __deepgramClosedByClient?: boolean;
   __deepgramKeepAliveTimer?: ReturnType<typeof globalThis.setInterval> | null;
@@ -406,6 +459,8 @@ export interface DeepgramStream extends WebSocket {
   __geminiUtteranceEnded?: boolean;
   __geminiUtteranceEndTimer?: ReturnType<typeof globalThis.setTimeout> | null;
   __geminiRotating?: boolean;
+  __hostedUnregister?: (() => void) | null;
+  __hostedSessionEnded?: boolean;
 }
 
 function clearGeminiUtteranceEndTimer(ws: DeepgramStream) {
@@ -959,6 +1014,119 @@ export async function testAppleSttConnection(language = 'zh-CN'): Promise<void> 
   await invoke('test_apple_stt', { language });
 }
 
+let hostedInterviewId: string | null = null;
+let activeHostedStreams = 0;
+
+async function openHostedSttSocket(
+  sampleRate: number,
+  onTranscript: (event: DeepgramTranscriptEvent) => void,
+  onError?: (err: any) => void,
+  options: DeepgramStreamOptions = {},
+): Promise<WebSocket> {
+  if (sampleRate !== 16_000) {
+    throw new Error('Hosted STT v1 requires 16 kHz audio. Restart capture with the standard audio pipeline.');
+  }
+  const source = options.source === 'system' ? 'system' : 'microphone';
+  const settings = useAppStore.getState().settings;
+  const language = options.language || (settings?.sttLanguage as string) || 'zh-CN';
+  const interviewId = hostedInterviewId || crypto.randomUUID();
+  hostedInterviewId = interviewId;
+  const clientRequestId = crypto.randomUUID();
+  const { hostedFetch, registerHostedConnection } = await import('./hostedAuth');
+  const response = await hostedFetch('/v1/stt/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': clientRequestId },
+    body: JSON.stringify({
+      client_request_id: clientRequestId,
+      interview_id: interviewId,
+      source,
+      language,
+      audio: { encoding: 'pcm_s16le', sample_rate: 16_000, channels: 1 },
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { message?: string; code?: string } | null;
+    throw new Error(body?.message || body?.code || `Hosted STT failed with ${response.status}`);
+  }
+  const session = await response.json() as { ws_url: string; ws_ticket: string };
+  const url = new URL(session.ws_url);
+  url.searchParams.set('ticket', session.ws_ticket);
+  const ws = new WebSocket(url) as DeepgramStream;
+  ws.binaryType = 'arraybuffer';
+  ws.__sttProvider = 'hosted';
+  ws.__deepgramOptions = { ...options };
+  ws.__deepgramOnTranscript = onTranscript;
+  ws.__deepgramOnError = onError;
+  ws.__hostedSessionEnded = false;
+  activeHostedStreams += 1;
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    ws.__hostedUnregister?.();
+    ws.__hostedUnregister = null;
+    activeHostedStreams = Math.max(0, activeHostedStreams - 1);
+    if (activeHostedStreams === 0) hostedInterviewId = null;
+  };
+  ws.__hostedUnregister = registerHostedConnection(() => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stt.stop', reason: 'sign_out' }));
+    ws.close();
+  });
+
+  return new Promise<WebSocket>((resolve, reject) => {
+    let ready = false;
+    const timer = globalThis.setTimeout(() => {
+      cleanup();
+      ws.close();
+      reject(new Error('Hosted STT connection timed out'));
+    }, DEEPGRAM_CONNECT_TIMEOUT_MS);
+    (timer as { unref?: () => void }).unref?.();
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(String(event.data));
+        if (payload.type === 'stt.ready') {
+          if (!ready) {
+            ready = true;
+            globalThis.clearTimeout(timer);
+            resolve(ws);
+          }
+          return;
+        }
+        if (payload.type === 'transcript') {
+          const boundary = ['interim', 'final', 'speech-final', 'utterance-end'].includes(payload.boundary)
+            ? payload.boundary as TranscriptBoundary
+            : 'interim';
+          onTranscript({
+            text: String(payload.text || ''),
+            isFinal: boundary !== 'interim',
+            boundary,
+          });
+        } else if (payload.type === 'quota.warning') {
+          onError?.(new Error(`Hosted STT quota is low (${Number(payload.remaining_ms) || 0} ms remaining).`));
+        } else if (payload.type === 'session.ended') {
+          ws.__hostedSessionEnded = true;
+          ws.close();
+        }
+      } catch (error) {
+        onError?.(error);
+      }
+    };
+    ws.onerror = (event) => {
+      onError?.(event);
+      if (!ready) {
+        globalThis.clearTimeout(timer);
+        cleanup();
+        reject(new Error('Hosted STT connection failed'));
+      }
+    };
+    ws.onclose = () => {
+      globalThis.clearTimeout(timer);
+      cleanup();
+      if (!ready) reject(new Error('Hosted STT closed before it was ready'));
+    };
+  });
+}
+
 export async function startDeepgramStream(
   onTranscript: (event: DeepgramTranscriptEvent) => void,
   onError?: (err: any) => void,
@@ -967,13 +1135,15 @@ export async function startDeepgramStream(
   options: DeepgramStreamOptions = {},
 ): Promise<WebSocket> {
   const configured = useAppStore.getState().settings?.sttProvider;
-  const provider = configured === 'gemini' ? 'gemini' : configured === 'apple' ? 'apple' : 'deepgram';
-  const ws = await (provider === 'gemini'
-    ? openGeminiLiveSocket(onTranscript, onError, false, undefined, options)
-    : provider === 'apple'
-      ? openAppleSttSocket(onTranscript, onError, options)
-      : openDeepgramSocket(sampleRate, onTranscript, onError, false, undefined, options)) as DeepgramStream;
-  ws.__deepgramManaged = true;
+  const provider = configured === 'hosted' ? 'hosted' : configured === 'gemini' ? 'gemini' : configured === 'apple' ? 'apple' : 'deepgram';
+  const ws = await (provider === 'hosted'
+    ? openHostedSttSocket(sampleRate, onTranscript, onError, options)
+    : provider === 'gemini'
+      ? openGeminiLiveSocket(onTranscript, onError, false, undefined, options)
+      : provider === 'apple'
+        ? openAppleSttSocket(onTranscript, onError, options)
+        : openDeepgramSocket(sampleRate, onTranscript, onError, false, undefined, options)) as DeepgramStream;
+  ws.__deepgramManaged = provider !== 'hosted';
   ws.__deepgramClosedByClient = false;
   ws.__deepgramReconnectAttempt = 0;
   ws.__deepgramReplaceSocket = (next) => {
@@ -1047,6 +1217,9 @@ export async function generateStructuredJson<T>(
     thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high'
   } = {},
 ): Promise<T> {
+  if (useAppStore.getState().settings?.aiAccessMode === 'hosted') {
+    return generateHostedStructuredJson<T>(system, prompt, signal, options.maxOutputTokens ?? 2_400);
+  }
   const { provider, model, apiKey } = await resolveConfiguredProvider(options.allowProviderFallback !== false);
   if (!apiKey) throw new Error('No LLM API key is configured. Add a provider key in Settings and retry.');
   const maxOutputTokens = options.maxOutputTokens ?? 2_400;
@@ -1106,6 +1279,63 @@ export async function generateStructuredJson<T>(
   }
 }
 
+async function generateHostedStructuredJson<T>(
+  system: string,
+  prompt: string,
+  signal: AbortSignal | undefined,
+  maxOutputTokens: number,
+): Promise<T> {
+  const requestId = crypto.randomUUID();
+  const { hostedFetch } = await import('./hostedAuth');
+  const cancel = () => {
+    void hostedFetch(`/v1/llm/answers/${requestId}`, { method: 'DELETE' }).catch(() => {});
+  };
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    const response = await hostedFetch('/v1/llm/answers', {
+      method: 'POST',
+      signal,
+      headers: {
+        'Accept': 'text/event-stream',
+        'Content-Type': 'application/json',
+        'Idempotency-Key': requestId,
+      },
+      body: JSON.stringify({
+        request_id: requestId,
+        request_type: 'structured-json',
+        system,
+        prompt,
+        response_format: 'json',
+        max_output_tokens: maxOutputTokens,
+      }),
+    });
+    const result = await consumeSse(
+      response,
+      (payload) => {
+        if (payload?.code) throw new Error(payload.code);
+        return {
+          delta: typeof payload?.delta === 'string' ? payload.delta : null,
+          finishReason: payload?.finish_reason || null,
+        };
+      },
+      { onDelta: () => {} },
+      'hosted',
+      'gemini-3.7-flash',
+    );
+    if (result.status === 'max-tokens') throw new Error('llm-output-truncated');
+    if (result.status !== 'complete') throw new Error('The hosted LLM response was incomplete. Please retry.');
+    if (!result.text) throw new Error('The hosted LLM returned an empty response.');
+    const cleaned = result.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    try {
+      return JSON.parse(cleaned) as T;
+    } catch {
+      throw new Error('The hosted LLM returned invalid JSON. Please retry.');
+    }
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+  }
+}
+
 /** Gracefully close an STT stream */
 export function closeDeepgramStream(ws: WebSocket | null) {
   if (!ws) return;
@@ -1113,6 +1343,15 @@ export function closeDeepgramStream(ws: WebSocket | null) {
   managed.__deepgramClosedByClient = true;
   managed.__deepgramManaged = false;
   clearDeepgramTimers(managed);
+  if (managed.__sttProvider === 'hosted') {
+    if (ws.readyState === WebSocket.OPEN && !managed.__hostedSessionEnded) {
+      ws.send(JSON.stringify({ type: 'stt.stop', reason: 'client_stop' }));
+      globalThis.setTimeout(() => ws.close(), 250);
+    } else if (ws.readyState === WebSocket.CONNECTING) {
+      ws.close();
+    }
+    return;
+  }
   if (managed.__sttProvider === 'apple') {
     const apple = managed as AppleSttStream;
     apple.__appleClosed = true;

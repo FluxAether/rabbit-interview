@@ -6,6 +6,7 @@ import { useTranslation } from '../i18n'
 import { computeDashboardStats } from '../lib/dashboardStats'
 import { deriveReadiness, primarySettingsTab, type SettingsTab } from '../lib/readiness'
 import { getApiKey } from '../lib/keyStore'
+import { useHostedAuth } from '../lib/hostedAuth'
 import { invoke } from '@tauri-apps/api/core'
 import type { AudioCapabilities } from '../lib/copilotSession'
 
@@ -55,6 +56,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
   const history = useAppStore((state) => state.history)
   const historyStatus = useAppStore((state) => state.historyStatus)
   const settings = useAppStore((state) => state.settings)
+  const hosted = useHostedAuth()
   const targetRole = useAppStore((state) => state.resumeTargetRole)
   const targetCompany = useAppStore((state) => state.resumeTargetCompany)
   const t = useTranslation()
@@ -78,8 +80,18 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
     ]).then(([groq, openai, anthropic, gemini, deepgram, capabilities]) => {
       if (cancelled) return
       const readiness = deriveReadiness({
-        settings: { aiModel: settings.aiModel, sttProvider: settings.sttProvider },
+        settings: { aiModel: settings.aiModel, aiAccessMode: settings.aiAccessMode, sttProvider: settings.sttProvider },
         keys: { groq: !!groq, openai: !!openai, anthropic: !!anthropic, gemini: !!gemini, deepgram: !!deepgram },
+        hosted: {
+          authenticated: hosted.status === 'signed-in',
+          reachable: hosted.status !== 'error',
+          eligible: Boolean(hosted.entitlements?.eligible),
+          status: hosted.entitlements?.status,
+          sttUnits: hosted.entitlements?.balances.STT_AUDIO_MS || 0,
+          llmUnits: hosted.entitlements?.balances.LLM_TOKEN_UNITS || 0,
+          sttEnabled: Boolean(hosted.entitlements?.hosted_stt_enabled),
+          llmEnabled: Boolean(hosted.entitlements?.hosted_llm_enabled),
+        },
         useSystemAudio: settings.useSystemAudio ?? true,
         useMicrophone: settings.useMicWithSystem ?? false,
         capabilities,
@@ -89,7 +101,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
       setSettingsTab(primarySettingsTab(readiness))
     })
     return () => { cancelled = true }
-  }, [settings.aiModel, settings.sttProvider, settings.useSystemAudio, settings.useMicWithSystem])
+  }, [hosted, settings.aiAccessMode, settings.aiModel, settings.sttProvider, settings.useSystemAudio, settings.useMicWithSystem])
 
   const launch = () => {
     onLaunchCopilot()

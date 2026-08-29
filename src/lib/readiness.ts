@@ -1,7 +1,7 @@
 import type { AppSettings, SttProvider } from './settingsStore'
 
 export type SettingsTab = 'general' | 'ai' | 'stt' | 'shortcuts_privacy' | 'storage' | 'license'
-export type LlmProvider = 'groq' | 'openai' | 'anthropic' | 'gemini'
+export type LlmProvider = 'groq' | 'openai' | 'anthropic' | 'gemini' | 'hosted'
 export type ReadinessStatus = 'loading' | 'unconfigured' | 'testing' | 'ready' | 'degraded' | 'error'
 export type ReadinessIssueCode =
   | 'missing-llm-key'
@@ -14,6 +14,10 @@ export type ReadinessIssueCode =
   | 'system-audio-unavailable'
   | 'no-capture-source'
   | 'capabilities-unavailable'
+  | 'hosted-auth-required'
+  | 'hosted-not-eligible'
+  | 'hosted-quota-insufficient'
+  | 'hosted-unavailable'
 
 export interface AudioCapabilitiesLike {
   system_audio_available: boolean
@@ -29,8 +33,18 @@ export interface ReadinessIssue {
 }
 
 export interface ReadinessInput {
-  settings?: Pick<AppSettings, 'aiModel' | 'sttProvider'> | null
+  settings?: Pick<AppSettings, 'aiModel' | 'aiAccessMode' | 'sttProvider'> | null
   keys?: Partial<Record<LlmProvider | 'deepgram', boolean>>
+  hosted?: {
+    authenticated: boolean
+    reachable: boolean
+    eligible: boolean
+    status?: string
+    sttUnits: number
+    llmUnits: number
+    sttEnabled: boolean
+    llmEnabled: boolean
+  } | null
   llmTest?: { success: boolean } | null
   sttTest?: { success: boolean } | null
   appleSttAvailable?: boolean
@@ -51,7 +65,8 @@ export interface ReadinessState {
   canStartCopilot: boolean
 }
 
-export function resolveLlmProvider(aiModel?: string | null): LlmProvider {
+export function resolveLlmProvider(aiModel?: string | null, accessMode?: string | null): LlmProvider {
+  if (accessMode === 'hosted') return 'hosted'
   const configured = (aiModel || '').toLowerCase()
   if (configured.startsWith('gemini')) return 'gemini'
   if (configured.includes('claude')) return 'anthropic'
@@ -64,8 +79,8 @@ export function sttRequiresCloudKey(provider: SttProvider): boolean {
 }
 
 export function deriveReadiness(input: ReadinessInput): ReadinessState {
-  const llmProvider = resolveLlmProvider(input.settings?.aiModel)
-  const sttProvider = input.settings?.sttProvider === 'gemini' || input.settings?.sttProvider === 'apple'
+  const llmProvider = resolveLlmProvider(input.settings?.aiModel, input.settings?.aiAccessMode)
+  const sttProvider = input.settings?.sttProvider === 'gemini' || input.settings?.sttProvider === 'apple' || input.settings?.sttProvider === 'hosted'
     ? input.settings.sttProvider
     : 'deepgram'
   const issues: ReadinessIssue[] = []
@@ -80,14 +95,35 @@ export function deriveReadiness(input: ReadinessInput): ReadinessState {
     }
   }
 
-  const llmConfigured = Boolean(input.keys?.[llmProvider])
-  if (!llmConfigured) {
-    issues.push({ code: 'missing-llm-key', settingsTab: 'ai', blocking: true })
-  } else if (input.llmTest && input.llmTest.success === false) {
-    issues.push({ code: 'invalid-llm-key', settingsTab: 'ai', blocking: true })
+  const hostedRequired = llmProvider === 'hosted' || sttProvider === 'hosted'
+  if (hostedRequired) {
+    if (input.hosted?.reachable === false) {
+      issues.push({ code: 'hosted-unavailable', settingsTab: 'ai', blocking: true })
+    } else if (!input.hosted?.authenticated) {
+      issues.push({ code: 'hosted-auth-required', settingsTab: 'ai', blocking: true })
+    } else if (!input.hosted.eligible || input.hosted.status !== 'ACTIVE') {
+      issues.push({ code: 'hosted-not-eligible', settingsTab: 'ai', blocking: true })
+    }
   }
 
-  if (sttProvider === 'apple') {
+  if (llmProvider === 'hosted') {
+    if (input.hosted?.authenticated && (!input.hosted.llmEnabled || input.hosted.llmUnits <= 0)) {
+      issues.push({ code: 'hosted-quota-insufficient', settingsTab: 'ai', blocking: true })
+    }
+  } else {
+    const llmConfigured = Boolean(input.keys?.[llmProvider])
+    if (!llmConfigured) {
+      issues.push({ code: 'missing-llm-key', settingsTab: 'ai', blocking: true })
+    } else if (input.llmTest && input.llmTest.success === false) {
+      issues.push({ code: 'invalid-llm-key', settingsTab: 'ai', blocking: true })
+    }
+  }
+
+  if (sttProvider === 'hosted') {
+    if (input.hosted?.authenticated && (!input.hosted.sttEnabled || input.hosted.sttUnits <= 0)) {
+      issues.push({ code: 'hosted-quota-insufficient', settingsTab: 'stt', blocking: true })
+    }
+  } else if (sttProvider === 'apple') {
     if (input.appleSttAvailable === false) {
       issues.push({ code: 'apple-stt-unavailable', settingsTab: 'stt', blocking: true })
     }
@@ -120,7 +156,7 @@ export function deriveReadiness(input: ReadinessInput): ReadinessState {
   }
 
   const blocking = issues.filter((issue) => issue.blocking)
-  const unconfigured = blocking.some((issue) => issue.code.startsWith('missing-') || issue.code === 'apple-stt-unavailable')
+  const unconfigured = blocking.some((issue) => issue.code.startsWith('missing-') || issue.code === 'apple-stt-unavailable' || issue.code === 'hosted-auth-required' || issue.code === 'hosted-not-eligible' || issue.code === 'hosted-quota-insufficient')
   let status: ReadinessStatus
   if (input.testing) status = 'testing'
   else if (blocking.length > 0) status = unconfigured ? 'unconfigured' : 'error'

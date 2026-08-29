@@ -6,12 +6,14 @@ import {
 import { encryptSecret } from './secretCrypto';
 
 export type SttLanguage = 'zh-CN' | 'zh-TW' | 'en-US' | 'multi';
-export type SttProvider = 'deepgram' | 'gemini' | 'apple';
+export type AiAccessMode = 'byok' | 'hosted';
+export type SttProvider = 'deepgram' | 'gemini' | 'apple' | 'hosted';
 export type CopilotFontSize = 'sm' | 'base' | 'lg';
 
 export const GEMINI_LIVE_TRANSCRIBE_MODEL = 'gemini-3.5-transcribe-live';
 export const GEMINI_LIVE_TRANSLATE_MODEL = 'gemini-3.5-live-translate-preview';
 export const APPLE_STT_MODEL = 'speech-transcriber';
+export const HOSTED_STT_MODEL = 'volcengine-bigmodel';
 
 export interface AppSettings {
   theme: 'Light' | 'Dark' | 'System';
@@ -19,6 +21,7 @@ export interface AppSettings {
   updateChannel: 'Stable' | 'Beta';
   language: string;
   aiModel: string;
+  aiAccessMode: AiAccessMode;
   stealthEnabled: boolean;
   // Per-provider last selected models (so UI remembers choices)
   aiModels?: Record<string, string>;
@@ -42,6 +45,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   updateChannel: 'Stable',
   language: 'zh-CN',
   aiModel: 'groq-llama-3.1',
+  aiAccessMode: 'byok',
   stealthEnabled: true,
   aiModels: {
     groq: 'llama-3.1-8b-instant',
@@ -78,13 +82,18 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
   if (aiModel.startsWith('gemini') && !['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash'].includes(aiModel)) {
     aiModel = 'gemini-3.6-flash';
   }
+  const aiAccessMode: AiAccessMode = saved?.aiAccessMode === 'hosted' ? 'hosted' : 'byok';
   const savedSttProvider = saved?.sttProvider as string | undefined;
-  const sttProvider: SttProvider = savedSttProvider === 'gemini'
+  const sttProvider: SttProvider = savedSttProvider === 'hosted'
+    ? 'hosted'
+    : savedSttProvider === 'gemini'
     ? 'gemini'
     : savedSttProvider === 'apple'
       ? 'apple'
       : 'deepgram';
-  const sttModel = sttProvider === 'gemini'
+  const sttModel = sttProvider === 'hosted'
+    ? HOSTED_STT_MODEL
+    : sttProvider === 'gemini'
     ? saved?.sttModel === GEMINI_LIVE_TRANSCRIBE_MODEL
       ? GEMINI_LIVE_TRANSCRIBE_MODEL
       : GEMINI_LIVE_TRANSLATE_MODEL
@@ -109,6 +118,7 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
     ...DEFAULT_SETTINGS,
     ...saved,
     aiModel,
+    aiAccessMode,
     aiModels,
     sttProvider,
     sttModel,

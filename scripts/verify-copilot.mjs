@@ -2,8 +2,10 @@
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import ts from 'typescript'
+import { resolveConfig } from 'vite'
 
 const root = process.cwd()
+const viteConfig = await resolveConfig({}, 'build', 'production')
 let passed = 0
 let failed = 0
 
@@ -52,6 +54,7 @@ const db = source('src/lib/db.ts')
 const archive = source('src/lib/copilotArchive.ts')
 const turnDetector = source('src/lib/interviewerTurnDetector.ts')
 const llm = source('src/lib/llm.ts')
+const hostedAuth = source('src/lib/hostedAuth.ts')
 const windowBridge = source('src/lib/copilotWindow.ts')
 const rustLib = source('src-tauri/src/lib.rs')
 const rustWindow = source('src-tauri/src/copilot_window.rs')
@@ -180,9 +183,52 @@ check(
   'STT provider guidance covers Google in all locales without claiming Deepgram exclusivity',
 )
 check(
-  settingsStore.includes("export type SttProvider = 'deepgram' | 'gemini' | 'apple'")
+  settingsStore.includes("export type SttProvider = 'deepgram' | 'gemini' | 'apple' | 'hosted'")
     && !llm.match(/SUPPORTED_GEMINI_MODELS[^;]+;/s)?.[0].includes('gemini-3.5-live-translate-preview'),
-  'Gemini Live Translate is typed as STT-only and is not offered as a regular LLM',
+  'hosted STT is typed while Gemini Live Translate remains STT-only',
+)
+check(
+  settingsStore.includes("export type AiAccessMode = 'byok' | 'hosted'")
+    && settingsStore.includes("aiAccessMode: 'byok'")
+    && settingsStore.includes("HOSTED_STT_MODEL = 'volcengine-bigmodel'"),
+  'hosted access is opt-in and preserves BYOK as the default',
+)
+check(
+  hostedAuth.includes('if (refreshPromise) return refreshPromise')
+    && hostedAuth.includes("const REFRESH_TOKEN_KEY = 'HOSTED_REFRESH_TOKEN'")
+    && hostedAuth.includes("activeConnections.forEach((close) => close())")
+    && hostedAuth.includes("code_challenge_method', 'S256'")
+    && hostedAuth.includes("/.well-known/openid-configuration")
+    && hostedAuth.includes("'ui_locales'")
+    && hostedAuth.includes("'Content-Type': 'application/x-www-form-urlencoded'")
+    && hostedAuth.includes("claims.at_hash !== await accessTokenHash(accessTokenValue)")
+    && hostedAuth.includes("await invoke('save_secure_secret', { key: REFRESH_TOKEN_KEY, value: token.refresh_token })")
+    && hostedAuth.includes("import.meta.env.DEV ? 'http://127.0.0.1:8787' : ''")
+    && hostedAuth.includes('return url.origin')
+    && !hostedAuth.includes('/v1/auth/token')
+    && !hostedAuth.includes('clearAllApiKeys'),
+  'hosted auth uses standard discovery, PKCE, verified ID tokens, rotated refresh storage, and preserves BYOK keys',
+)
+check(
+  viteConfig.envDir === path.join(root, 'server'),
+  'production desktop loads hosted gateway configuration from the server env directory',
+)
+check(
+  llm.includes("hostedFetch('/v1/llm/answers'")
+    && llm.includes("'Idempotency-Key': requestId")
+    && llm.includes("method: 'DELETE'")
+    && llm.includes("payload.type === 'transcript'")
+    && llm.includes("if (result.status === 'max-tokens') throw new Error('llm-output-truncated')")
+    && llm.includes("ws.__deepgramManaged = provider !== 'hosted'"),
+  'hosted LLM cancellation and source-aware STT use the shared Copilot facades',
+)
+check(
+  cargo.includes('tauri-plugin-deep-link')
+    && cargo.includes('tauri-plugin-single-instance')
+    && rustLib.includes('emit_auth_callback')
+    && rustLib.includes('url.scheme() != "rabbitinterview"')
+    && tauriConfig.includes('rabbitinterview'),
+  'desktop auth callback is registered and validated before reaching the frontend',
 )
 check(!app.includes("listen<number[]>('audio-chunk'") && !page.includes("listen<number[]>('audio-chunk'"), 'views do not own audio listeners')
 check(
@@ -431,6 +477,82 @@ check(
   normalizedAppleSettings.sttProvider === 'apple'
     && normalizedAppleSettings.sttModel === 'speech-transcriber',
   'Apple STT settings normalize to speech-transcriber',
+)
+storedSettings = JSON.stringify({ aiAccessMode: 'hosted', sttProvider: 'hosted', sttModel: 'unknown' })
+const normalizedHostedSettings = await loadAppSettings()
+check(
+  normalizedHostedSettings.aiAccessMode === 'hosted'
+    && normalizedHostedSettings.sttProvider === 'hosted'
+    && normalizedHostedSettings.sttModel === 'volcengine-bigmodel'
+    && DEFAULT_SETTINGS.aiAccessMode === 'byok',
+  'hosted settings normalize to the gateway model without changing the BYOK default',
+)
+
+const { deriveReadiness: deriveHostedReadiness } = loadTypeScriptModule('src/lib/readiness.ts', ['deriveReadiness'])
+const hostedCapabilities = {
+  system_audio_available: true,
+  microphone_available: true,
+  system_audio_reason: null,
+  microphone_reason: null,
+}
+const hostedReadinessBase = {
+  settings: { aiModel: 'groq-llama-3.1', aiAccessMode: 'hosted', sttProvider: 'hosted' },
+  capabilities: hostedCapabilities,
+  useSystemAudio: true,
+}
+const hostedSignedOut = deriveHostedReadiness(hostedReadinessBase)
+const hostedUnavailable = deriveHostedReadiness({
+  ...hostedReadinessBase,
+  hosted: {
+    authenticated: false,
+    reachable: false,
+    eligible: false,
+    status: 'ACTIVE',
+    sttUnits: 0,
+    llmUnits: 0,
+    sttEnabled: true,
+    llmEnabled: true,
+  },
+})
+const hostedReady = deriveHostedReadiness({
+  ...hostedReadinessBase,
+  hosted: {
+    authenticated: true,
+    reachable: true,
+    eligible: true,
+    status: 'ACTIVE',
+    sttUnits: 60_000,
+    llmUnits: 10_000,
+    sttEnabled: true,
+    llmEnabled: true,
+  },
+})
+const hostedDepleted = deriveHostedReadiness({
+  ...hostedReadinessBase,
+  hosted: {
+    authenticated: true,
+    reachable: true,
+    eligible: true,
+    status: 'ACTIVE',
+    sttUnits: 0,
+    llmUnits: 0,
+    sttEnabled: true,
+    llmEnabled: true,
+  },
+})
+check(
+  hostedSignedOut.issues.some((issue) => issue.code === 'hosted-auth-required')
+    && hostedUnavailable.issues.some((issue) => issue.code === 'hosted-unavailable')
+    && !hostedUnavailable.issues.some((issue) => issue.code === 'hosted-auth-required')
+    && hostedReady.status === 'ready'
+    && hostedReady.canStartCopilot,
+  'hosted readiness distinguishes signed-out and unreachable states before enabling eligible quota',
+)
+check(
+  hostedDepleted.issues.some((issue) => issue.code === 'hosted-quota-insufficient' && issue.settingsTab === 'ai')
+    && hostedDepleted.issues.some((issue) => issue.code === 'hosted-quota-insufficient' && issue.settingsTab === 'stt')
+    && !hostedDepleted.canStartCopilot,
+  'hosted readiness blocks depleted LLM and STT quota independently',
 )
 
 if (sessionState) {

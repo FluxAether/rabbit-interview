@@ -30,6 +30,7 @@ import { loadAppSettings, type AppSettings } from './lib/settingsStore'
 import { deriveReadiness, type SettingsTab } from './lib/readiness'
 import type { Page, SettingsIntent } from './lib/navigation'
 import { getApiKey } from './lib/keyStore'
+import { initializeHostedAuth, useHostedAuth } from './lib/hostedAuth'
 import { encryptSecret } from './lib/secretCrypto'
 import { loadResumeWorkspace, persistResumeWorkspace } from './lib/resumeWorkspaceStore'
 import { selectResumeWorkspace, useAppStore } from './stores/useAppStore'
@@ -170,6 +171,7 @@ function Sidebar({
 export default function App() {
   const floating = window.location.hash === '#copilot-floating'
   const settings = useAppStore((state) => state.settings)
+  const hosted = useHostedAuth()
   const loadHistory = useAppStore((state) => state.loadHistory)
   const setHistoryLoadError = useAppStore((state) => state.setHistoryLoadError)
   const hydrateResumeWorkspace = useAppStore((state) => state.hydrateResumeWorkspace)
@@ -179,6 +181,9 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 960px)').matches)
   const [userCollapsed, setUserCollapsed] = useState(false)
   const [windowStatus, setWindowStatus] = useState<CopilotWindowStatus | null>(null)
+  useEffect(() => {
+    if (!floating) void initializeHostedAuth()
+  }, [floating])
   useEffect(() => {
     if (floating) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -360,8 +365,18 @@ export default function App() {
         const capabilities = await invoke<AudioCapabilities>('get_audio_capabilities').catch(() => null)
         if (cancelled) return
         const readiness = deriveReadiness({
-          settings: { aiModel: current.aiModel, sttProvider: current.sttProvider },
+          settings: { aiModel: current.aiModel, aiAccessMode: current.aiAccessMode, sttProvider: current.sttProvider },
           keys: { groq: !!groq, openai: !!openai, anthropic: !!anthropic, gemini: !!gemini, deepgram: !!deepgram },
+          hosted: {
+            authenticated: hosted.status === 'signed-in',
+            reachable: hosted.status !== 'error',
+            eligible: Boolean(hosted.entitlements?.eligible),
+            status: hosted.entitlements?.status,
+            sttUnits: hosted.entitlements?.balances.STT_AUDIO_MS || 0,
+            llmUnits: hosted.entitlements?.balances.LLM_TOKEN_UNITS || 0,
+            sttEnabled: Boolean(hosted.entitlements?.hosted_stt_enabled),
+            llmEnabled: Boolean(hosted.entitlements?.hosted_llm_enabled),
+          },
           useSystemAudio: current.useSystemAudio ?? true,
           useMicrophone: current.useMicWithSystem ?? false,
           capabilities,
@@ -381,7 +396,7 @@ export default function App() {
       cancelled = true
       unsubscribe()
     }
-  }, [floating, settings.aiModel, settings.sttProvider, settings.useSystemAudio, settings.useMicWithSystem])
+  }, [floating, hosted, settings.aiAccessMode, settings.aiModel, settings.sttProvider, settings.useSystemAudio, settings.useMicWithSystem])
 
   if (floating) {
     const hide = async () => {

@@ -122,6 +122,7 @@ export const useAppStore = create<AppState>((set) => ({
     updateChannel: 'Stable',
     stealthEnabled: true,
     aiModel: 'groq-llama-3.1',
+    aiAccessMode: 'byok',
     aiModels: {
       groq: 'llama-3.1-8b-instant',
       openai: 'gpt-5.6-luna',

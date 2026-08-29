@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Apple } from 'lucide-react'
 import { motion } from 'motion/react'
+import AuthPage from './components/AuthPage'
 import CopilotPanel from './components/CopilotPanel'
 import FeatureCards from './components/FeatureCards'
 import GitHubIcon from './components/GitHubIcon'
@@ -20,6 +21,10 @@ function readLang(): Lang {
 }
 
 export default function App() {
+  return window.location.pathname.startsWith('/auth/') ? <AuthPage /> : <LandingPage />
+}
+
+function LandingPage() {
   const [lang, setLang] = useState<Lang>('zh')
   const t = copy[lang]
 
@@ -65,6 +70,12 @@ export default function App() {
             <a href="#download" className="hover:text-ink">{t.nav.download}</a>
           </nav>
           <a href="#download" className="text-xs text-mute md:hidden">{t.nav.download}</a>
+          <a
+            href="/auth/register"
+            className="hidden h-8 items-center rounded-lg border border-white/15 px-3 text-xs font-medium text-ink hover:border-white/25 sm:inline-flex"
+          >
+            {t.nav.register}
+          </a>
           <div className="flex items-center rounded-full border border-white/10 bg-white/[0.03] px-1 py-0.5 text-[11px] font-medium">
             <button
               type="button"
