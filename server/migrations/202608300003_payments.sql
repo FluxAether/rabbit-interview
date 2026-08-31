@@ -1,0 +1,63 @@
+CREATE TABLE payment_orders (
+    id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    merchant_order_no VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    account_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    product_code VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    channel VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    provider_trade_no VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs,
+    amount_minor BIGINT NOT NULL,
+    currency CHAR(3) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    duration_days SMALLINT NOT NULL,
+    stt_units BIGINT NOT NULL,
+    llm_units BIGINT NOT NULL,
+    status VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL DEFAULT 'PENDING',
+    expires_at DATETIME(6) NOT NULL,
+    paid_at DATETIME(6),
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY payment_orders_merchant_no_uq (merchant_order_no),
+    UNIQUE KEY payment_orders_provider_trade_uq (channel, provider_trade_no),
+    KEY payment_orders_account_created_idx (account_id, created_at),
+    CONSTRAINT payment_orders_account_fk FOREIGN KEY (account_id) REFERENCES accounts (id),
+    CONSTRAINT payment_orders_channel_ck CHECK (channel IN ('ALIPAY')),
+    CONSTRAINT payment_orders_status_ck CHECK (status IN ('PENDING', 'PAID', 'CLOSED')),
+    CONSTRAINT payment_orders_amount_ck CHECK (amount_minor > 0),
+    CONSTRAINT payment_orders_currency_ck CHECK (currency = 'CNY'),
+    CONSTRAINT payment_orders_duration_ck CHECK (duration_days > 0),
+    CONSTRAINT payment_orders_quota_ck CHECK (stt_units > 0 AND llm_units > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_as_cs;
+
+CREATE TABLE payment_events (
+    id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    channel VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    event_id VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    merchant_order_no VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs,
+    signature_valid BOOLEAN NOT NULL,
+    payload_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    payload JSON NOT NULL,
+    processing_status VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    received_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    processed_at DATETIME(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY payment_events_channel_event_uq (channel, event_id),
+    KEY payment_events_order_idx (merchant_order_no, received_at),
+    CONSTRAINT payment_events_channel_ck CHECK (channel IN ('ALIPAY')),
+    CONSTRAINT payment_events_status_ck CHECK (processing_status IN ('RECEIVED', 'PROCESSED', 'REJECTED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_as_cs;
+
+CREATE TABLE subscriptions (
+    id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    account_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    payment_order_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    product_code VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_as_cs NOT NULL,
+    starts_at DATETIME(6) NOT NULL,
+    ends_at DATETIME(6) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY subscriptions_payment_order_uq (payment_order_id),
+    KEY subscriptions_account_period_idx (account_id, ends_at),
+    CONSTRAINT subscriptions_account_fk FOREIGN KEY (account_id) REFERENCES accounts (id),
+    CONSTRAINT subscriptions_payment_order_fk FOREIGN KEY (payment_order_id) REFERENCES payment_orders (id),
+    CONSTRAINT subscriptions_period_ck CHECK (ends_at > starts_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_as_cs;

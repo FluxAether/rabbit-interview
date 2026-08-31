@@ -4,6 +4,7 @@ pub mod entitlement;
 pub mod error;
 pub mod llm;
 pub mod oidc;
+pub mod payments;
 pub mod protocol;
 pub mod providers;
 pub mod sessions;
@@ -30,7 +31,7 @@ use chrono::{DateTime, Utc};
 use config::Config;
 use entitlement::{Account, Entitlement};
 use error::AppError;
-use protocol::{AdjustmentRequest, EntitlementResponse};
+use protocol::{AccountLookupResponse, AdjustmentRequest, EntitlementResponse, LookupRequest};
 use subtle::ConstantTimeEq;
 use tokio::sync::{Mutex, Semaphore};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -68,6 +69,7 @@ struct StateInner {
     entitlement: Entitlement,
     auth: AuthService,
     http: reqwest::Client,
+    payments: Option<payments::PaymentService>,
     tickets: tickets::Tickets,
     tracker: TaskTracker,
     shutdown: CancellationToken,
@@ -96,10 +98,16 @@ impl AppState {
             .user_agent("rabbit-interview-gateway/0.1")
             .build()?;
         let auth = AuthService::new(pool.clone(), config.clone(), http.clone())?;
+        let payments = payments::PaymentService::from_config(
+            pool.clone(),
+            http.clone(),
+            &config,
+        )?;
         Ok(Self(Arc::new(StateInner {
             entitlement: Entitlement::new(pool),
             auth,
             http,
+            payments,
             tickets: tickets::Tickets::default(),
             tracker: TaskTracker::new(),
             shutdown: CancellationToken::new(),
@@ -124,6 +132,10 @@ impl AppState {
 
     pub fn http(&self) -> &reqwest::Client {
         &self.0.http
+    }
+
+    pub fn payments(&self) -> Option<&payments::PaymentService> {
+        self.0.payments.as_ref()
     }
 
     pub fn tickets(&self) -> &tickets::Tickets {
@@ -214,6 +226,7 @@ pub fn router(state: AppState) -> Router {
             header::CONTENT_TYPE,
             header::ACCEPT,
             HeaderName::from_static("idempotency-key"),
+            HeaderName::from_static("x-csrf-token"),
             HeaderName::from_static("x-admin-token"),
             HeaderName::from_static("x-admin-actor"),
         ]);
@@ -230,11 +243,13 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/llm/answers", post(llm::create_answer))
         .route("/v1/llm/answers/{request_id}", delete(llm::cancel_answer))
+        .route("/internal/accounts/lookup", post(lookup_account))
         .route(
             "/internal/accounts/{account_id}/quota-adjustments",
             post(adjust_quota),
         )
         .merge(oidc::router())
+        .merge(payments::router())
         .layer(DefaultBodyLimit::max(max_json_bytes))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
@@ -285,6 +300,32 @@ async fn entitlements(
         hosted_stt_enabled: state.config().hosted_stt_enabled,
         hosted_llm_enabled: state.config().hosted_llm_enabled,
         payments_enabled: state.config().payments_enabled,
+        subscription_url: format!("{}/subscribe", state.config().landing_public_url),
+    }))
+}
+
+async fn lookup_account(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<LookupRequest>,
+) -> Result<Json<AccountLookupResponse>, AppError> {
+    require_admin(state.config(), &headers)?;
+    let _actor = headers
+        .get("X-Admin-Actor")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .ok_or(AppError::Unauthorized)?;
+    let identity = state
+        .auth()
+        .identity_by_email(&request.email)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let balances = state.entitlement().balances(&identity.id).await?;
+    Ok(Json(AccountLookupResponse {
+        account_id: identity.id,
+        email: identity.email,
+        status: identity.status,
+        balances,
     }))
 }
 

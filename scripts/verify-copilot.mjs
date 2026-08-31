@@ -2248,6 +2248,16 @@ check(historyPage.includes('parseHistoryFeedback'), 'History renders saved scori
 check(settingsStore.includes('useMicWithSystem: false'), 'real Copilot defaults to system audio without microphone')
 check(tauriConfig.includes('thomas92118/rabbit-interview'), 'updater points at the current origin repository')
 {
+  const authPage = source('landing/src/components/AuthPage.tsx')
+  const landingApp = source('landing/src/App.tsx')
+  const gateway = source('server/src/lib.rs') + source('server/src/oidc.rs')
+  check(authPage.includes("href={authHref('/auth/register')}") && authPage.includes("href={authHref('/auth/login')}"), 'landing login and register pages link to each other')
+  check(authPage.includes('desktopOnlyTitle') && !authPage.includes("setError('MISSING_REQUEST')"), 'landing login without an OIDC request explains desktop sign-in')
+  check(authPage.includes("if (showSuccess) setInteraction(next)\n      window.location.assign(next.redirect_to)") && authPage.includes("decision === 'allow'") && authPage.includes('t.login.successTitle'), 'landing replaces the login form with a success page before returning to the desktop app')
+  check(landingApp.includes("/subscribe") && landingApp.includes("/admin"), 'landing routes the subscribe and admin pages')
+  check(gateway.includes('/internal/accounts/lookup') && gateway.includes('/account/subscription/context'), 'gateway exposes admin email lookup and subscription context')
+}
+{
   const licenseMod = loadTypeScriptModule('src/lib/license.ts', [
     'PAYWALL_ENABLED',
     'canGenerateSuggestion',

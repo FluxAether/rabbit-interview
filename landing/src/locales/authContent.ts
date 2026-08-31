@@ -14,6 +14,10 @@ type AuthCopy = {
     submit: string
     forgot: string
     register: string
+    desktopOnlyTitle: string
+    desktopOnlyBody: string
+    successTitle: string
+    successBody: string
     mfaTitle: string
     mfaHelp: string
     code: string
@@ -32,6 +36,7 @@ type AuthCopy = {
     sentTitle: string
     sentBody: string
     existing: string
+    signIn: string
   }
   forgot: {
     title: string
@@ -40,6 +45,7 @@ type AuthCopy = {
     submit: string
     sentTitle: string
     sentBody: string
+    backToSignIn: string
   }
   password: {
     setupTitle: string
@@ -76,6 +82,49 @@ type AuthCopy = {
     title: string
     body: string
   }
+  subscribe: {
+    title: string
+    subtitle: string
+    hostedTitle: string
+    hostedBody: string
+    byokTitle: string
+    byokBody: string
+    grantTitle: string
+    grantBody: string
+    paymentsNote: string
+    signedOut: string
+    signedIn: string
+    stt: string
+    llm: string
+    paymentsOff: string
+    monthPlan: string
+    quarterPlan: string
+    days: string
+    sttMinutes: string
+    llmUnits: string
+    buy: string
+    redirecting: string
+    currentPlan: string
+    paidThrough: string
+    paymentPending: string
+    paymentPaid: string
+    paymentClosed: string
+  }
+  admin: {
+    title: string
+    subtitle: string
+    token: string
+    actor: string
+    email: string
+    lookup: string
+    account: string
+    status: string
+    sttMinutes: string
+    reason: string
+    validUntil: string
+    grant: string
+    granted: string
+  }
   errorTitle: string
   errors: Record<string, string>
 }
@@ -108,6 +157,11 @@ const sharedErrors = {
     RATE_LIMITED: 'Too many attempts. Try again later.',
     INTERNAL_ERROR: 'Unable to continue right now. Try again later.',
     NETWORK_ERROR: 'Unable to reach the account service. Check your connection and try again.',
+    ACCOUNT_SUSPENDED: 'This account cannot receive hosted quota.',
+    SESSION_NOT_FOUND: 'No account matches that email.',
+    IDEMPOTENCY_CONFLICT: 'This checkout request conflicts with an earlier request. Try again.',
+    PROVIDER_UNAVAILABLE: 'Alipay is temporarily unavailable. Try again later.',
+    PROVIDER_PROTOCOL_ERROR: 'The payment result could not be verified. Refresh this page later.',
   },
   zhCN: {
     MISSING_REQUEST: '请从 Rabbit Interview 桌面应用发起登录。',
@@ -136,6 +190,11 @@ const sharedErrors = {
     RATE_LIMITED: '尝试次数过多，请稍后再试。',
     INTERNAL_ERROR: '暂时无法继续，请稍后重试。',
     NETWORK_ERROR: '无法连接账号服务，请检查网络后重试。',
+    ACCOUNT_SUSPENDED: '该账号当前不能发放云托管额度。',
+    SESSION_NOT_FOUND: '没有匹配该邮箱的账号。',
+    IDEMPOTENCY_CONFLICT: '本次支付请求与先前请求冲突，请重试。',
+    PROVIDER_UNAVAILABLE: '支付宝暂时不可用，请稍后重试。',
+    PROVIDER_PROTOCOL_ERROR: '支付结果暂时无法验证，请稍后刷新本页。',
   },
   zhTW: {
     MISSING_REQUEST: '請從 Rabbit Interview 桌面應用程式發起登入。',
@@ -164,6 +223,11 @@ const sharedErrors = {
     RATE_LIMITED: '嘗試次數過多，請稍後再試。',
     INTERNAL_ERROR: '暫時無法繼續，請稍後再試。',
     NETWORK_ERROR: '無法連線帳號服務，請檢查網路後再試。',
+    ACCOUNT_SUSPENDED: '此帳號目前不能發放雲端代管額度。',
+    SESSION_NOT_FOUND: '沒有符合此電子郵件的帳號。',
+    IDEMPOTENCY_CONFLICT: '本次付款請求與先前請求衝突，請重試。',
+    PROVIDER_UNAVAILABLE: '支付寶暫時無法使用，請稍後重試。',
+    PROVIDER_PROTOCOL_ERROR: '付款結果暫時無法驗證，請稍後重新整理本頁。',
   },
 } as const
 
@@ -182,6 +246,10 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       submit: 'Sign in',
       forgot: 'Forgot password?',
       register: 'Create an account',
+      desktopOnlyTitle: 'Open Rabbit Interview to sign in',
+      desktopOnlyBody: 'This page continues a desktop sign-in request. Register here, then sign in from the app.',
+      successTitle: 'Sign-in successful',
+      successBody: 'You can return to Rabbit Interview. This browser tab is no longer needed.',
       mfaTitle: 'Verify sign-in',
       mfaHelp: 'Enter an authenticator or recovery code.',
       code: 'Verification code',
@@ -204,7 +272,8 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       submit: 'Create account',
       sentTitle: 'Check your email',
       sentBody: 'If the address can be registered, a setup link has been sent.',
-      existing: 'Already have an account? Open Rabbit Interview to sign in.',
+      existing: 'Already have an account?',
+      signIn: 'Sign in',
     },
     forgot: {
       title: 'Reset your password',
@@ -213,6 +282,7 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       submit: 'Send reset link',
       sentTitle: 'Check your email',
       sentBody: 'If the account exists, a reset link has been sent.',
+      backToSignIn: 'Back to sign in',
     },
     password: {
       setupTitle: 'Set your password',
@@ -249,6 +319,49 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       title: 'Signed out',
       body: 'You can close this page or return to Rabbit Interview.',
     },
+    subscribe: {
+      title: 'Hosted access',
+      subtitle: 'Buy fixed hosted-access periods with Alipay, or keep using your own provider keys.',
+      hostedTitle: 'Rabbit hosted',
+      hostedBody: 'Sign in from the desktop app to use gateway STT and Gemini. Remaining quota is shown below after a browser session exists.',
+      byokTitle: 'Bring your own keys',
+      byokBody: 'Deepgram, Gemini, Groq, and Apple stay on this device. Hosted quota is not required.',
+      grantTitle: 'Fixed periods, no renewal',
+      grantBody: 'Each successful payment adds a separate 30- or 90-day quota period. Renewing early schedules the next period after the current one.',
+      paymentsNote: 'Alipay purchases are one-time payments. There is no automatic renewal.',
+      signedOut: 'Sign in from the desktop app, then reopen this page to see remaining quota.',
+      signedIn: 'Signed in as',
+      stt: 'STT minutes remaining',
+      llm: 'LLM units remaining',
+      paymentsOff: 'Payments are disabled.',
+      monthPlan: 'Pro monthly',
+      quarterPlan: 'Pro quarterly',
+      days: 'days',
+      sttMinutes: 'STT minutes',
+      llmUnits: 'LLM units',
+      buy: 'Pay with Alipay',
+      redirecting: 'Opening Alipay…',
+      currentPlan: 'Plan',
+      paidThrough: 'paid through',
+      paymentPending: 'Payment is pending. This page will update after Alipay confirms it.',
+      paymentPaid: 'Payment verified. The subscription quota is now available.',
+      paymentClosed: 'This payment was closed without granting quota.',
+    },
+    admin: {
+      title: 'Grant hosted quota',
+      subtitle: 'Look up an account by email, then add STT minutes. Tokens stay in this tab.',
+      token: 'Admin token',
+      actor: 'Operator',
+      email: 'Account email',
+      lookup: 'Look up',
+      account: 'Account',
+      status: 'Status',
+      sttMinutes: 'STT minutes to add',
+      reason: 'Reason',
+      validUntil: 'Valid until (optional)',
+      grant: 'Grant quota',
+      granted: 'Quota granted.',
+    },
     errorTitle: 'Unable to continue',
     errors: sharedErrors.en,
   },
@@ -266,6 +379,10 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       submit: '登录',
       forgot: '忘记密码？',
       register: '创建账号',
+      desktopOnlyTitle: '请从桌面应用登录',
+      desktopOnlyBody: '此页面只继续桌面应用发起的登录请求。可以先在此注册，再回到应用登录。',
+      successTitle: '登录成功',
+      successBody: '现在可以返回 Rabbit Interview，此浏览器页面无需继续停留。',
       mfaTitle: '验证登录',
       mfaHelp: '请输入验证器或恢复码。',
       code: '验证码',
@@ -288,7 +405,8 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       submit: '创建账号',
       sentTitle: '请查收邮件',
       sentBody: '如果该邮箱可以注册，设置链接已发送。',
-      existing: '已有账号？请打开 Rabbit Interview 登录。',
+      existing: '已有账号？',
+      signIn: '去登录',
     },
     forgot: {
       title: '重置密码',
@@ -297,6 +415,7 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       submit: '发送重置链接',
       sentTitle: '请查收邮件',
       sentBody: '如果账号存在，重置链接已发送。',
+      backToSignIn: '返回登录',
     },
     password: {
       setupTitle: '设置密码',
@@ -333,6 +452,49 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       title: '已退出',
       body: '你可以关闭此页面，或返回 Rabbit Interview。',
     },
+    subscribe: {
+      title: '云托管额度',
+      subtitle: '可通过支付宝购买固定期限的云托管服务，也可以继续使用自备密钥。',
+      hostedTitle: 'Rabbit 云托管',
+      hostedBody: '从桌面应用登录后，可使用网关 STT 和 Gemini。浏览器里若已有登录会话，下方会显示剩余额度。',
+      byokTitle: '自备密钥',
+      byokBody: 'Deepgram、Gemini、Groq 和 Apple 仍走本机。不需要云托管额度。',
+      grantTitle: '固定期限，不自动续费',
+      grantBody: '每笔成功支付会增加一个独立的 30 天或 90 天额度周期。提前续费时，新周期会接在当前周期之后。',
+      paymentsNote: '支付宝购买为一次性支付，不会自动续费。',
+      signedOut: '请先从桌面应用登录，再打开此页查看剩余额度。',
+      signedIn: '当前账号',
+      stt: '剩余 STT 分钟',
+      llm: '剩余 LLM 单位',
+      paymentsOff: '支付未启用。',
+      monthPlan: 'Pro 月度套餐',
+      quarterPlan: 'Pro 季度套餐',
+      days: '天',
+      sttMinutes: 'STT 分钟',
+      llmUnits: 'LLM 单位',
+      buy: '使用支付宝支付',
+      redirecting: '正在打开支付宝…',
+      currentPlan: '套餐',
+      paidThrough: '有效期至',
+      paymentPending: '支付确认中，支付宝确认后本页会自动更新。',
+      paymentPaid: '支付已验证，订阅额度现已生效。',
+      paymentClosed: '该笔支付已关闭，未发放额度。',
+    },
+    admin: {
+      title: '发放云托管额度',
+      subtitle: '按邮箱查找账号，再增加 STT 分钟。管理令牌只留在当前标签页。',
+      token: '管理令牌',
+      actor: '操作者',
+      email: '账号邮箱',
+      lookup: '查找',
+      account: '账号',
+      status: '状态',
+      sttMinutes: '增加的 STT 分钟',
+      reason: '原因',
+      validUntil: '有效期（可选）',
+      grant: '发放额度',
+      granted: '额度已发放。',
+    },
     errorTitle: '无法继续',
     errors: sharedErrors.zhCN,
   },
@@ -350,6 +512,10 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       submit: '登入',
       forgot: '忘記密碼？',
       register: '建立帳號',
+      desktopOnlyTitle: '請從桌面應用程式登入',
+      desktopOnlyBody: '此頁面只繼續桌面應用程式發起的登入請求。可以先在此註冊，再回到應用程式登入。',
+      successTitle: '登入成功',
+      successBody: '現在可以返回 Rabbit Interview，此瀏覽器頁面無需繼續停留。',
       mfaTitle: '驗證登入',
       mfaHelp: '請輸入驗證器或復原碼。',
       code: '驗證碼',
@@ -372,7 +538,8 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       submit: '建立帳號',
       sentTitle: '請查看電子郵件',
       sentBody: '如果此電子郵件可以註冊，設定連結已傳送。',
-      existing: '已有帳號？請開啟 Rabbit Interview 登入。',
+      existing: '已有帳號？',
+      signIn: '去登入',
     },
     forgot: {
       title: '重設密碼',
@@ -381,6 +548,7 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       submit: '傳送重設連結',
       sentTitle: '請查看電子郵件',
       sentBody: '如果帳號存在，重設連結已傳送。',
+      backToSignIn: '返回登入',
     },
     password: {
       setupTitle: '設定密碼',
@@ -416,6 +584,49 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     signedOut: {
       title: '已登出',
       body: '你可以關閉此頁面，或返回 Rabbit Interview。',
+    },
+    subscribe: {
+      title: '雲端代管額度',
+      subtitle: '可透過支付寶購買固定期限的雲端代管服務，也可以繼續使用自備金鑰。',
+      hostedTitle: 'Rabbit 雲端代管',
+      hostedBody: '從桌面應用程式登入後，可使用閘道 STT 與 Gemini。瀏覽器若已有登入工作階段，下方會顯示剩餘額度。',
+      byokTitle: '自備金鑰',
+      byokBody: 'Deepgram、Gemini、Groq 與 Apple 仍走本機。不需要雲端代管額度。',
+      grantTitle: '固定期限，不自動續費',
+      grantBody: '每筆成功付款會增加一個獨立的 30 天或 90 天額度週期。提前續費時，新週期會接在目前週期之後。',
+      paymentsNote: '支付寶購買為一次性付款，不會自動續費。',
+      signedOut: '請先從桌面應用程式登入，再開啟此頁查看剩餘額度。',
+      signedIn: '目前帳號',
+      stt: '剩餘 STT 分鐘',
+      llm: '剩餘 LLM 單位',
+      paymentsOff: '付款未啟用。',
+      monthPlan: 'Pro 月度方案',
+      quarterPlan: 'Pro 季度方案',
+      days: '天',
+      sttMinutes: 'STT 分鐘',
+      llmUnits: 'LLM 單位',
+      buy: '使用支付寶付款',
+      redirecting: '正在開啟支付寶…',
+      currentPlan: '方案',
+      paidThrough: '有效期至',
+      paymentPending: '付款確認中，支付寶確認後本頁會自動更新。',
+      paymentPaid: '付款已驗證，訂閱額度現已生效。',
+      paymentClosed: '此筆付款已關閉，未發放額度。',
+    },
+    admin: {
+      title: '發放雲端代管額度',
+      subtitle: '依電子郵件查找帳號，再增加 STT 分鐘。管理權杖只留在目前分頁。',
+      token: '管理權杖',
+      actor: '操作者',
+      email: '帳號電子郵件',
+      lookup: '查找',
+      account: '帳號',
+      status: '狀態',
+      sttMinutes: '增加的 STT 分鐘',
+      reason: '原因',
+      validUntil: '有效期（選填）',
+      grant: '發放額度',
+      granted: '額度已發放。',
     },
     errorTitle: '無法繼續',
     errors: sharedErrors.zhTW,

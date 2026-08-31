@@ -28,6 +28,7 @@ use crate::{
         REFRESH_FAMILY_TTL_DAYS, REFRESH_TOKEN_TTL_DAYS, RESET_TTL_MINUTES,
     },
     error::AppError,
+    protocol::SubscriptionContext,
     require_admin, AppState,
 };
 
@@ -74,6 +75,7 @@ pub fn router() -> Router<AppState> {
             "/account/security/revoke-others",
             post(revoke_other_sessions),
         )
+        .route("/account/subscription/context", get(subscription_context))
         .route("/internal/accounts/invitations", post(invite_account))
         .route(
             "/internal/accounts/{account_id}/suspend",
@@ -117,11 +119,11 @@ struct Authorization {
 }
 
 #[derive(Debug)]
-struct BrowserSession {
+pub(crate) struct BrowserSession {
     id: String,
-    account_id: String,
+    pub(crate) account_id: String,
     auth_time: DateTime<Utc>,
-    raw_token: String,
+    pub(crate) raw_token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1493,6 +1495,48 @@ async fn security_page(State(state): State<AppState>) -> Response {
     landing_redirect(state.auth(), "/auth/security", &[])
 }
 
+async fn subscription_context(State(state): State<AppState>, jar: CookieJar) -> Response {
+    let auth = state.auth();
+    let session = match load_browser_session(auth, &jar).await {
+        Ok(Some(value)) => value,
+        _ => return auth_error(StatusCode::UNAUTHORIZED, "AUTH_REQUIRED", false),
+    };
+    let identity = match auth.identity_by_id(&session.account_id).await {
+        Ok(value) => value,
+        Err(_) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", true),
+    };
+    let balances = match state.entitlement().balances(&identity.id).await {
+        Ok(value) => value,
+        Err(_) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", true),
+    };
+    auth_response(SubscriptionContext {
+        email: identity.email,
+        status: identity.status,
+        balances,
+        hosted_stt_enabled: state.config().hosted_stt_enabled,
+        hosted_llm_enabled: state.config().hosted_llm_enabled,
+        payments_enabled: state.config().payments_enabled,
+        csrf: auth.csrf_token(&session.raw_token, "payment"),
+        products: state
+            .payments()
+            .map(|payments| payments.products())
+            .unwrap_or_default(),
+        subscription: match state.payments() {
+            Some(payments) => match payments.subscription(&identity.id).await {
+                Ok(value) => value,
+                Err(_) => {
+                    return auth_error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "INTERNAL_ERROR",
+                        true,
+                    )
+                }
+            },
+            None => None,
+        },
+    })
+}
+
 async fn security_context(State(state): State<AppState>, jar: CookieJar) -> Response {
     let auth = state.auth();
     let session = match load_browser_session(auth, &jar).await {
@@ -1974,7 +2018,7 @@ async fn create_browser_session(
     ))
 }
 
-async fn load_browser_session(
+pub(crate) async fn load_browser_session(
     auth: &AuthService,
     jar: &CookieJar,
 ) -> Result<Option<BrowserSession>, AppError> {

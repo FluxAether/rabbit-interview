@@ -19,6 +19,7 @@ export interface HostedEntitlements {
   hosted_stt_enabled: boolean
   hosted_llm_enabled: boolean
   payments_enabled: boolean
+  subscription_url: string
 }
 
 export interface HostedAuthSnapshot {
@@ -266,6 +267,18 @@ export async function refreshHostedEntitlements(): Promise<HostedEntitlements> {
     publish({ status: 'error', entitlements: snapshot.entitlements, error: normalizeError(error) })
     throw error
   }
+}
+
+export async function openHostedSubscription(): Promise<void> {
+  const configured = snapshot.entitlements?.subscription_url
+  if (!configured) throw new Error('Hosted subscription page is unavailable.')
+  const url = new URL(configured)
+  const local = url.hostname === '127.0.0.1' || url.hostname === 'localhost'
+  if ((url.protocol !== 'https:' && !(local && url.protocol === 'http:'))
+    || url.username || url.password || url.search || url.hash) {
+    throw new Error('Hosted subscription page is invalid.')
+  }
+  await openUrl(url.toString())
 }
 
 async function ensureCallbackListener(): Promise<void> {

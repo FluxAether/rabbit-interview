@@ -12,6 +12,44 @@ type PublicContext = { binding: string; csrf: string }
 type TokenContext = { csrf: string }
 type SecurityContext = { email: string; totp_enabled: boolean; csrf: string }
 type TotpSetup = { qr_base64: string; secret: string; csrf: string }
+type PaymentProduct = {
+  code: 'PRO_MONTH' | 'PRO_QUARTER'
+  price_minor: number
+  currency: 'CNY'
+  duration_days: number
+  stt_ms: number
+  llm_units: number
+}
+type PaymentOrder = {
+  merchant_order_no: string
+  product_code: PaymentProduct['code']
+  status: 'PENDING' | 'PAID' | 'CLOSED'
+  checkout_url: string | null
+  expires_at: string
+  paid_at: string | null
+  paid_through: string | null
+}
+type SubscriptionContext = {
+  email: string
+  status: string
+  balances: { STT_AUDIO_MS: number; LLM_TOKEN_UNITS: number }
+  hosted_stt_enabled: boolean
+  hosted_llm_enabled: boolean
+  payments_enabled: boolean
+  csrf: string
+  products: PaymentProduct[]
+  subscription: null | {
+    product_code: PaymentProduct['code']
+    starts_at: string
+    paid_through: string
+  }
+}
+type AccountLookup = {
+  account_id: string
+  email: string
+  status: string
+  balances: { STT_AUDIO_MS: number; LLM_TOKEN_UNITS: number }
+}
 type T = (typeof authCopy)[AuthLang]
 
 const inputClass = 'mt-2 h-11 w-full rounded-xl border border-white/15 bg-black/20 px-3.5 text-sm text-ink placeholder:text-mute/60 focus:border-white/35 focus:outline-none'
@@ -73,6 +111,41 @@ async function api<TResponse>(path: string, values?: Record<string, string>): Pr
   return body as TResponse
 }
 
+async function jsonApi<TResponse>(path: string, init?: { json?: unknown; headers?: Record<string, string> }): Promise<TResponse> {
+  let response: Response
+  try {
+    response = await fetch(`${gateway}${path}`, {
+      method: init?.json ? 'POST' : 'GET',
+      credentials: 'include',
+      headers: {
+        ...(init?.json ? { 'Content-Type': 'application/json' } : {}),
+        ...(init?.headers || {}),
+      },
+      body: init?.json ? JSON.stringify(init.json) : undefined,
+    })
+  } catch {
+    throw new Error('NETWORK_ERROR')
+  }
+  const body = await response.json().catch(() => null) as null | {
+    code?: string
+    error?: string
+  }
+  if (!response.ok || body === null) {
+    throw new Error(body?.code || body?.error || (response.status === 429 ? 'RATE_LIMITED' : 'INTERNAL_ERROR'))
+  }
+  return body as TResponse
+}
+
+function authHref(path: string): string {
+  const params = new URLSearchParams()
+  const request = fragment().get('request')
+  const lang = fragment().get('lang')
+  if (request) params.set('request', request)
+  if (lang) params.set('lang', lang)
+  const hash = params.toString()
+  return hash ? `${path}#${hash}` : path
+}
+
 function errorText(t: T, error: unknown): string {
   const code = error instanceof Error ? error.message : 'INTERNAL_ERROR'
   return t.errors[code] || t.errors.INTERNAL_ERROR
@@ -112,7 +185,6 @@ function LoginPage({ t }: { t: T }) {
   useEffect(() => {
     let active = true
     if (!request) {
-      setError('MISSING_REQUEST')
       return
     }
     api<Interaction>('/oauth2/interaction', { request })
@@ -125,8 +197,9 @@ function LoginPage({ t }: { t: T }) {
     return () => { active = false }
   }, [request])
 
-  const accept = (next: Interaction) => {
+  const accept = (next: Interaction, showSuccess = true) => {
     if (next.step === 'complete') {
+      if (showSuccess) setInteraction(next)
       window.location.assign(next.redirect_to)
     } else {
       setInteraction(next)
@@ -179,7 +252,7 @@ function LoginPage({ t }: { t: T }) {
         request,
         csrf: interaction.csrf,
         decision,
-      }))
+      }), decision === 'allow')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'INTERNAL_ERROR')
     } finally {
@@ -187,6 +260,17 @@ function LoginPage({ t }: { t: T }) {
     }
   }
 
+  if (!request) {
+    return (
+      <>
+        <Intro title={t.login.desktopOnlyTitle} body={t.login.desktopOnlyBody} />
+        <div className="mt-7 grid gap-3">
+          <a className={`${primaryButton} w-full`} href={authHref('/auth/register')}>{t.login.register}</a>
+          <a className={`${secondaryButton} w-full`} href="/">{t.backHome}</a>
+        </div>
+      </>
+    )
+  }
   if (!interaction && !error) return <Loading t={t} />
   if (!interaction) {
     return (
@@ -195,6 +279,10 @@ function LoginPage({ t }: { t: T }) {
         <a href="/" className={`${secondaryButton} mt-7 w-full`}>{t.backHome}</a>
       </>
     )
+  }
+
+  if (interaction.step === 'complete') {
+    return <StaticPage t={t} title={t.login.successTitle} body={t.login.successBody} />
   }
 
   if (interaction.step === 'login') {
@@ -214,8 +302,8 @@ function LoginPage({ t }: { t: T }) {
           <button className={`${primaryButton} w-full`} disabled={busy}>{t.login.submit}</button>
         </form>
         <div className="mt-5 flex flex-wrap justify-between gap-3 text-sm text-mute">
-          <a className="hover:text-ink" href="/auth/forgot-password">{t.login.forgot}</a>
-          <a className="hover:text-ink" href="/auth/register">{t.login.register}</a>
+          <a className="hover:text-ink" href={authHref('/auth/forgot-password')}>{t.login.forgot}</a>
+          <a className="hover:text-ink" href={authHref('/auth/register')}>{t.login.register}</a>
         </div>
       </>
     )
@@ -314,7 +402,10 @@ function RegisterPage({ t }: { t: T }) {
           <button className={`${primaryButton} w-full`} disabled={busy}>{t.register.submit}</button>
         </form>
       ) : null}
-      <p className="mt-5 text-center text-xs leading-5 text-mute">{t.register.existing}</p>
+      <p className="mt-5 text-center text-sm text-mute">
+        {t.register.existing}{' '}
+        <a className="text-ink underline decoration-white/20 underline-offset-4 hover:decoration-white/50" href={authHref('/auth/login')}>{t.register.signIn}</a>
+      </p>
     </>
   )
 }
@@ -367,6 +458,9 @@ function ForgotPage({ t }: { t: T }) {
           <button className={`${primaryButton} w-full`} disabled={busy}>{t.forgot.submit}</button>
         </form>
       ) : null}
+      <p className="mt-5 text-center text-sm text-mute">
+        <a className="text-ink underline decoration-white/20 underline-offset-4 hover:decoration-white/50" href={authHref('/auth/login')}>{t.forgot.backToSignIn}</a>
+      </p>
     </>
   )
 }
@@ -575,6 +669,297 @@ function SecurityPage({ t }: { t: T }) {
   )
 }
 
+function formatMinutes(ms: number | undefined): string {
+  return (Math.max(0, Number(ms) || 0) / 60_000).toFixed(1)
+}
+
+function formatUnits(units: number | undefined): string {
+  return Math.max(0, Number(units) || 0).toLocaleString()
+}
+
+function formatDate(value: string | undefined, lang: string): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString(lang)
+}
+
+function SubscribePage({ t }: { t: T }) {
+  const [context, setContext] = useState<SubscriptionContext | null>(null)
+  const [order, setOrder] = useState<PaymentOrder | null>(null)
+  const [busyProduct, setBusyProduct] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    const returnedOrder = new URLSearchParams(window.location.search).get('out_trade_no')
+    jsonApi<SubscriptionContext>('/account/subscription/context')
+      .then(async (value) => {
+        if (!active) return
+        setContext(value)
+        if (!value.payments_enabled || !returnedOrder || !/^RI[a-f0-9]{32}$/i.test(returnedOrder)) return
+        window.history.replaceState(null, '', window.location.pathname)
+        let refreshed = await jsonApi<PaymentOrder>(`/account/payment-orders/${returnedOrder}/refresh`, {
+          json: {},
+          headers: { 'X-CSRF-Token': value.csrf },
+        })
+        if (!active) return
+        setOrder(refreshed)
+        for (let attempt = 0; attempt < 10 && refreshed.status === 'PENDING' && active; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1500))
+          refreshed = await jsonApi<PaymentOrder>(`/account/payment-orders/${returnedOrder}`)
+          if (active) setOrder(refreshed)
+        }
+        if (active && refreshed.status === 'PAID') {
+          setContext(await jsonApi<SubscriptionContext>('/account/subscription/context'))
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!active) return
+        const code = reason instanceof Error ? reason.message : 'INTERNAL_ERROR'
+        if (code !== 'AUTH_REQUIRED') setError(code)
+      })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [])
+
+  const buy = async (productCode: PaymentProduct['code']) => {
+    if (!context) return
+    setBusyProduct(productCode)
+    setError('')
+    try {
+      const created = await jsonApi<PaymentOrder>('/account/payment-orders', {
+        json: { product_code: productCode },
+        headers: {
+          'Idempotency-Key': crypto.randomUUID(),
+          'X-CSRF-Token': context.csrf,
+        },
+      })
+      if (!created.checkout_url) throw new Error('INTERNAL_ERROR')
+      const checkout = new URL(created.checkout_url)
+      const local = checkout.hostname === 'localhost' || checkout.hostname === '127.0.0.1'
+      if (checkout.protocol !== 'https:' && !(local && checkout.protocol === 'http:')) {
+        throw new Error('INTERNAL_ERROR')
+      }
+      window.location.assign(checkout.toString())
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'INTERNAL_ERROR')
+      setBusyProduct('')
+    }
+  }
+
+  const planName = (code: PaymentProduct['code']) => code === 'PRO_QUARTER'
+    ? t.subscribe.quarterPlan
+    : t.subscribe.monthPlan
+
+  return (
+    <>
+      <Intro title={t.subscribe.title} body={t.subscribe.subtitle} />
+      <div className="mt-7 space-y-4">
+        <section className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
+          <h2 className="text-sm font-semibold">{t.subscribe.hostedTitle}</h2>
+          <p className="mt-2 text-sm leading-6 text-mute">{t.subscribe.hostedBody}</p>
+        </section>
+        <section className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
+          <h2 className="text-sm font-semibold">{t.subscribe.byokTitle}</h2>
+          <p className="mt-2 text-sm leading-6 text-mute">{t.subscribe.byokBody}</p>
+        </section>
+        <section className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
+          <h2 className="text-sm font-semibold">{t.subscribe.grantTitle}</h2>
+          <p className="mt-2 text-sm leading-6 text-mute">{t.subscribe.grantBody}</p>
+        </section>
+        <p className="text-sm leading-6 text-mute">{t.subscribe.paymentsNote}</p>
+      </div>
+      {error ? <ErrorMessage>{errorText(t, new Error(error))}</ErrorMessage> : null}
+      {loading ? <Loading t={t} /> : context ? (
+        <div className="mt-7 space-y-4">
+          <section className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
+            <p className="text-xs text-mute">{t.subscribe.signedIn}</p>
+            <p className="mt-1 break-all text-sm font-medium">{context.email}</p>
+            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-mute">{t.subscribe.stt}</dt>
+                <dd className="mt-1 font-medium">{formatMinutes(context.balances.STT_AUDIO_MS)}</dd>
+              </div>
+              <div>
+                <dt className="text-mute">{t.subscribe.llm}</dt>
+                <dd className="mt-1 font-medium">{formatUnits(context.balances.LLM_TOKEN_UNITS)}</dd>
+              </div>
+            </dl>
+            {context.subscription ? (
+              <p className="mt-4 text-xs text-mute">
+                {t.subscribe.currentPlan}: {planName(context.subscription.product_code)} · {t.subscribe.paidThrough} {formatDate(context.subscription.paid_through, t.htmlLang)}
+              </p>
+            ) : null}
+          </section>
+          {order ? (
+            <p className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3 text-sm">
+              {order.status === 'PAID' ? t.subscribe.paymentPaid : order.status === 'CLOSED' ? t.subscribe.paymentClosed : t.subscribe.paymentPending}
+            </p>
+          ) : null}
+          {context.payments_enabled ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {context.products.map((product) => (
+                <section key={product.code} className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
+                  <h2 className="text-sm font-semibold">{planName(product.code)}</h2>
+                  <p className="mt-2 text-2xl font-semibold">¥{(product.price_minor / 100).toFixed(0)}</p>
+                  <p className="mt-2 text-xs leading-5 text-mute">
+                    {product.duration_days} {t.subscribe.days} · {formatMinutes(product.stt_ms)} {t.subscribe.sttMinutes} · {formatUnits(product.llm_units)} {t.subscribe.llmUnits}
+                  </p>
+                  <button
+                    type="button"
+                    className={`${primaryButton} mt-4 w-full`}
+                    disabled={Boolean(busyProduct)}
+                    onClick={() => void buy(product.code)}
+                  >
+                    {busyProduct === product.code ? t.subscribe.redirecting : t.subscribe.buy}
+                  </button>
+                </section>
+              ))}
+            </div>
+          ) : <p className="text-xs text-mute">{t.subscribe.paymentsOff}</p>}
+        </div>
+      ) : !error ? (
+        <p className="mt-7 text-sm leading-6 text-mute">{t.subscribe.signedOut}</p>
+      ) : null}
+      <div className="mt-7 grid gap-3 sm:grid-cols-2">
+        <a className={primaryButton} href={authHref('/auth/register')}>{t.login.register}</a>
+        <a className={secondaryButton} href="/">{t.backHome}</a>
+      </div>
+    </>
+  )
+}
+
+function AdminPage({ t }: { t: T }) {
+  const [token, setToken] = useState('')
+  const [actor, setActor] = useState('')
+  const [email, setEmail] = useState('')
+  const [account, setAccount] = useState<AccountLookup | null>(null)
+  const [sttMinutes, setSttMinutes] = useState('')
+  const [reason, setReason] = useState('')
+  const [validUntil, setValidUntil] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const headers = () => ({ 'X-Admin-Token': token, 'X-Admin-Actor': actor })
+
+  const lookup = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      setAccount(await jsonApi<AccountLookup>('/internal/accounts/lookup', {
+        json: { email },
+        headers: headers(),
+      }))
+    } catch (reason) {
+      setAccount(null)
+      setError(reason instanceof Error ? reason.message : 'INTERNAL_ERROR')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const grant = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!account) return
+    const minutes = Number(sttMinutes)
+    if (!Number.isFinite(minutes) || minutes <= 0 || !reason.trim()) {
+      setError('INVALID_REQUEST')
+      return
+    }
+    let expires: string | undefined
+    if (validUntil) {
+      const parsed = new Date(validUntil)
+      if (Number.isNaN(parsed.getTime())) {
+        setError('INVALID_REQUEST')
+        return
+      }
+      expires = parsed.toISOString()
+    }
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      await jsonApi(`/internal/accounts/${account.account_id}/quota-adjustments`, {
+        json: {
+          metric: 'STT_AUDIO_MS',
+          units: Math.round(minutes * 60_000),
+          reason: reason.trim(),
+          ...(expires ? { valid_until: expires } : {}),
+        },
+        headers: headers(),
+      })
+      setAccount(await jsonApi<AccountLookup>('/internal/accounts/lookup', {
+        json: { email: account.email },
+        headers: headers(),
+      }))
+      setNotice(t.admin.granted)
+      setSttMinutes('')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'INTERNAL_ERROR')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <Intro title={t.admin.title} body={t.admin.subtitle} />
+      {error ? <ErrorMessage>{errorText(t, new Error(error))}</ErrorMessage> : null}
+      {notice ? <p role="status" className="mt-5 rounded-xl border border-emerald-200/15 bg-emerald-200/[0.05] px-3.5 py-3 text-sm text-emerald-100">{notice}</p> : null}
+      <form className="mt-7 space-y-5" onSubmit={lookup} aria-busy={busy}>
+        <label className="block text-sm font-medium">
+          {t.admin.token}
+          <input className={inputClass} type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} required />
+        </label>
+        <label className="block text-sm font-medium">
+          {t.admin.actor}
+          <input className={inputClass} value={actor} onChange={(event) => setActor(event.target.value)} maxLength={128} required />
+        </label>
+        <label className="block text-sm font-medium">
+          {t.admin.email}
+          <input className={inputClass} type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+        </label>
+        <button className={`${primaryButton} w-full`} disabled={busy}>{t.admin.lookup}</button>
+      </form>
+      {account ? (
+        <>
+          <div className="mt-7 rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4 text-sm">
+            <p className="text-xs text-mute">{t.admin.account}</p>
+            <p className="mt-1 break-all font-medium">{account.email}</p>
+            <p className="mt-3 text-xs text-mute">{t.admin.status}</p>
+            <p className="mt-1">{account.status}</p>
+            <dl className="mt-4 text-sm">
+              <div>
+                <dt className="text-mute">{t.subscribe.stt}</dt>
+                <dd className="mt-1 font-medium">{formatMinutes(account.balances.STT_AUDIO_MS)}</dd>
+              </div>
+            </dl>
+          </div>
+          <form className="mt-7 space-y-5" onSubmit={grant} aria-busy={busy}>
+            <label className="block text-sm font-medium">
+              {t.admin.sttMinutes}
+              <input className={inputClass} inputMode="decimal" value={sttMinutes} onChange={(event) => setSttMinutes(event.target.value)} />
+            </label>
+            <label className="block text-sm font-medium">
+              {t.admin.reason}
+              <input className={inputClass} value={reason} onChange={(event) => setReason(event.target.value)} maxLength={512} required />
+            </label>
+            <label className="block text-sm font-medium">
+              {t.admin.validUntil}
+              <input className={inputClass} type="datetime-local" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} />
+            </label>
+            <button className={`${primaryButton} w-full`} disabled={busy}>{t.admin.grant}</button>
+          </form>
+        </>
+      ) : null}
+    </>
+  )
+}
+
 function StaticPage({ title, body, t }: { title: string; body: string; t: T }) {
   return (
     <>
@@ -647,6 +1032,8 @@ export default function AuthPage() {
   else if (path === '/auth/setup') content = <PasswordPage t={t} kind="setup" />
   else if (path === '/auth/security') content = <SecurityPage t={t} />
   else if (path === '/auth/signed-out') content = <StaticPage t={t} title={t.signedOut.title} body={t.signedOut.body} />
+  else if (path === '/subscribe') content = <SubscribePage t={t} />
+  else if (path === '/admin') content = <AdminPage t={t} />
   else {
     const code = fragment().get('error') || 'INVALID_REQUEST'
     content = <StaticPage t={t} title={t.errorTitle} body={t.errors[code] || t.errors.INTERNAL_ERROR} />

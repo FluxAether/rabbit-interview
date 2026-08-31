@@ -43,7 +43,7 @@ import type { SettingsTab } from '../lib/readiness'
 import type { Page } from '../lib/navigation'
 import { deriveLicenseState, parseLicensePayload } from '../lib/license'
 import { saveSetting } from '../lib/db'
-import { refreshHostedEntitlements, signInHosted, signOutHosted, useHostedAuth } from '../lib/hostedAuth'
+import { openHostedSubscription, refreshHostedEntitlements, signInHosted, signOutHosted, useHostedAuth } from '../lib/hostedAuth'
 
 type TabType = SettingsTab
 
@@ -1121,9 +1121,14 @@ export default function Settings({
                     </div>
                     <div className="flex items-center gap-2">
                       {hosted.status === 'signed-in' && (
-                        <button type="button" disabled={hostedAction} onClick={() => { setHostedAction(true); void refreshHostedEntitlements().catch((error) => setSaveError(String(error))).finally(() => setHostedAction(false)) }} className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs hover:bg-[var(--bg-hover)] disabled:opacity-50">
-                          {t('settings.hosted.refresh')}
-                        </button>
+                        <>
+                          <button type="button" disabled={hostedAction} onClick={() => { setHostedAction(true); void openHostedSubscription().catch((error) => setSaveError(String(error))).finally(() => setHostedAction(false)) }} className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs hover:bg-[var(--bg-hover)] disabled:opacity-50">
+                            {t('settings.hosted.manage')}
+                          </button>
+                          <button type="button" disabled={hostedAction} onClick={() => { setHostedAction(true); void refreshHostedEntitlements().catch((error) => setSaveError(String(error))).finally(() => setHostedAction(false)) }} className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs hover:bg-[var(--bg-hover)] disabled:opacity-50">
+                            {t('settings.hosted.refresh')}
+                          </button>
+                        </>
                       )}
                       <button type="button" disabled={hostedAction || hosted.status === 'restoring'} onClick={() => void handleHostedAuth()} className="rounded-md bg-[var(--action)] px-3 py-1 text-xs font-medium text-[var(--action-text)] disabled:opacity-50">
                         {hosted.status === 'signed-in' ? t('settings.hosted.signOut') : t('settings.hosted.signIn')}

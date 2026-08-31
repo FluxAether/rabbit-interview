@@ -137,6 +137,12 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     ]);
     let login = send(&app, Method::POST, "/oauth2/login", Some(login_form)).await?;
     assert_eq!(login.0, StatusCode::OK);
+    let cookie = login
+        .3
+        .as_deref()
+        .and_then(|header| header.split(';').next())
+        .expect("browser session cookie")
+        .to_owned();
     let login: Value = serde_json::from_slice(&login.1)?;
     assert_eq!(login["step"], "complete");
     let callback = url::Url::parse(
@@ -181,6 +187,84 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     assert_eq!(userinfo.0, StatusCode::OK);
     let rejected_id_token = bearer(&app, "/oauth2/userinfo", id_token).await?;
     assert_eq!(rejected_id_token.0, StatusCode::UNAUTHORIZED);
+
+    let unauthenticated_subscription = send(
+        &app,
+        Method::GET,
+        "/account/subscription/context",
+        None,
+    )
+    .await?;
+    assert_eq!(unauthenticated_subscription.0, StatusCode::UNAUTHORIZED);
+    let signed_in_subscription = send_cookie(
+        &app,
+        Method::GET,
+        "/account/subscription/context",
+        &cookie,
+        None,
+    )
+    .await?;
+    assert_eq!(signed_in_subscription.0, StatusCode::OK);
+    let subscription: Value = serde_json::from_slice(&signed_in_subscription.1)?;
+    assert_eq!(subscription["email"], email);
+    assert_eq!(subscription["status"], "ACTIVE");
+    assert_eq!(subscription["balances"]["STT_AUDIO_MS"], 0);
+    assert_eq!(subscription["payments_enabled"], false);
+
+    let missing_admin = send_json(
+        &app,
+        "/internal/accounts/lookup",
+        serde_json::json!({"email": email}),
+        None,
+        Some("operator@example.test"),
+    )
+    .await?;
+    assert_eq!(missing_admin.0, StatusCode::UNAUTHORIZED);
+    let unknown_account = send_json(
+        &app,
+        "/internal/accounts/lookup",
+        serde_json::json!({"email": "missing@example.test"}),
+        Some("integration-admin"),
+        Some("operator@example.test"),
+    )
+    .await?;
+    assert_eq!(unknown_account.0, StatusCode::NOT_FOUND);
+    let lookup = send_json(
+        &app,
+        "/internal/accounts/lookup",
+        serde_json::json!({"email": email}),
+        Some("integration-admin"),
+        Some("operator@example.test"),
+    )
+    .await?;
+    assert_eq!(lookup.0, StatusCode::OK);
+    let lookup: Value = serde_json::from_slice(&lookup.1)?;
+    assert_eq!(lookup["account_id"], account_id);
+    assert_eq!(lookup["email"], email);
+    let granted = send_json(
+        &app,
+        &format!("/internal/accounts/{account_id}/quota-adjustments"),
+        serde_json::json!({
+            "metric": "STT_AUDIO_MS",
+            "units": 3_600_000,
+            "reason": "pilot grant"
+        }),
+        Some("integration-admin"),
+        Some("operator@example.test"),
+    )
+    .await?;
+    assert_eq!(granted.0, StatusCode::OK);
+    let refreshed = send_json(
+        &app,
+        "/internal/accounts/lookup",
+        serde_json::json!({"email": email}),
+        Some("integration-admin"),
+        Some("operator@example.test"),
+    )
+    .await?;
+    assert_eq!(refreshed.0, StatusCode::OK);
+    let refreshed: Value = serde_json::from_slice(&refreshed.1)?;
+    assert_eq!(refreshed["balances"]["STT_AUDIO_MS"], 3_600_000);
 
     let refresh_form = form(&[
         ("grant_type", "refresh_token"),
@@ -258,6 +342,11 @@ fn test_config(
         hosted_stt_enabled: false,
         hosted_llm_enabled: false,
         payments_enabled: false,
+        alipay_app_id: None,
+        alipay_seller_id: None,
+        alipay_private_key: None,
+        alipay_public_key: None,
+        alipay_gateway_url: "https://openapi.alipay.com/gateway.do".to_owned(),
         admin_token: Some("integration-admin".to_owned()),
         volcengine_api_key: None,
         volcengine_resource_id: "volc.bigasr.sauc.duration".to_owned(),
@@ -283,10 +372,23 @@ async fn send(
     method: Method,
     uri: &str,
     form_body: Option<String>,
-) -> anyhow::Result<(StatusCode, Vec<u8>, Option<String>)> {
+) -> anyhow::Result<(StatusCode, Vec<u8>, Option<String>, Option<String>)> {
+    send_cookie(app, method, uri, "", form_body).await
+}
+
+async fn send_cookie(
+    app: &axum::Router,
+    method: Method,
+    uri: &str,
+    cookie: &str,
+    form_body: Option<String>,
+) -> anyhow::Result<(StatusCode, Vec<u8>, Option<String>, Option<String>)> {
     let mut request = Request::builder().method(method).uri(uri);
     if form_body.is_some() {
         request = request.header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    }
+    if !cookie.is_empty() {
+        request = request.header(header::COOKIE, cookie);
     }
     let mut request = request.body(Body::from(form_body.unwrap_or_default()))?;
     request
@@ -299,8 +401,40 @@ async fn send(
         .get(header::LOCATION)
         .and_then(|value| value.to_str().ok())
         .map(ToOwned::to_owned);
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
     let body = response.into_body().collect().await?.to_bytes().to_vec();
-    Ok((status, body, location))
+    Ok((status, body, location, set_cookie))
+}
+
+async fn send_json(
+    app: &axum::Router,
+    uri: &str,
+    body: Value,
+    admin_token: Option<&str>,
+    admin_actor: Option<&str>,
+) -> anyhow::Result<(StatusCode, Vec<u8>)> {
+    let mut request = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(token) = admin_token {
+        request = request.header("x-admin-token", token);
+    }
+    if let Some(actor) = admin_actor {
+        request = request.header("x-admin-actor", actor);
+    }
+    let mut request = request.body(Body::from(serde_json::to_vec(&body)?))?;
+    request
+        .extensions_mut()
+        .insert(ConnectInfo("127.0.0.1:43210".parse::<SocketAddr>()?));
+    let response = app.clone().oneshot(request).await?;
+    let status = response.status();
+    let bytes = response.into_body().collect().await?.to_bytes().to_vec();
+    Ok((status, bytes))
 }
 
 async fn bearer(

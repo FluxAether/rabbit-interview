@@ -77,6 +77,8 @@ async fn concurrent_reservations_never_overspend_and_use_earliest_expiry() -> an
         .await?;
     }
 
+    assert_eq!(entitlement.balances(&account.id).await?[LLM_METRIC], 655);
+
     let barrier = Arc::new(Barrier::new(100));
     let mut tasks = JoinSet::new();
     for _ in 0..100 {

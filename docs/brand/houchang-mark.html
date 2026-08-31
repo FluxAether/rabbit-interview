@@ -1,0 +1,480 @@
+<title>候场字标</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Noto+Serif+SC:wght@600;700;900&display=swap">
+<style>
+  :root {
+    --stage: #0c0c0e;
+    --ink: #171717;
+    --paper: #f4f4f7;
+    --mute: #8a8a94;
+    --line: #2a2a32;
+    --lamp: #c9a36a;
+    --lamp-dim: #8a7048;
+    --type-display: "Noto Serif SC", "Songti SC", "STSong", serif;
+    --type-latin: "Fraunces", "Iowan Old Style", "Palatino Linotype", serif;
+    --type-body: "Newsreader", "Iowan Old Style", "Palatino Linotype", serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--stage);
+    color: var(--paper);
+    font-family: var(--type-body);
+    font-size: 18px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  .wrap {
+    width: min(1180px, calc(100% - 40px));
+    margin: 0 auto;
+    padding: 48px 0 96px;
+  }
+
+  .mast {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    align-items: end;
+    padding-bottom: 36px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .eyebrow {
+    font-family: var(--type-latin);
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--lamp);
+    margin: 0 0 14px;
+  }
+
+  h1 {
+    font-family: var(--type-display);
+    font-weight: 900;
+    font-size: clamp(56px, 8vw, 92px);
+    line-height: 0.95;
+    letter-spacing: 0.12em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .mast p {
+    max-width: 36ch;
+    margin: 18px 0 0;
+    color: var(--mute);
+    font-size: 17px;
+  }
+
+  .note {
+    font-size: 13px;
+    color: var(--mute);
+    max-width: 22ch;
+    text-align: right;
+    font-style: italic;
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 48px;
+    align-items: center;
+    padding: 64px 0 48px;
+  }
+
+  .stage {
+    background:
+      radial-gradient(circle at 50% 42%, rgba(201, 163, 106, 0.16), transparent 42%),
+      #101012;
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    min-height: 520px;
+    display: grid;
+    place-items: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stage svg { width: min(340px, 72%); height: auto; }
+
+  .lamp {
+    position: absolute;
+    top: 28px;
+    right: 28px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--lamp);
+    box-shadow: 0 0 18px var(--lamp);
+  }
+
+  .thesis h2 {
+    font-family: var(--type-latin);
+    font-optical-sizing: auto;
+    font-size: clamp(28px, 3.4vw, 40px);
+    font-weight: 500;
+    line-height: 1.15;
+    margin: 0 0 18px;
+    text-wrap: balance;
+  }
+
+  .thesis p {
+    margin: 0 0 16px;
+    color: #c8c8d0;
+    max-width: 38ch;
+  }
+
+  .rules {
+    display: grid;
+    gap: 10px;
+    margin-top: 28px;
+  }
+
+  .rules span {
+    display: block;
+    font-size: 15px;
+    color: var(--mute);
+    padding-left: 14px;
+    border-left: 2px solid var(--lamp-dim);
+  }
+
+  section {
+    padding: 48px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  section h3 {
+    font-family: var(--type-display);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    margin: 0 0 8px;
+  }
+
+  section .lead {
+    color: var(--mute);
+    margin: 0 0 28px;
+    max-width: 62ch;
+    font-size: 16px;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .tile {
+    background: #101012;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 28px 24px 22px;
+    display: grid;
+    gap: 18px;
+    min-height: 220px;
+  }
+
+  .tile.light {
+    background: var(--paper);
+    color: var(--ink);
+  }
+
+  .tile header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: var(--type-latin);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--mute);
+  }
+
+  .tile.light header { color: #6b6b73; }
+
+  .mark {
+    display: grid;
+    place-items: center;
+    min-height: 120px;
+  }
+
+  .mark svg { width: 96px; height: 96px; }
+  .mark.wide svg { width: min(100%, 280px); height: auto; }
+  .mark.word svg { width: min(100%, 220px); height: auto; }
+
+  .sizes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px 36px;
+    align-items: end;
+    background: #101012;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 32px;
+  }
+
+  .size {
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+  }
+
+  .size b {
+    font-family: var(--type-latin);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--mute);
+  }
+
+  .dont {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .bad {
+    border: 1px dashed #5a3a3a;
+    background: #161012;
+    border-radius: 18px;
+    padding: 24px;
+    color: #c9b4b4;
+    font-size: 16px;
+  }
+
+  .bad strong {
+    display: block;
+    color: #e8c4c4;
+    font-family: var(--type-display);
+    margin-bottom: 8px;
+  }
+
+  .files {
+    font-size: 15px;
+    color: var(--mute);
+  }
+
+  .files code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    color: var(--paper);
+  }
+
+  @media (max-width: 840px) {
+    .mast, .hero, .row, .dont { grid-template-columns: 1fr; }
+    .note { text-align: left; max-width: none; }
+    .stage { min-height: 380px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lamp { box-shadow: none; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <div>
+      <p class="eyebrow">Oncue · hard mark</p>
+      <h1>候场</h1>
+      <p>一块硬板，一条偏右的缝。台前大，侧幕窄。有机切面已废，不再画两个蛋。</p>
+    </div>
+    <p class="note">Design only. Not shipped. Existing <code style="font-family:ui-monospace,monospace;font-size:12px;color:#c9a36a">public/logo.svg</code> and Tauri icons stay as they are.</p>
+  </header>
+
+  <div class="hero">
+    <div class="stage" aria-hidden="true">
+      <span class="lamp"></span>
+      <svg viewBox="0 0 1024 1024" role="img">
+        <rect x="64" y="64" width="896" height="896" rx="220" fill="#171717"/>
+        <defs>
+          <clipPath id="hero-slab">
+            <rect x="196" y="196" width="632" height="632" rx="28"/>
+          </clipPath>
+        </defs>
+        <g clip-path="url(#hero-slab)">
+          <rect x="196" y="196" width="632" height="632" fill="#F7F7F8"/>
+          <g transform="rotate(-13 708 512)">
+            <rect x="672" y="20" width="76" height="1000" fill="#171717"/>
+          </g>
+        </g>
+      </svg>
+    </div>
+    <div class="thesis">
+      <h2>One slab. The cue is the cut.</h2>
+      <p>候场不是两间软房。是一块硬面被切开：左边是台前，右边是侧幕。缝偏右，所以台前永远更大。</p>
+      <p>颜色不换。#171717 底，#F7F7F8 形。16px 只保证斜切；32px 起能看出两间房。</p>
+      <div class="rules">
+        <span>中文店招是「候场」二字，不是兔子，也不是英文动物名。</span>
+        <span>英文店招是 Oncue。同一枚图标，两套字标。</span>
+        <span>Cue lamp 只出现在品牌板上，不进 App 图标。</span>
+        <span>图标只用硬边。不要椭圆、不要水滴、不要有机切面。</span>
+      </div>
+    </div>
+  </div>
+
+  <section>
+    <h3>锁头</h3>
+    <p class="lead">图标负责识别，字标负责被叫出来。落地页、支付页、小红书封面用锁头；托盘和 Dock 只用图标。</p>
+    <div class="row">
+      <article class="tile">
+        <header><span>App icon</span><span>1024</span></header>
+        <div class="mark">
+          <svg viewBox="0 0 1024 1024">
+            <rect x="64" y="64" width="896" height="896" rx="220" fill="#171717"/>
+            <defs>
+              <clipPath id="lock-app">
+                <rect x="196" y="196" width="632" height="632" rx="28"/>
+              </clipPath>
+            </defs>
+            <g clip-path="url(#lock-app)">
+              <rect x="196" y="196" width="632" height="632" fill="#F7F7F8"/>
+              <g transform="rotate(-13 708 512)">
+                <rect x="672" y="20" width="76" height="1000" fill="#171717"/>
+              </g>
+            </g>
+          </svg>
+        </div>
+      </article>
+      <article class="tile">
+        <header><span>中文锁头</span><span>候场</span></header>
+        <div class="mark wide">
+          <svg viewBox="0 0 720 160">
+            <svg x="8" y="16" width="128" height="128" viewBox="64 64 896 896">
+              <rect x="64" y="64" width="896" height="896" rx="220" fill="#171717"/>
+              <defs>
+                <clipPath id="lock-zh">
+                  <rect x="196" y="196" width="632" height="632" rx="28"/>
+                </clipPath>
+              </defs>
+              <g clip-path="url(#lock-zh)">
+                <rect x="196" y="196" width="632" height="632" fill="#F7F7F8"/>
+                <g transform="rotate(-13 708 512)">
+                  <rect x="672" y="20" width="76" height="1000" fill="#171717"/>
+                </g>
+              </g>
+            </svg>
+            <text x="168" y="108" fill="#F7F7F8" font-family="Noto Serif SC, Songti SC, serif" font-weight="900" font-size="92" letter-spacing="0.14em">候场</text>
+          </svg>
+        </div>
+      </article>
+      <article class="tile">
+        <header><span>English lockup</span><span>Oncue</span></header>
+        <div class="mark wide">
+          <svg viewBox="0 0 720 160">
+            <svg x="8" y="16" width="128" height="128" viewBox="64 64 896 896">
+              <rect x="64" y="64" width="896" height="896" rx="220" fill="#171717"/>
+              <defs>
+                <clipPath id="lock-en">
+                  <rect x="196" y="196" width="632" height="632" rx="28"/>
+                </clipPath>
+              </defs>
+              <g clip-path="url(#lock-en)">
+                <rect x="196" y="196" width="632" height="632" fill="#F7F7F8"/>
+                <g transform="rotate(-13 708 512)">
+                  <rect x="672" y="20" width="76" height="1000" fill="#171717"/>
+                </g>
+              </g>
+            </svg>
+            <text x="168" y="108" fill="#F7F7F8" font-family="Fraunces, Bodoni Moda, serif" font-weight="600" font-size="86" letter-spacing="-0.03em">Oncue</text>
+          </svg>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h3>字标</h3>
+    <p class="lead">没有图标时，名字自己就是标。中文宋黑，英文 Fraunces。不要用 Inter 做品牌字。</p>
+    <div class="row">
+      <article class="tile">
+        <header><span>Wordmark ZH</span><span>dark</span></header>
+        <div class="mark word">
+          <svg viewBox="0 0 640 240">
+            <text x="320" y="168" text-anchor="middle" fill="#F7F7F8" font-family="Noto Serif SC, serif" font-weight="900" font-size="152" letter-spacing="0.12em">候场</text>
+          </svg>
+        </div>
+      </article>
+      <article class="tile light">
+        <header><span>Wordmark ZH</span><span>light</span></header>
+        <div class="mark word">
+          <svg viewBox="0 0 640 240">
+            <text x="320" y="168" text-anchor="middle" fill="#171717" font-family="Noto Serif SC, serif" font-weight="900" font-size="152" letter-spacing="0.12em">候场</text>
+          </svg>
+        </div>
+      </article>
+      <article class="tile">
+        <header><span>Wordmark EN</span><span>Oncue</span></header>
+        <div class="mark word">
+          <svg viewBox="0 0 640 200">
+            <text x="320" y="140" text-anchor="middle" fill="#F7F7F8" font-family="Fraunces, serif" font-weight="600" font-size="128" letter-spacing="-0.03em">Oncue</text>
+          </svg>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h3>尺寸</h3>
+    <p class="lead">16px 只保证「斜切一块」。32px 起能看出台前和侧幕。中文二字不要缩进托盘。</p>
+    <div class="sizes">
+      <div class="size">
+        <svg width="96" height="96" viewBox="0 0 1024 1024"><use href="#mark"/></svg>
+        <b>96 Dock</b>
+      </div>
+      <div class="size">
+        <svg width="64" height="64" viewBox="0 0 1024 1024"><use href="#mark"/></svg>
+        <b>64</b>
+      </div>
+      <div class="size">
+        <svg width="48" height="48" viewBox="0 0 1024 1024"><use href="#mark"/></svg>
+        <b>48 Sidebar</b>
+      </div>
+      <div class="size">
+        <svg width="32" height="32" viewBox="0 0 1024 1024"><use href="#mark"/></svg>
+        <b>32 Tray</b>
+      </div>
+      <div class="size">
+        <svg width="24" height="24" viewBox="0 0 1024 1024"><use href="#mark"/></svg>
+        <b>24</b>
+      </div>
+      <div class="size">
+        <svg width="16" height="16" viewBox="0 0 1024 1024"><use href="#mark"/></svg>
+        <b>16 Favicon</b>
+      </div>
+    </div>
+    <svg width="0" height="0" aria-hidden="true">
+      <symbol id="mark" viewBox="0 0 1024 1024">
+        <rect x="64" y="64" width="896" height="896" rx="220" fill="#171717"/>
+        <defs>
+          <clipPath id="sym-slab">
+            <rect x="196" y="196" width="632" height="632" rx="28"/>
+          </clipPath>
+        </defs>
+        <g clip-path="url(#sym-slab)">
+          <rect x="196" y="196" width="632" height="632" fill="#F7F7F8"/>
+          <g transform="rotate(-13 708 512)">
+            <rect x="672" y="20" width="76" height="1000" fill="#171717"/>
+          </g>
+        </g>
+      </symbol>
+    </svg>
+  </section>
+
+  <section>
+    <h3>不要</h3>
+    <div class="dont">
+      <p class="bad"><strong>不要画两个蛋。</strong>有机切面在 32px 上就是两颗卵。图标只用硬边。</p>
+      <p class="bad"><strong>不要画兔子。</strong>旧名残留。现有视觉里本来就没有兔，塞回去是在撒谎。</p>
+      <p class="bad"><strong>不要画幕布、话筒、耳机。</strong>那是面试工具库存插画，和即答侠、Cluely 的功能海报撞车。</p>
+      <p class="bad"><strong>不要把 Cue lamp 放进 App 图标。</strong>16px 上会变成脏点。灯只给品牌板和海报。</p>
+      <p class="bad"><strong>不要中英并排四个词。</strong>中文页只写候场，英文页只写 Oncue。图标两边共用。</p>
+      <p class="bad"><strong>不要画禁止符斜杠。</strong>缝必须偏右，台前必须明显大于侧幕。居中斜切会读成 NO。</p>
+    </div>
+  </section>
+
+  <section>
+    <h3>文件</h3>
+    <p class="files">源文件在仓库 <code>docs/brand/</code>：<code>mark-app.svg</code>、<code>lockup-zh.svg</code>、<code>lockup-en.svg</code>、<code>wordmark-zh.svg</code>、<code>wordmark-en.svg</code>。没有改 <code>public/logo.svg</code>、<code>src-tauri/icons</code>、<code>tauri.conf.json</code> 或任何 App 配置。</p>
+  </section>
+</div>

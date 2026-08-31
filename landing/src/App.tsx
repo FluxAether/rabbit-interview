@@ -21,7 +21,10 @@ function readLang(): Lang {
 }
 
 export default function App() {
-  return window.location.pathname.startsWith('/auth/') ? <AuthPage /> : <LandingPage />
+  const path = window.location.pathname
+  return path.startsWith('/auth/') || path === '/subscribe' || path === '/admin'
+    ? <AuthPage />
+    : <LandingPage />
 }
 
 function LandingPage() {
@@ -67,6 +70,7 @@ function LandingPage() {
             <a href="#features" className="hover:text-ink">{t.nav.features}</a>
             <a href="#workflow" className="hover:text-ink">{t.nav.workflow}</a>
             <a href="#privacy" className="hover:text-ink">{t.nav.privacy}</a>
+            <a href="/subscribe" className="hover:text-ink">{t.nav.subscribe}</a>
             <a href="#download" className="hover:text-ink">{t.nav.download}</a>
           </nav>
           <a href="#download" className="text-xs text-mute md:hidden">{t.nav.download}</a>

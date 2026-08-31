@@ -1,6 +1,6 @@
 # Hosted gateway runbook
 
-Status: pre-production, single replica, public email-verified registration with manual quota.
+Status: pre-production, single replica, public email-verified registration with manual grants and an opt-in Alipay adapter.
 
 The Gateway is Rabbit Interview's OIDC Provider and hosted AI resource server. It runs as one Rust process backed by MySQL 8.4. The desktop is the only registered public client and uses Authorization Code with PKCE (`S256`).
 
@@ -33,10 +33,14 @@ Do not run multiple replicas in this version. Login throttles, one-time WebSocke
 - `RESEND_API_URL`: optional Resend-compatible API origin; defaults to `https://api.resend.com`.
 - `GATEWAY_ADMIN_TOKEN`: secret used only by account and quota administration APIs.
 - `VOLCENGINE_API_KEY` and `GEMINI_API_KEY`: deployment secrets, never desktop build variables.
+- `ALIPAY_APP_ID` and `ALIPAY_SELLER_ID`: the identifiers for the selected Alipay application and merchant.
+- `ALIPAY_PRIVATE_KEY`: the unarmored Base64 application RSA2 private key from Alipay. Do not wrap it as PEM.
+- `ALIPAY_PUBLIC_KEY`: the unarmored Base64 Alipay RSA2 public key from Alipay. This integration uses public-key mode, not certificate mode.
+- `ALIPAY_GATEWAY_URL`: the matching sandbox or production OpenAPI gateway URL.
 
 Set `GATEWAY_TRUSTED_PROXY_CIDRS` only to CIDRs of reverse proxies that replace `X-Forwarded-For`; otherwise the direct peer address is used for throttling.
 
-Keep `HOSTED_STT_ENABLED=false`, `HOSTED_LLM_ENABLED=false`, and `PAYMENTS_ENABLED=false` until their gates are complete. `PAYMENTS_ENABLED=true` deliberately fails startup because no payment adapter exists.
+Keep `HOSTED_STT_ENABLED=false`, `HOSTED_LLM_ENABLED=false`, and `PAYMENTS_ENABLED=false` until their gates are complete. When payments are enabled, startup fails if an Alipay identifier or parseable RSA key is missing. The asynchronous notification URL is derived as `${GATEWAY_PUBLIC_URL}/webhooks/alipay`; the browser return URL is `${LANDING_PUBLIC_URL}/subscribe`.
 
 Both desktop and landing builds need `VITE_HOSTED_GATEWAY_URL=https://your-gateway.example`. Replace `gateway.example.com` in `src-tauri/tauri.conf.json` CSP with the same HTTPS/WSS origin before release. The Gateway allows credentialed CORS only from the exact configured origins; do not use wildcard origins.
 
@@ -94,7 +98,7 @@ All browser-facing authentication UI is served by the landing application under 
 
 ## Account operations
 
-Users register at `https://your-landing.example/auth/register`. Registration sends a one-time email verification and password setup link valid for 24 hours. It creates no hosted quota; grant quota separately when appropriate.
+Users register at `https://your-landing.example/auth/register`. Registration sends a one-time email verification and password setup link valid for 24 hours. It creates no hosted quota; grant quota separately when appropriate. The public explanation is `https://your-landing.example/subscribe`. A signed-in browser session can read remaining quota from `GET /account/subscription/context`.
 
 Administrators can still invite an account:
 
@@ -120,6 +124,12 @@ curl -fsS -X POST -H "X-Admin-Token: $GATEWAY_ADMIN_TOKEN" -H "X-Admin-Actor: op
   https://your-gateway.example/internal/accounts/ACCOUNT_ID/revoke-sessions
 ```
 
+Look up an account UUID by email, then grant quota. Operators can also use the unlinked landing page `https://your-landing.example/admin`; the admin token stays in that tab and is not stored.
+
+```bash
+curl -fsS -X POST   -H "X-Admin-Token: $GATEWAY_ADMIN_TOKEN"   -H "X-Admin-Actor: operator@example.com"   -H "Content-Type: application/json"   https://your-gateway.example/internal/accounts/lookup   -d '{"email":"person@example.com"}'
+```
+
 Grant quota by account UUID:
 
 ```bash
@@ -132,6 +142,25 @@ curl -fsS -X POST \
 ```
 
 Use `LLM_TOKEN_UNITS` for LLM grants. Account and quota changes write security audit events. Audio, transcripts, prompts, and answers are not persisted by the Gateway.
+
+## Subscription payments
+
+The self-serve products are one-time purchases with no automatic renewal:
+
+- `PRO_MONTH`: CNY 89, 30 days, 15 STT hours, 2,000,000 LLM units.
+- `PRO_QUARTER`: CNY 199, 90 days, 50 STT hours, 8,000,000 LLM units.
+
+Configure an Alipay sandbox application in public-key RSA2 mode, set `ALIPAY_PRIVATE_KEY` and `ALIPAY_PUBLIC_KEY` to the unarmored Base64 key strings from Alipay, set the sandbox gateway URL supplied by Alipay, then set `PAYMENTS_ENABLED=true`. The signed-in landing page creates a server-priced order at `POST /account/payment-orders`; it never submits an amount or quota. Payment is granted only after a verified asynchronous notification or a signed server-side `alipay.trade.query` response. The browser return itself never grants quota.
+
+For sandbox acceptance, buy each product from `/subscribe` and verify all of the following before enabling production payments:
+
+1. Alipay returns literal `success` from the public webhook and the local order becomes `PAID`.
+2. One immutable `subscriptions` row and exactly two `SUBSCRIPTION` quota buckets are created for the order.
+3. Replaying the notification does not add another subscription or bucket.
+4. A mismatched amount, application ID, seller ID, order number, or RSA2 signature returns `failure` and grants nothing.
+5. An early renewal starts at the previous paid-through time, so future quota is not spendable early.
+
+Keep `PAYMENTS_ENABLED=false` in production until the merchant account, callback domain, product copy, refund process, privacy review, and archived sandbox evidence are approved.
 
 ## Health, recovery, and backups
 

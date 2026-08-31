@@ -103,7 +103,7 @@ impl Entitlement {
 
     pub async fn balances(&self, account_id: &str) -> Result<BTreeMap<String, i64>, AppError> {
         let rows = sqlx::query(
-            "SELECT metric, COALESCE(SUM(remaining_units), 0) AS units \
+            "SELECT metric, CAST(COALESCE(SUM(remaining_units), 0) AS SIGNED) AS units \
              FROM quota_buckets \
              WHERE account_id = ? AND remaining_units > 0 \
                AND valid_from <= UTC_TIMESTAMP(6) \
@@ -681,7 +681,7 @@ async fn reservation_account(pool: &MySqlPool, reservation_id: &str) -> Result<S
         .ok_or(AppError::NotFound)
 }
 
-async fn lock_account(
+pub(crate) async fn lock_account(
     tx: &mut Transaction<'_, MySql>,
     account_id: &str,
 ) -> Result<String, AppError> {
@@ -805,7 +805,7 @@ async fn add_hold_locked(
     Ok(())
 }
 
-async fn load_idempotency(
+pub(crate) async fn load_idempotency(
     tx: &mut Transaction<'_, MySql>,
     account_id: &str,
     key: &str,
@@ -829,7 +829,7 @@ async fn load_idempotency(
     .map_err(AppError::Database)
 }
 
-async fn insert_idempotency(
+pub(crate) async fn insert_idempotency(
     tx: &mut Transaction<'_, MySql>,
     account_id: &str,
     key: &str,

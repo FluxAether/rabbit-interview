@@ -18,7 +18,9 @@ In BYOK mode, audio, transcripts, resume text, and job descriptions may be sent 
 
 In hosted mode, the selected system-audio and microphone streams pass through the Rabbit gateway to Volcengine for transcription. Questions and the context needed to generate an answer pass through the gateway to Gemini. The gateway does not persist audio, transcripts, prompts, resumes, or answers.
 
-The hosted service stores the account email address, display name, salted password hash, optional encrypted TOTP secret and recovery-code hashes, browser and refresh-token session records, quota buckets, reservations, provider request IDs, and metering metadata. It does not store plaintext passwords, TOTP secrets, recovery codes, or bearer tokens. Usage metadata is retained for 730 days; security audit events are retained for 30 days.
+If you choose a hosted subscription, Alipay receives the merchant order number, product description, and payment amount needed to complete payment. Rabbit does not receive or store your Alipay password or payment credential.
+
+The hosted service stores the account email address, display name, salted password hash, optional encrypted TOTP secret and recovery-code hashes, browser and refresh-token session records, quota buckets, reservations, payment order and provider transaction identifiers, allowlisted payment-event metadata, subscription periods, provider request IDs, and metering metadata. It does not store plaintext passwords, TOTP secrets, recovery codes, bearer tokens, or payment credentials. Usage metadata is retained for 730 days; security audit events are retained for 30 days.
 
 ## What we do not collect
 

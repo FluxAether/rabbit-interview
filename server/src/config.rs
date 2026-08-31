@@ -3,7 +3,7 @@ use std::{env, net::SocketAddr, path::PathBuf, str::FromStr, time::Duration};
 use anyhow::{anyhow, Context, Result};
 use ipnet::IpNet;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Config {
     pub listen_addr: SocketAddr,
     pub database_url: String,
@@ -22,6 +22,11 @@ pub struct Config {
     pub hosted_stt_enabled: bool,
     pub hosted_llm_enabled: bool,
     pub payments_enabled: bool,
+    pub alipay_app_id: Option<String>,
+    pub alipay_seller_id: Option<String>,
+    pub alipay_private_key: Option<String>,
+    pub alipay_public_key: Option<String>,
+    pub alipay_gateway_url: String,
     pub admin_token: Option<String>,
     pub volcengine_api_key: Option<String>,
     pub volcengine_resource_id: String,
@@ -86,6 +91,12 @@ impl Config {
             hosted_stt_enabled: flag("HOSTED_STT_ENABLED", false)?,
             hosted_llm_enabled: flag("HOSTED_LLM_ENABLED", false)?,
             payments_enabled: flag("PAYMENTS_ENABLED", false)?,
+            alipay_app_id: optional("ALIPAY_APP_ID"),
+            alipay_seller_id: optional("ALIPAY_SELLER_ID"),
+            alipay_private_key: optional("ALIPAY_PRIVATE_KEY"),
+            alipay_public_key: optional("ALIPAY_PUBLIC_KEY"),
+            alipay_gateway_url: env::var("ALIPAY_GATEWAY_URL")
+                .unwrap_or_else(|_| "https://openapi.alipay.com/gateway.do".to_owned()),
             admin_token: optional("GATEWAY_ADMIN_TOKEN"),
             volcengine_api_key: optional("VOLCENGINE_API_KEY"),
             volcengine_resource_id: env::var("VOLCENGINE_RESOURCE_ID")
@@ -162,8 +173,22 @@ impl Config {
         if self.hosted_llm_enabled && self.gemini_api_key.is_none() {
             return Err(anyhow!("HOSTED_LLM_ENABLED requires GEMINI_API_KEY"));
         }
-        if self.payments_enabled {
-            return Err(anyhow!("PAYMENTS_ENABLED cannot be enabled before a payment adapter and verified webhook are configured"));
+        validate_secure_url(
+            "ALIPAY_GATEWAY_URL",
+            &self.alipay_gateway_url,
+            "https",
+            "http",
+            false,
+        )?;
+        if self.payments_enabled
+            && (self.alipay_app_id.is_none()
+                || self.alipay_seller_id.is_none()
+                || self.alipay_private_key.is_none()
+                || self.alipay_public_key.is_none())
+        {
+            return Err(anyhow!(
+                "PAYMENTS_ENABLED requires ALIPAY_APP_ID, ALIPAY_SELLER_ID, ALIPAY_PRIVATE_KEY, and ALIPAY_PUBLIC_KEY"
+            ));
         }
         if self.initial_stt_hold_ms <= 0
             || self.stt_top_up_ms <= 0

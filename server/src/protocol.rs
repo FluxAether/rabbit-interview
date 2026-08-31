@@ -51,6 +51,7 @@ pub struct EntitlementResponse {
     pub hosted_stt_enabled: bool,
     pub hosted_llm_enabled: bool,
     pub payments_enabled: bool,
+    pub subscription_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,4 +60,47 @@ pub struct AdjustmentRequest {
     pub units: i64,
     pub reason: String,
     pub valid_until: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LookupRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AccountLookupResponse {
+    pub account_id: String,
+    pub email: String,
+    pub status: String,
+    pub balances: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SubscriptionContext {
+    pub email: String,
+    pub status: String,
+    pub balances: BTreeMap<String, i64>,
+    pub hosted_stt_enabled: bool,
+    pub hosted_llm_enabled: bool,
+    pub payments_enabled: bool,
+    pub csrf: String,
+    pub products: Vec<PaymentProduct>,
+    pub subscription: Option<SubscriptionSummary>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PaymentProduct {
+    pub code: &'static str,
+    pub price_minor: i64,
+    pub currency: &'static str,
+    pub duration_days: i64,
+    pub stt_ms: i64,
+    pub llm_units: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SubscriptionSummary {
+    pub product_code: String,
+    pub starts_at: String,
+    pub paid_through: String,
 }
