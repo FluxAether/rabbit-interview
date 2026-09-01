@@ -2,7 +2,7 @@
 
 - **Slug:** `ai-tool-subscriptions`
 - **Date:** 2026-08-31
-- **Status:** Awaiting user approval; no evidence gathering has started.
+- **Status:** Complete — final report and provenance delivered.
 - **Planned deliverables:**
   - `outputs/.drafts/ai-tool-subscriptions-draft.md`
   - `outputs/.drafts/ai-tool-subscriptions-cited.md`
@@ -41,10 +41,10 @@
 | T2 | Researcher 2 | 调研 AI 编程工具的席位、额度、超额与团队计划 | `outputs/.drafts/ai-tool-subscriptions-research-coding.md` | Complete |
 | T3 | Researcher 3 | 调研模型 API、云平台/聚合平台的按量、预付、批处理与承诺用量模式 | `outputs/.drafts/ai-tool-subscriptions-research-api.md` | Complete |
 | T4 | Researcher 4 | 调研隐私、数据使用、SLA、管理能力、地区/年度计费及订阅边界 | `outputs/.drafts/ai-tool-subscriptions-research-governance.md` | Complete |
-| T5 | Lead | 汇总并复核统一比较维度，建立可复算成本情景 | `outputs/.drafts/ai-tool-subscriptions-draft.md` | In progress |
-| T6 | Verifier | 为完整草稿逐项补充并验证引用 | `outputs/.drafts/ai-tool-subscriptions-cited.md` | Pending T5 |
-| T7 | Reviewer | 检查不受支持的断言、逻辑缺口、单一来源关键结论和过度自信 | `outputs/.drafts/ai-tool-subscriptions-verification.md` | Pending T6 |
-| T8 | Lead | 修复致命问题、核验磁盘文件并交付报告与 provenance | `outputs/ai-tool-subscriptions.md`; `.provenance.md` | Pending T7 |
+| T5 | Lead | 汇总并复核统一比较维度，建立可复算成本情景 | `outputs/.drafts/ai-tool-subscriptions-draft.md` | Complete |
+| T6 | Verifier | 为完整草稿逐项补充并验证引用 | `outputs/.drafts/ai-tool-subscriptions-cited.md` | Complete — PASS WITH NOTES |
+| T7 | Reviewer | 检查不受支持的断言、逻辑缺口、单一来源关键结论和过度自信 | `outputs/.drafts/ai-tool-subscriptions-verification.md` | Complete — initial BLOCK; no FATAL, 3 MAJOR + 3 MINOR |
+| T8 | Lead | 修复致命问题、核验磁盘文件并交付报告与 provenance | `outputs/ai-tool-subscriptions.md`; `.provenance.md` | Complete — PASS WITH NOTES |
 
 ## Verification log
 
@@ -58,9 +58,10 @@
 | Research wave | PASS WITH NOTES | 4 个 researcher 均完成；期间出现无活动提示，检查状态后引导其停止扩搜并完成报告。 |
 | Research artifacts copied on disk | PASS | 4 个外部研究文件已从 managed artifacts 复制到规定路径，并另写项目证据笔记。 |
 | PDF parsing restriction | PASS | 未抓取或解析 PDF；治理研究将一份 GitHub PDF 条款列为 rejected/not relied upon。 |
-| Source reachability and claim mapping | IN PROGRESS | Verifier 将在草稿完成后逐 URL 与逐关键断言检查。 |
-| Cost calculations reproducible | IN PROGRESS | API 研究提供公式；最终稿将只保留已注明单位与假设的情景。 |
-| Required files exist on disk | PENDING | 交付前用磁盘检查验证。 |
+| Source reachability and claim mapping | PASS WITH NOTES | Verifier 已逐关键断言映射研究笔记与官方 URL；因 verifier 无联网能力，未在成稿时实时重开 URL。 |
+| Cost calculations reproducible | PASS | 低/中/高代理情景、100 小时语音示例及套餐比率均已逐项复算；代理 SKU 与实际 Hosted SKU 明确分离。 |
+| Reviewer remediation | PASS | 3 MAJOR + 3 MINOR 均已写入 revised candidate；`rg` 精确命中修复且 stale phrases 全部 MISS。 |
+| Required files exist on disk | PASS | 计划、研究、draft、cited、revised、verification、final 和 provenance 均用 `test -s`/`wc`/`stat` 验证；final 与 revised 用 `cmp` 验证一致。 |
 
 ## Decision log
 
@@ -72,3 +73,6 @@
 - 2026-08-31 — 用户明确批准后启动 4 个 researcher；四条证据线均完成并写入规定 research 文件。
 - 2026-08-31 — 项目检查发现 hosted 网关与支付宝商品处于当前未提交工作树且 runbook 标记 pre-production；最终报告不得把 ¥89/¥199 称为已上线价格。
 - 2026-08-31 — 当前 production gate 未关闭，尤其 Volcengine 真实账单舍入、Gemini 取消后计费及支付宝沙箱/退款/对账；最终建议必须以试点和阶段门表达。
+- 2026-08-31 — Lead 完成统一草稿与低/中/高代理成本情景；verifier 修正缓存 token 公式、API 权益边界、BYOK “免费”措辞及实际/代理 SKU 混淆，给出 `PASS WITH NOTES`（未实时重开 URL）。
+- 2026-08-31 — Reviewer 初始 `BLOCK`，无 FATAL；指出直接价格引用不完整、DPA 时点矛盾及 P95 毛利方向错误。Lead 已全部修复，并同步修正 8M units 近似、生产账户措辞和 90 天等效口径。
+- 2026-08-31 — 最终状态 `PASS WITH NOTES`：研究报告可交付，但 Volcengine/Gemini/支付宝/合同生产门仍阻止把 Hosted 和 ¥89/¥199 描述为生产就绪。

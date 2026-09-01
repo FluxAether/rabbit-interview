@@ -683,6 +683,44 @@ function formatDate(value: string | undefined, lang: string): string {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString(lang)
 }
 
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date.getTime())
+  next.setUTCDate(next.getUTCDate() + days)
+  return next
+}
+
+function fillTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(start|end)\}/g, (token, key: string) => values[key] || token)
+}
+
+function periodPreview(
+  product: PaymentProduct,
+  paidThrough: string | undefined,
+  lang: string,
+): { start: string; end: string; renewing: boolean } {
+  const now = new Date()
+  const currentEnd = paidThrough ? new Date(paidThrough) : null
+  const renewing = Boolean(currentEnd && !Number.isNaN(currentEnd.getTime()) && currentEnd.getTime() > now.getTime())
+  const start = renewing && currentEnd ? currentEnd : now
+  return {
+    start: formatDate(start.toISOString(), lang),
+    end: formatDate(addDays(start, product.duration_days).toISOString(), lang),
+    renewing,
+  }
+}
+
+function paidOrderCopy(order: PaymentOrder, products: PaymentProduct[], lang: string, t: T): string {
+  const product = products.find((item) => item.code === order.product_code)
+  const end = order.paid_through ? new Date(order.paid_through) : null
+  if (!product || !end || Number.isNaN(end.getTime())) return t.subscribe.paymentPaid
+  const start = addDays(end, -product.duration_days)
+  const copy = start.getTime() > Date.now() ? t.subscribe.paymentRenewed : t.subscribe.paymentPaid
+  return fillTemplate(copy, {
+    start: formatDate(start.toISOString(), lang),
+    end: formatDate(end.toISOString(), lang),
+  })
+}
+
 function SubscribePage({ t }: { t: T }) {
   const [context, setContext] = useState<SubscriptionContext | null>(null)
   const [order, setOrder] = useState<PaymentOrder | null>(null)
@@ -794,28 +832,43 @@ function SubscribePage({ t }: { t: T }) {
           </section>
           {order ? (
             <p className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3 text-sm">
-              {order.status === 'PAID' ? t.subscribe.paymentPaid : order.status === 'CLOSED' ? t.subscribe.paymentClosed : t.subscribe.paymentPending}
+              {order.status === 'PAID'
+                ? paidOrderCopy(order, context.products, t.htmlLang, t)
+                : order.status === 'CLOSED' ? t.subscribe.paymentClosed : t.subscribe.paymentPending}
             </p>
           ) : null}
           {context.payments_enabled ? (
             <div className="grid gap-4 sm:grid-cols-2">
-              {context.products.map((product) => (
-                <section key={product.code} className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
-                  <h2 className="text-sm font-semibold">{planName(product.code)}</h2>
-                  <p className="mt-2 text-2xl font-semibold">¥{(product.price_minor / 100).toFixed(0)}</p>
-                  <p className="mt-2 text-xs leading-5 text-mute">
-                    {product.duration_days} {t.subscribe.days} · {formatMinutes(product.stt_ms)} {t.subscribe.sttMinutes} · {formatUnits(product.llm_units)} {t.subscribe.llmUnits}
-                  </p>
-                  <button
-                    type="button"
-                    className={`${primaryButton} mt-4 w-full`}
-                    disabled={Boolean(busyProduct)}
-                    onClick={() => void buy(product.code)}
-                  >
-                    {busyProduct === product.code ? t.subscribe.redirecting : t.subscribe.buy}
-                  </button>
-                </section>
-              ))}
+              {context.products.map((product) => {
+                const preview = periodPreview(product, context.subscription?.paid_through, t.htmlLang)
+                const action = product.code === 'PRO_QUARTER'
+                  ? (preview.renewing ? t.subscribe.renewQuarter : t.subscribe.buyQuarter)
+                  : (preview.renewing ? t.subscribe.renewMonth : t.subscribe.buyMonth)
+                return (
+                  <section key={product.code} className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
+                    <h2 className="text-sm font-semibold">{planName(product.code)}</h2>
+                    <p className="mt-2 text-2xl font-semibold">¥{(product.price_minor / 100).toFixed(0)}</p>
+                    <p className="mt-2 text-xs leading-5 text-mute">
+                      {product.duration_days} {t.subscribe.days} · {formatMinutes(product.stt_ms)} {t.subscribe.sttMinutes} · {formatUnits(product.llm_units)} {t.subscribe.llmUnits}
+                    </p>
+                    <div className="mt-4 space-y-1 text-xs leading-5 text-mute">
+                      <p className="font-medium text-ink">{t.subscribe.renewLabel}</p>
+                      <p>{fillTemplate(preview.renewing ? t.subscribe.renewPreview : t.subscribe.buyPreview, { start: preview.start, end: preview.end })}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className={`${primaryButton} mt-4 w-full`}
+                      disabled={Boolean(busyProduct)}
+                      onClick={() => void buy(product.code)}
+                    >
+                      {busyProduct === product.code ? t.subscribe.redirecting : action}
+                    </button>
+                    <p className="mt-2 text-xs leading-5 text-mute">
+                      {preview.renewing ? t.subscribe.renewNote : t.subscribe.oneTimeNote}
+                    </p>
+                  </section>
+                )
+              })}
             </div>
           ) : <p className="text-xs text-mute">{t.subscribe.paymentsOff}</p>}
         </div>

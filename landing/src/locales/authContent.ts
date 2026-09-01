@@ -109,6 +109,16 @@ type AuthCopy = {
     paymentPending: string
     paymentPaid: string
     paymentClosed: string
+    buyMonth: string
+    buyQuarter: string
+    renewMonth: string
+    renewQuarter: string
+    renewLabel: string
+    buyPreview: string
+    renewPreview: string
+    oneTimeNote: string
+    renewNote: string
+    paymentRenewed: string
   }
   admin: {
     title: string
@@ -346,6 +356,16 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       paymentPending: 'Payment is pending. This page will update after Alipay confirms it.',
       paymentPaid: 'Payment verified. The subscription quota is now available.',
       paymentClosed: 'This payment was closed without granting quota.',
+      buyMonth: 'Buy monthly pass',
+      buyQuarter: 'Buy quarterly pass',
+      renewMonth: 'Renew 30 days',
+      renewQuarter: 'Renew 90 days',
+      renewLabel: 'Renewal details',
+      buyPreview: 'This period starts after payment, through {end}. Quota is available after payment.',
+      renewPreview: 'The next period starts on {start}, through {end}. New quota is available from {start}.',
+      oneTimeNote: 'One-time payment. It will not charge again after this period ends.',
+      renewNote: 'This is a manual renewal. It does not start automatic billing.',
+      paymentRenewed: 'Renewal verified. Access now lasts through {end}. New quota is available from {start}.',
     },
     admin: {
       title: 'Grant hosted quota',
@@ -479,6 +499,16 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       paymentPending: '支付确认中，支付宝确认后本页会自动更新。',
       paymentPaid: '支付已验证，订阅额度现已生效。',
       paymentClosed: '该笔支付已关闭，未发放额度。',
+      buyMonth: '购买月卡',
+      buyQuarter: '购买季卡',
+      renewMonth: '续费 30 天',
+      renewQuarter: '续费 90 天',
+      renewLabel: '续费说明',
+      buyPreview: '本周期从支付成功后开始，预计有效期至 {end}，套餐额度支付成功后可用。',
+      renewPreview: '新周期从 {start} 开始，有效期延长至 {end}，新增额度从 {start} 可用。',
+      oneTimeNote: '一次性支付，到期后不会自动扣费。',
+      renewNote: '本次为手动续费，不会开启自动续费。',
+      paymentRenewed: '续费成功。有效期已延长至 {end}，新增额度将从 {start} 可用。',
     },
     admin: {
       title: '发放云托管额度',
@@ -612,6 +642,16 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       paymentPending: '付款確認中，支付寶確認後本頁會自動更新。',
       paymentPaid: '付款已驗證，訂閱額度現已生效。',
       paymentClosed: '此筆付款已關閉，未發放額度。',
+      buyMonth: '購買月卡',
+      buyQuarter: '購買季卡',
+      renewMonth: '續費 30 天',
+      renewQuarter: '續費 90 天',
+      renewLabel: '續費說明',
+      buyPreview: '本週期從付款成功後開始，預計有效期至 {end}，方案額度付款成功後可用。',
+      renewPreview: '新週期從 {start} 開始，有效期延長至 {end}，新增額度從 {start} 可用。',
+      oneTimeNote: '一次性付款，到期後不會自動扣款。',
+      renewNote: '本次為手動續費，不會開啟自動續費。',
+      paymentRenewed: '續費成功。有效期已延長至 {end}，新增額度將從 {start} 可用。',
     },
     admin: {
       title: '發放雲端代管額度',
