@@ -1160,7 +1160,8 @@ export default function Settings({
                       ) : (
                         <button
                           onClick={() => activateProvider('groq', groqModel)}
-                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+                          disabled={aiAccessMode === 'hosted'}
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t("settings.useProvider", { name: "Groq" })}
                         </button>
@@ -1207,7 +1208,8 @@ export default function Settings({
                       ) : (
                         <button
                           onClick={() => activateProvider('openai', openaiModel)}
-                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+                          disabled={aiAccessMode === 'hosted'}
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t("settings.useProvider", { name: "OpenAI" })}
                         </button>
@@ -1254,7 +1256,8 @@ export default function Settings({
                       ) : (
                         <button
                           onClick={() => activateProvider('anthropic', anthropicModel)}
-                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+                          disabled={aiAccessMode === 'hosted'}
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t("settings.useProvider", { name: "Claude" })}
                         </button>
@@ -1301,7 +1304,8 @@ export default function Settings({
                       ) : (
                         <button
                           onClick={() => activateProvider('gemini', geminiModel)}
-                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+                          disabled={aiAccessMode === 'hosted'}
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t("settings.useProvider", { name: "Gemini" })}
                         </button>
