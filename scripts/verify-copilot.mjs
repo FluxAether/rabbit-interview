@@ -93,6 +93,13 @@ check(
 )
 check(panel.includes('orderCopilotMessagesForDisplay') && panel.includes('groupCopilotMessages('), 'live chat renders AI replies under the matching interviewer question')
 check(
+  session.includes('replyAnchorId')
+    && session.includes('const replyToId = this.replyAnchorId(question, requestType)')
+    && session.includes('suggestion: { id: idBase, text: \'\', category },')
+    && session.includes('replyToId,'),
+  'live answers attach replyToId so the bubble stays under the matching question',
+)
+check(
   panel.includes('showMyBubbles')
     && panel.includes('toggleShowMyBubbles')
     && panel.includes('copilotShowMyBubbles')
@@ -113,7 +120,7 @@ check(
     const groups = [];
     for (const message of filtered) {
       const previous = groups[groups.length - 1];
-      if (message.role === 'assistant' && previous && (previous[0].role === 'interviewer' || previous[0].source === 'follow-up')) {
+      if (message.role === 'assistant' && previous && (message.replyToId == null || message.replyToId === previous[0].id) && (previous[0].role === 'interviewer' || previous[0].source === 'follow-up')) {
         previous.push(message);
         continue;
       }
@@ -785,8 +792,8 @@ if (sessionState) {
       msg(1, 'interviewer', 'system-stt', 'Q'),
       msg(2, 'me', 'microphone-stt', 'said'),
       msg(3, 'assistant', 'llm', 'A'),
-    ]) === 'interviewer:1,assistant:3,me:2',
-    'display pins the AI reply under the interviewer question',
+    ]) === 'interviewer:1,me:2,assistant:3',
+    'display keeps later AI replies after the question and any later user bubbles',
   )
   check(
     displayRoles([
@@ -794,8 +801,8 @@ if (sessionState) {
       msg(2, 'interviewer', 'system-stt', 'Q2'),
       msg(3, 'assistant', 'llm', 'A1'),
       msg(4, 'assistant', 'llm', 'A2'),
-    ]) === 'interviewer:1,assistant:3,interviewer:2,assistant:4',
-    'display pairs delayed answers with the earliest unanswered question',
+    ]) === 'interviewer:1,interviewer:2,assistant:3,assistant:4',
+    'display keeps unmatched AI replies in stored order instead of inserting them above a later question',
   )
   check(
     displayRoles([
@@ -823,6 +830,14 @@ if (sessionState) {
       { id: 5, role: 'assistant', source: 'llm', text: 'A1_retry', createdAt: 5, replyToId: 1 },
     ]) === 'interviewer:1,assistant:2,assistant:5,interviewer:3,assistant:4',
     'display pins a regenerated reply under its matching earlier interviewer question below the original answer',
+  )
+  check(
+    displayRoles([
+      msg(1, 'interviewer', 'system-stt', 'Q1'),
+      msg(2, 'interviewer', 'system-stt', 'Q2'),
+      { id: 3, role: 'assistant', source: 'llm', text: 'A2', createdAt: 3, replyToId: 2 },
+    ]) === 'interviewer:1,interviewer:2,assistant:3',
+    'display keeps a reply anchored to the latest question below that question',
   )
 }
 

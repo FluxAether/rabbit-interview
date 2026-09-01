@@ -130,6 +130,7 @@ function groupCopilotMessages(messages: CopilotMessage[], showMyBubbles = true):
     if (
       message.role === "assistant"
       && previous
+      && (message.replyToId == null || message.replyToId === previous[0].id)
       && (previous[0].role === "interviewer" || previous[0].source === "follow-up")
     ) {
       previous.push(message)

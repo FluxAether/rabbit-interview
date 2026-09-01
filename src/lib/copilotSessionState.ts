@@ -112,41 +112,23 @@ function isDisplayAnchor(message: CopilotMessage): boolean {
   return message.role === 'interviewer' || isFollowUp(message)
 }
 
-/** Keep stored order intact. For display, pin each AI reply under its question. */
+/** Keep stored order. Only move replies that explicitly name their question. */
 export function orderCopilotMessagesForDisplay(messages: CopilotMessage[]): CopilotMessage[] {
   if (messages.length < 2) return messages
 
-  const replies = new Map<number, CopilotMessage[]>()
-  const orphans: CopilotMessage[] = []
-  const unanswered: CopilotMessage[] = []
+  const anchorOf = new Map<number, number>()
   let lastAnchor: CopilotMessage | null = null
-
   for (const message of messages) {
     if (isDisplayAnchor(message)) {
-      unanswered.push(message)
+      lastAnchor = message
       continue
     }
     if (message.role !== 'assistant') continue
-
-    let anchor: CopilotMessage | null = null
-    if (message.replyToId != null) {
-      anchor = messages.find((item) => item.id === message.replyToId && isDisplayAnchor(item)) ?? null
-    }
-    if (!anchor) anchor = unanswered[0] ?? lastAnchor
-    if (anchor?.role === 'interviewer') {
-      const followUp = [...unanswered].reverse().find(isFollowUp)
-      if (followUp) anchor = followUp
-    }
-    if (!anchor) {
-      orphans.push(message)
-      continue
-    }
-    const queuedAt = unanswered.findIndex((item) => item.id === anchor.id)
-    if (queuedAt >= 0) unanswered.splice(0, queuedAt + 1)
-    lastAnchor = anchor
-    const bucket = replies.get(anchor.id)
-    if (bucket) bucket.push(message)
-    else replies.set(anchor.id, [message])
+    const named = message.replyToId != null
+      ? messages.find((item) => item.id === message.replyToId && isDisplayAnchor(item))
+      : null
+    const anchor = named ?? lastAnchor
+    if (anchor) anchorOf.set(message.id, anchor.id)
   }
 
   const ordered: CopilotMessage[] = []
@@ -157,15 +139,31 @@ export function orderCopilotMessagesForDisplay(messages: CopilotMessage[]): Copi
     ordered.push(message)
   }
 
-  for (const message of messages) {
-    if (message.role === 'assistant') continue
-    push(message)
-    if (!isDisplayAnchor(message)) continue
-    for (const reply of replies.get(message.id) ?? []) push(reply)
+  let blockAnchorId: number | null = null
+  const flushBlockReplies = () => {
+    if (blockAnchorId == null) return
+    for (const message of messages) {
+      if (anchorOf.get(message.id) === blockAnchorId) push(message)
+    }
   }
-  for (const message of orphans) push(message)
+
   for (const message of messages) {
-    if (message.role === 'assistant') push(message)
+    if (isDisplayAnchor(message)) {
+      flushBlockReplies()
+      blockAnchorId = message.id
+      push(message)
+      continue
+    }
+    if (message.role === 'assistant') {
+      const anchorId = anchorOf.get(message.id)
+      if (anchorId != null && anchorId !== blockAnchorId) continue
+      if (anchorId == null && blockAnchorId == null) continue
+    }
+    push(message)
+  }
+  flushBlockReplies()
+  for (const message of messages) {
+    push(message)
   }
   return ordered
 }

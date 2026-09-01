@@ -126,6 +126,10 @@ function createChatMessage(
   return { id, role, source, text, createdAt }
 }
 
+function isFollowUpAnchor(message: { role: string; source: string }): boolean {
+  return message.role === 'me' && message.source === 'follow-up'
+}
+
 
 export type CopilotSessionCommand =
   | { type: 'start'; config?: CopilotStartConfig }
@@ -747,6 +751,17 @@ class CopilotSessionHost {
     return -(sessionId * 1_000_000 + ++this.messageSequence)
   }
 
+  private replyAnchorId(question: string, requestType: SuggestionRequestType): number | undefined {
+    const messages = this.snapshot.messages
+    const match = [...messages].reverse().find((message) => {
+      if (requestType === 'follow-up') return isFollowUpAnchor(message) && message.text.trim() === question
+      return message.role === 'interviewer' && message.text.trim() === question
+    })
+    if (match) return match.id
+    if (requestType === 'follow-up') return [...messages].reverse().find(isFollowUpAnchor)?.id
+    return [...messages].reverse().find((message) => message.role === 'interviewer')?.id
+  }
+
   private utteranceText(utterance: CopilotUtteranceState, includeInterim = false): string {
     return transcriptFromEndpointState(utterance.endpoint, includeInterim)
   }
@@ -1107,10 +1122,12 @@ class CopilotSessionHost {
       emittedText: false,
     }
     const category = String(useAppStore.getState().settings?.aiModel || 'AI')
+    const replyToId = this.replyAnchorId(question, requestType)
     this.transition({
       type: 'stream-answer',
       sessionId,
       suggestion: { id: idBase, text: '', category },
+      replyToId,
     })
 
     try {
@@ -1137,6 +1154,7 @@ class CopilotSessionHost {
                 sessionId,
                 suggestion: { id: idBase, text: fullText, category },
                 continuing: continuationAttempt > 0,
+                replyToId,
               })
             },
           },
@@ -1172,6 +1190,7 @@ class CopilotSessionHost {
             answerId: idBase,
             answer: fullText,
             suggestions: splitSuggestions(fullText, category, idBase),
+            replyToId,
           })
           break
         }
@@ -1183,6 +1202,7 @@ class CopilotSessionHost {
             sessionId,
             suggestion: { id: idBase, text: fullText, category },
             continuing: true,
+            replyToId,
           })
           continue
         }
@@ -1201,12 +1221,13 @@ class CopilotSessionHost {
           answerId: idBase,
           text: fullText,
           reason,
+          replyToId,
         })
         break
       }
     } catch (error) {
       if (controller.signal.aborted || !this.isCurrent(sessionId)) return
-      this.transition({ type: 'cancel-answer', sessionId, answerId: idBase })
+      this.transition({ type: 'cancel-answer', sessionId, answerId: idBase, replyToId })
       this.transition({
         type: 'recoverable-error',
         sessionId,
