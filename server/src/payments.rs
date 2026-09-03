@@ -51,7 +51,7 @@ struct Product {
 const PRODUCTS: [Product; 2] = [
     Product {
         code: "PRO_MONTH",
-        subject: "Rabbit Interview Pro - 30 days",
+        subject: "OnCue Pro - 30 days",
         price_minor: 8_900,
         duration_days: 30,
         stt_ms: 54_000_000,
@@ -59,7 +59,7 @@ const PRODUCTS: [Product; 2] = [
     },
     Product {
         code: "PRO_QUARTER",
-        subject: "Rabbit Interview Pro - 90 days",
+        subject: "OnCue Pro - 90 days",
         price_minor: 19_900,
         duration_days: 90,
         stt_ms: 180_000_000,
@@ -1088,7 +1088,7 @@ mod tests {
             oidc_signing_keyset_file: PathBuf::from("unused-signing-keyset.json"),
             oidc_data_keyring_file: PathBuf::from("unused-data-keyring.json"),
             resend_api_key: "re_test_gateway".to_owned(),
-            resend_from: "Rabbit Interview <no-reply@example.test>".to_owned(),
+            resend_from: "OnCue <no-reply@example.test>".to_owned(),
             resend_api_url: "https://api.resend.com".to_owned(),
             trusted_proxy_cidrs: Vec::new(),
             hosted_stt_enabled: false,
@@ -1169,7 +1169,7 @@ mod tests {
         let checkout = provider
             .checkout_url(&CheckoutOrder {
                 merchant_order_no: "RI0123456789abcdef0123456789abcdef",
-                subject: "Rabbit Interview Pro",
+                subject: "OnCue Pro",
                 amount_minor: 8_900,
             })
             .unwrap();

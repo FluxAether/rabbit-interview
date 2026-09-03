@@ -138,7 +138,7 @@ export function exportHistoryRecordsPdf(records: InterviewRecord[], options: His
     context.fillStyle = '#64748b'
     context.font = `400 18px ${FONT_STACK}`
     context.textBaseline = 'top'
-    context.fillText(`Rabbit Interview · ${options.mode === 'mock' ? 'Mock Interview' : 'Stealth Copilot'} · data page ${options.page}`, MARGIN_X, 28)
+    context.fillText(`OnCue · ${options.mode === 'mock' ? 'Mock Interview' : 'Stealth Copilot'} · data page ${options.page}`, MARGIN_X, 28)
     context.textAlign = 'right'
     context.fillText(`PDF ${exportPageNumber}`, CANVAS_WIDTH - MARGIN_X, 28)
     context.textAlign = 'left'

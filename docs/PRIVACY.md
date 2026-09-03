@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-30
 
-Rabbit Interview is a local-first desktop app. BYOK and Apple speech recognition work without a Rabbit account. The optional hosted mode uses a Rabbit account and gateway for authentication and metered STT and LLM access.
+OnCue is a local-first desktop app. BYOK and Apple speech recognition work without a Rabbit account. The optional hosted mode uses a Rabbit account and gateway for authentication and metered STT and LLM access.
 
 ## What stays on this device
 

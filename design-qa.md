@@ -7,7 +7,7 @@
 - Implementation screenshot, idle waveform (64px): `/tmp/rabbit-waveform-idle-64px.png`
 - Full-view comparison: `/tmp/rabbit-interview-full-comparison.png`
 - Focused waveform comparison: `/tmp/rabbit-interview-waveform-comparison.png`
-- Viewport: Rabbit Interview desktop window at `1162 x 768` CSS px.
+- Viewport: OnCue desktop window at `1162 x 768` CSS px.
 - Source pixels: `1543 x 1019`; implementation pixels: `2324 x 1536` (Retina 2x).
 - Density normalization: the source full view was normalized to `1162 x 768`; both waveform crops were normalized to `874 x 80` before comparison.
 - State: light theme, Hidden Assistant route. The active implementation capture rendered the production `CopilotWaveform` with a temporary `0.72` QA amplitude and no native audio capture; the override was removed before final verification. The idle capture used final runtime state.

@@ -424,12 +424,12 @@ impl AuthService {
         let greeting = display_name.unwrap_or(email);
         self.send_mail(
             email,
-            "Rabbit Interview account invitation",
+            "OnCue account invitation",
             format!(
-                "Hello {greeting},\n\nSet your Rabbit Interview password within 24 hours:\n{link}\n\nIf you did not expect this invitation, ignore this email."
+                "Hello {greeting},\n\nSet your OnCue password within 24 hours:\n{link}\n\nIf you did not expect this invitation, ignore this email."
             ),
             format!(
-                "<p>Hello {},</p><p>Set your Rabbit Interview password within 24 hours:</p><p><a href=\"{}\">Set password</a></p><p>If you did not expect this invitation, ignore this email.</p>",
+                "<p>Hello {},</p><p>Set your OnCue password within 24 hours:</p><p><a href=\"{}\">Set password</a></p><p>If you did not expect this invitation, ignore this email.</p>",
                 html_escape::encode_text(greeting),
                 html_escape::encode_double_quoted_attribute(&link),
             ),
@@ -447,12 +447,12 @@ impl AuthService {
         let greeting = display_name.unwrap_or(email);
         self.send_mail(
             email,
-            "Verify your Rabbit Interview email",
+            "Verify your OnCue email",
             format!(
-                "Hello {greeting},\n\nVerify your email and set your Rabbit Interview password within 24 hours:\n{link}\n\nIf you did not create this account, ignore this email."
+                "Hello {greeting},\n\nVerify your email and set your OnCue password within 24 hours:\n{link}\n\nIf you did not create this account, ignore this email."
             ),
             format!(
-                "<p>Hello {},</p><p>Verify your email and set your Rabbit Interview password within 24 hours:</p><p><a href=\"{}\">Verify email</a></p><p>If you did not create this account, ignore this email.</p>",
+                "<p>Hello {},</p><p>Verify your email and set your OnCue password within 24 hours:</p><p><a href=\"{}\">Verify email</a></p><p>If you did not create this account, ignore this email.</p>",
                 html_escape::encode_text(greeting),
                 html_escape::encode_double_quoted_attribute(&link),
             ),
@@ -474,7 +474,7 @@ impl AuthService {
         let greeting = display_name.unwrap_or(email);
         self.send_mail(
             email,
-            "Reset your Rabbit Interview password",
+            "Reset your OnCue password",
             format!(
                 "Hello {greeting},\n\nReset your password within 30 minutes:\n{link}\n\nIf you did not request this, ignore this email."
             ),

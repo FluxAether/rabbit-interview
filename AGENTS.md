@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-RabbitInterview is a Tauri 2 desktop application. The React 19 and TypeScript frontend lives in `src/`: page-level views are in `src/pages/`, shared integrations and utilities in `src/lib/`, Zustand state in `src/stores/`, and translations in `src/i18n/`. Native commands, audio capture, and SQLite setup live in `src-tauri/src/`; Tauri capabilities, icons, and packaging configuration stay under `src-tauri/`. Use `scripts/` for focused verification utilities and `docs/` for design references. Treat `dist/`, `node_modules/`, and `src-tauri/target/` as generated output.
+OnCue is a Tauri 2 desktop application. The React 19 and TypeScript frontend lives in `src/`: page-level views are in `src/pages/`, shared integrations and utilities in `src/lib/`, Zustand state in `src/stores/`, and translations in `src/i18n/`. Native commands, audio capture, and SQLite setup live in `src-tauri/src/`; Tauri capabilities, icons, and packaging configuration stay under `src-tauri/`. Use `scripts/` for focused verification utilities and `docs/` for design references. Treat `dist/`, `node_modules/`, and `src-tauri/target/` as generated output.
 
 ## Build, Test, and Development Commands
 

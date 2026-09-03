@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-26
 
-Rabbit Interview is provided as a desktop interview copilot. It is not a guarantee of interview outcomes and does not replace your judgment.
+OnCue is provided as a desktop interview copilot. It is not a guarantee of interview outcomes and does not replace your judgment.
 
 ## License
 

@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>RabbitInterview captures system audio from meeting applications to provide real-time interview assistance.</string>
+    <string>OnCue captures system audio from meeting applications to provide real-time interview assistance.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>RabbitInterview transcribes interview audio on-device when Apple Speech is selected.</string>
+    <string>OnCue transcribes interview audio on-device when Apple Speech is selected.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>RabbitInterview uses your microphone to capture your voice during mock and live interviews.</string>
+    <string>OnCue uses your microphone to capture your voice during mock and live interviews.</string>
 </dict>
 </plist>

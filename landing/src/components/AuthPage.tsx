@@ -1029,7 +1029,7 @@ function AuthShell({ children, lang, setLang }: { children: ReactNode; lang: Aut
       <header className="relative mx-auto flex max-w-5xl items-center justify-between gap-4 px-5 py-5">
         <a href="/" className="flex items-center gap-2.5 text-sm font-semibold">
           <img src="/logo.svg" alt="" className="h-8 w-8 rounded-lg" />
-          <span className="hidden sm:inline">Rabbit Interview</span>
+          <span className="hidden sm:inline">OnCue</span>
         </a>
         <div className="flex items-center rounded-full border border-white/10 bg-white/[0.03] p-1 text-[11px] font-medium" aria-label="Language">
           {(['zh-CN', 'zh-TW', 'en'] as const).map((value) => (
@@ -1053,7 +1053,7 @@ function AuthShell({ children, lang, setLang }: { children: ReactNode; lang: Aut
           {children}
         </div>
       </main>
-      <footer className="relative px-5 pb-6 text-center text-[11px] text-mute">© 2026 Rabbit Interview</footer>
+      <footer className="relative px-5 pb-6 text-center text-[11px] text-mute">© 2026 OnCue</footer>
     </div>
   )
 }

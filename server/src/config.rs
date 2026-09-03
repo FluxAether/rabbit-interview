@@ -356,7 +356,7 @@ mod tests {
             "/callback"
         )
         .is_err());
-        assert!(validate_from_mailbox("Rabbit Interview <no-reply@example.com>").is_ok());
+        assert!(validate_from_mailbox("OnCue <no-reply@example.com>").is_ok());
         assert!(validate_from_mailbox("no-reply@example.com").is_ok());
         assert!(validate_from_mailbox("not-an-email").is_err());
         assert!(validate_from_mailbox("<no-reply@example.com>").is_err());

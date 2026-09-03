@@ -1,4 +1,4 @@
-# Rabbit Interview 云托管 STT、LLM 网关与订阅计费实施方案
+# OnCue 云托管 STT、LLM 网关与订阅计费实施方案
 
 > 状态：Draft / Implementation Plan  
 > 目标读者：产品、桌面端、服务端、测试、运维、安全与合规负责人  
@@ -10,7 +10,7 @@
 
 ## 1. 执行摘要
 
-Rabbit Interview 当前是 Tauri 桌面应用：STT 支持 Deepgram、Gemini Live 和 Apple 端侧识别，LLM 由桌面端使用用户自己的密钥直接调用，历史、设置和密钥保存在本地 SQLite；当前付费墙关闭。云托管方案不是简单增加一个模型选项，而是新增账号身份、可信计量、配额账本、厂商代理、支付回调、对账和运维体系。
+OnCue 当前是 Tauri 桌面应用：STT 支持 Deepgram、Gemini Live 和 Apple 端侧识别，LLM 由桌面端使用用户自己的密钥直接调用，历史、设置和密钥保存在本地 SQLite；当前付费墙关闭。云托管方案不是简单增加一个模型选项，而是新增账号身份、可信计量、配额账本、厂商代理、支付回调、对账和运维体系。
 
 本方案采用以下最小可行路径：
 

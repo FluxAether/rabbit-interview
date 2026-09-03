@@ -1,4 +1,4 @@
-# Rabbit Interview
+# OnCue
 
 Desktop interview copilot for **macOS** and **Windows**, built with **Tauri 2** and **React 19**.
 

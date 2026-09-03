@@ -336,7 +336,7 @@ fn test_config(
         oidc_signing_keyset_file,
         oidc_data_keyring_file,
         resend_api_key: "re_test_gateway".to_owned(),
-        resend_from: "Rabbit Interview <no-reply@example.test>".to_owned(),
+        resend_from: "OnCue <no-reply@example.test>".to_owned(),
         resend_api_url: "https://api.resend.com".to_owned(),
         trusted_proxy_cidrs: Vec::new(),
         hosted_stt_enabled: false,

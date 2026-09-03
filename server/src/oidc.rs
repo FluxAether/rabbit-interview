@@ -2207,7 +2207,7 @@ fn build_totp(secret: Vec<u8>, email: &str) -> Result<TOTP, AppError> {
         1,
         30,
         secret,
-        Some("Rabbit Interview".to_owned()),
+        Some("OnCue".to_owned()),
         email.to_owned(),
     )
     .map_err(|_| AppError::Internal)

@@ -2,7 +2,7 @@
 
 Status: pre-production, single replica, public email-verified registration with manual grants and an opt-in Alipay adapter.
 
-The Gateway is Rabbit Interview's OIDC Provider and hosted AI resource server. It runs as one Rust process backed by MySQL 8.4. The desktop is the only registered public client and uses Authorization Code with PKCE (`S256`).
+The Gateway is OnCue's OIDC Provider and hosted AI resource server. It runs as one Rust process backed by MySQL 8.4. The desktop is the only registered public client and uses Authorization Code with PKCE (`S256`).
 
 ## Build and start
 
@@ -29,7 +29,7 @@ Do not run multiple replicas in this version. Login throttles, one-time WebSocke
 - `OIDC_REDIRECT_URI=rabbitinterview://auth/callback` and `OIDC_POST_LOGOUT_REDIRECT_URI=rabbitinterview://auth/logout`.
 - `OIDC_SIGNING_KEYSET_FILE` and `OIDC_DATA_KEYRING_FILE`: read-only secret files described below.
 - `RESEND_API_KEY`: Resend API key (`re_...`).
-- `RESEND_FROM`: verified sender, either `no-reply@example.com` or `Rabbit Interview <no-reply@example.com>`.
+- `RESEND_FROM`: verified sender, either `no-reply@example.com` or `OnCue <no-reply@example.com>`.
 - `RESEND_API_URL`: optional Resend-compatible API origin; defaults to `https://api.resend.com`.
 - `GATEWAY_ADMIN_TOKEN`: secret used only by account and quota administration APIs.
 - `VOLCENGINE_API_KEY` and `GEMINI_API_KEY`: deployment secrets, never desktop build variables.

@@ -64,7 +64,7 @@ function LandingPage() {
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3">
           <a href="#top" className="flex items-center gap-2.5">
             <img src="/logo.svg" alt="" className="h-8 w-8 rounded-lg" />
-            <span className="hidden text-sm font-semibold tracking-tight sm:inline">Rabbit Interview</span>
+            <span className="hidden text-sm font-semibold tracking-tight sm:inline">OnCue</span>
           </a>
           <nav className="hidden items-center gap-7 text-sm text-mute md:flex" aria-label="primary">
             <a href="#features" className="hover:text-ink">{t.nav.features}</a>

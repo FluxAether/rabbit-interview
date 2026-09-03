@@ -1,4 +1,4 @@
-# Rabbit Interview 登录、注册、授权与订阅优化实施方案
+# OnCue 登录、注册、授权与订阅优化实施方案
 
 - 状态：待评审
 - 日期：2026-08-31
@@ -83,7 +83,7 @@
 官网查看产品与价格
 → 创建账号
 → 邮件验证并设置密码
-→ 一键回到 Rabbit Interview
+→ 一键回到 OnCue
 → 桌面端重新打开或继续授权
 → 浏览器登录、MFA、同意权限
 → 自动回到桌面并显示账号状态
@@ -143,7 +143,7 @@
 - 注册、登录交互、订阅上下文加载失败时显示：
   - 发生了什么
   - “重试”
-  - “返回 Rabbit Interview”或“返回首页”
+  - “返回 OnCue”或“返回首页”
 - 重试只重新获取当前上下文，不刷新整页，不清空已经输入的表单数据。
 - busy 状态把按钮文字改为实际动作，例如“正在创建账号…”而不是仅降低透明度。
 
@@ -212,7 +212,7 @@
 推荐的安全最小方案：
 
 1. 注册页明确提示“设置密码后返回桌面应用继续登录”。
-2. 密码保存成功页增加“打开 Rabbit Interview”主按钮。
+2. 密码保存成功页增加“打开 OnCue”主按钮。
 3. 增加一个无敏感参数的 allowlist 深链：
    - rabbitinterview://auth/resume
 4. Tauri 只接受 callback、logout 和 resume 三种路径。
@@ -427,7 +427,7 @@
 
 未登录时购买按钮改为：
 
-- “从 Rabbit Interview 登录后购买”
+- “从 OnCue 登录后购买”
 - 若未安装，提供下载入口
 - 注册仍是次级动作，不把注册伪装成直接购买
 
@@ -483,7 +483,7 @@
 最小修复：
 
 1. 验证 out_trade_no 格式。
-2. 立即保存到 sessionStorage，键名带 Rabbit Interview 命名空间。
+2. 立即保存到 sessionStorage，键名带 OnCue 命名空间。
 3. 首次状态请求完成后再清理 URL。
 4. 页面重载时优先从 sessionStorage 恢复。
 5. 轮询节奏改为 0、2、5、10、20、30 秒。
@@ -782,12 +782,12 @@ https://www.figma.com/design/aTTHOeFHflxIjy1o08L0yr
 
 文件名：
 
-Rabbit Interview — 登录、注册、授权与订阅审计
+OnCue — 登录、注册、授权与订阅审计
 
 布局：
 
 - Design file，不使用 FigJam。
-- 一个主 Section，标题“Rabbit Interview — 登录 / 注册 / 授权 / 订阅审计”。
+- 一个主 Section，标题“OnCue — 登录 / 注册 / 授权 / 订阅审计”。
 - 五张截图按真实流程从左到右放在同一行。
 - 每张卡宽 720px，卡与卡之间 200px。
 - 截图保持原始比例，不裁切、不拉伸。

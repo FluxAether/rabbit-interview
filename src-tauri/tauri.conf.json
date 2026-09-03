@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Rabbit Interview",
+  "productName": "OnCue",
   "version": "0.15.0",
   "identifier": "com.rabbitinterview.desktop",
   "build": {
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Rabbit Interview",
+        "title": "OnCue",
         "width": 1180,
         "height": 780,
         "minWidth": 960,

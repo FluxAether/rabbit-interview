@@ -132,7 +132,7 @@ jobs:
           name: Verify bundled AudioTee
           command: |
             set -euo pipefail
-            APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/Rabbit Interview.app"
+            APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/OnCue.app"
             test -x "$APP/Contents/MacOS/audiotee"
             test "$(lipo -archs "$APP/Contents/MacOS/audiotee")" = "x86_64 arm64"
             codesign --verify --verbose=2 "$APP"

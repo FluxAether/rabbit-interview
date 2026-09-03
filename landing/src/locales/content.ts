@@ -11,7 +11,7 @@ export const DOWNLOAD = {
 export const copy = {
   zh: {
     htmlLang: 'zh-CN',
-    title: 'Rabbit Interview',
+    title: 'OnCue',
     description: '本机优先的桌面面试助手。系统音频听面试官，置顶浮窗只给你看。',
     skip: '跳到主要内容',
     nav: {
@@ -83,11 +83,11 @@ export const copy = {
       limited: '捕获保护有限',
     },
     footerNote: '需要自备 API Key。安装包可能未经公证。仅在规则允许时使用。',
-    copyright: '© 2026 Rabbit Interview. All rights reserved.',
+    copyright: '© 2026 OnCue. All rights reserved.',
   },
   en: {
     htmlLang: 'en',
-    title: 'Rabbit Interview',
+    title: 'OnCue',
     description: 'A local-first desktop interview copilot. System audio hears the interviewer; the floating window is only for you.',
     skip: 'Skip to content',
     nav: {
@@ -159,7 +159,7 @@ export const copy = {
       limited: 'Capture protection is limited',
     },
     footerNote: 'Bring your own API keys. Builds may be unsigned. Use only where assistance tools are allowed.',
-    copyright: '© 2026 Rabbit Interview. All rights reserved.',
+    copyright: '© 2026 OnCue. All rights reserved.',
   },
 } as const
 

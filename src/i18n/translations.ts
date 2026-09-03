@@ -6,7 +6,7 @@ export type TranslationKey = string
 export const translations: Record<SupportedLanguage, Record<string, string>> = {
   'en-US': {
     // App / Shell
-    'app.name': 'Rabbit Interview',
+    'app.name': 'OnCue',
     'app.tagline': 'Desktop Interview Copilot',
 
     // Navigation
@@ -68,7 +68,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'dashboard.station.mock.desc': 'Full voice dialogue simulation with multi-dimensional reports',
     'dashboard.station.resume.title': 'Resume Optimizer',
     'dashboard.station.resume.desc': 'Evidence-first ATS keyword matching and fact-reviewed export',
-    'dashboard.onboarding.title': 'Getting Started with Rabbit Interview',
+    'dashboard.onboarding.title': 'Getting Started with OnCue',
     'dashboard.onboarding.subtitle': 'Complete these 3 steps to boost your interview readiness:',
     'dashboard.onboarding.step1': '1. Configure AI Model API Key in Settings',
     'dashboard.onboarding.step2': '2. Import Resume and match target Job Description',
@@ -569,7 +569,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
 
   'zh-CN': {
     // App / Shell
-    'app.name': 'Rabbit Interview',
+    'app.name': 'OnCue',
     'app.tagline': 'AI 面试助手',
 
     // Navigation
@@ -1132,7 +1132,7 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
 
   'zh-TW': {
     // For now, alias most to zh-CN for completeness. Can be refined later.
-    'app.name': 'Rabbit Interview',
+    'app.name': 'OnCue',
     'app.tagline': 'AI 面試助手',
 
     'nav.dashboard': '儀表板',
