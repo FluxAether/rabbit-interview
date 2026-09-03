@@ -4,6 +4,8 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { useSyncExternalStore } from 'react'
 import { DEFAULT_LANGUAGE } from '../i18n/types'
 import { useAppStore } from '../stores/useAppStore'
+import { deleteSecret, loadSecret, saveSecret } from './db'
+import { decryptSecret, encryptSecret } from './secretCrypto'
 
 const REFRESH_TOKEN_KEY = 'HOSTED_REFRESH_TOKEN'
 const OIDC_CLIENT_ID = 'rabbit-desktop'
@@ -85,6 +87,24 @@ let pendingLogoutState = ''
 let discoveryPromise: Promise<OidcDiscovery> | null = null
 const subscribers = new Set<() => void>()
 const activeConnections = new Set<() => void>()
+
+async function loadStoredRefreshToken(): Promise<string | null> {
+  const fromKeychain = await invoke<string | null>('load_secure_secret', { key: REFRESH_TOKEN_KEY }).catch(() => null)
+  if (fromKeychain?.trim()) return fromKeychain.trim()
+  try {
+    const fromDb = decryptSecret(await loadSecret(REFRESH_TOKEN_KEY))
+    if (fromDb?.trim()) {
+      await invoke('save_secure_secret', { key: REFRESH_TOKEN_KEY, value: fromDb.trim() }).catch(() => {})
+      return fromDb.trim()
+    }
+  } catch {}
+  return null
+}
+
+async function deleteStoredRefreshToken(): Promise<void> {
+  await invoke('delete_secure_secret', { key: REFRESH_TOKEN_KEY }).catch(() => {})
+  await deleteSecret(REFRESH_TOKEN_KEY).catch(() => {})
+}
 
 function gatewayBase(): string {
   const configured = String(import.meta.env.VITE_HOSTED_GATEWAY_URL || (import.meta.env.DEV ? 'http://127.0.0.1:8787' : '')).trim()
@@ -212,7 +232,7 @@ export async function signInHosted(): Promise<void> {
 export async function signOutHosted(): Promise<void> {
   activeConnections.forEach((close) => close())
   activeConnections.clear()
-  const refreshToken = await invoke<string | null>('load_secure_secret', { key: REFRESH_TOKEN_KEY }).catch(() => null)
+  const refreshToken = await loadStoredRefreshToken()
   const logoutIdToken = idToken
   const discovery = await getDiscovery().catch(() => null)
   if (refreshToken && discovery) {
@@ -225,7 +245,7 @@ export async function signOutHosted(): Promise<void> {
   accessToken = ''
   idToken = ''
   accessTokenExpiresAt = 0
-  await invoke('delete_secure_secret', { key: REFRESH_TOKEN_KEY }).catch(() => {})
+  await deleteStoredRefreshToken()
   publish({ status: 'signed-out', entitlements: null, error: null })
   if (discovery && logoutIdToken) {
     pendingLogoutState = randomBase64Url(32)
@@ -334,7 +354,7 @@ async function refreshAccessToken(force = false): Promise<boolean> {
   if (!force && accessToken && accessTokenExpiresAt > Date.now() + 30_000) return true
   if (refreshPromise) return refreshPromise
   refreshPromise = (async () => {
-    const refreshToken = await invoke<string | null>('load_secure_secret', { key: REFRESH_TOKEN_KEY }).catch(() => null)
+    const refreshToken = await loadStoredRefreshToken()
     if (!refreshToken) return false
     const discovery = await getDiscovery()
     const response = await fetch(discovery.token_endpoint, {
@@ -361,6 +381,7 @@ async function applyToken(token: TokenResponse, discovery: OidcDiscovery, expect
   await validateIdToken(token.id_token, token.access_token, discovery, expectedNonce)
   if (token.refresh_token) {
     await invoke('save_secure_secret', { key: REFRESH_TOKEN_KEY, value: token.refresh_token })
+    await saveSecret(REFRESH_TOKEN_KEY, encryptSecret(token.refresh_token)).catch(() => {})
   }
   accessToken = token.access_token
   idToken = token.id_token
@@ -405,7 +426,7 @@ async function clearLocalTokens() {
   accessToken = ''
   idToken = ''
   accessTokenExpiresAt = 0
-  await invoke('delete_secure_secret', { key: REFRESH_TOKEN_KEY }).catch(() => {})
+  await deleteStoredRefreshToken()
 }
 
 function formBody(values: Record<string, string>): URLSearchParams {
