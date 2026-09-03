@@ -1320,6 +1320,7 @@ export default function Settings({
                           onChange={(e) => updateProviderModel('gemini', e.target.value)}
                           className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
                         >
+                          <option value="gemini-3.8-flash">Gemini 3.8 Flash</option>
                           <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
                           <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
                           <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>

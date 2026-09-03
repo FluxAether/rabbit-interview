@@ -71,7 +71,7 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
   if (aiModels.anthropic?.startsWith('claude-3')) aiModels.anthropic = 'claude-haiku-4-5';
   if (aiModels.openai?.startsWith('gpt-4')) aiModels.openai = 'gpt-5.6-luna';
   if (aiModels.groq === 'gemma2-9b-it') aiModels.groq = 'llama-3.1-8b-instant';
-  if (!aiModels.gemini || !['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash'].includes(aiModels.gemini)) {
+  if (!aiModels.gemini || !['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.8-flash'].includes(aiModels.gemini)) {
     aiModels.gemini = 'gemini-3.6-flash';
   }
 
@@ -79,7 +79,7 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
   if (aiModel.startsWith('claude-3')) aiModel = 'claude-haiku-4-5';
   if (aiModel.startsWith('gpt-4')) aiModel = 'gpt-5.6-luna';
   if (aiModel === 'gemma2-9b-it') aiModel = 'llama-3.1-8b-instant';
-  if (aiModel.startsWith('gemini') && !['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash'].includes(aiModel)) {
+  if (aiModel.startsWith('gemini') && !['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.8-flash'].includes(aiModel)) {
     aiModel = 'gemini-3.6-flash';
   }
   const aiAccessMode: AiAccessMode = saved?.aiAccessMode === 'hosted' ? 'hosted' : 'byok';
