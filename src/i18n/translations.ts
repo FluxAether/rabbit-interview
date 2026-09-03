@@ -545,6 +545,13 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.suggestedHint': 'Suggested answer',
     'copilot.copied': 'Copied',
     'copilot.newMessages': 'New messages',
+    'copilot.viewMode.normal': 'Standard View',
+    'copilot.viewMode.hud': 'HUD Teleprompter',
+    'copilot.intent.listening': 'Capturing audio...',
+    'copilot.intent.analyzing': 'Analyzing question & context...',
+    'copilot.intent.generating': 'Synthesizing response...',
+    'copilot.source.sys': 'SYS',
+    'copilot.source.mic': 'MIC',
 
     // Feedback labels (used in mock)
     'feedback.clarity': 'Clarity',
@@ -1101,6 +1108,13 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.suggestedHint': '推荐提示',
     'copilot.copied': '已复制',
     'copilot.newMessages': '有新消息',
+    'copilot.viewMode.normal': '标准视图',
+    'copilot.viewMode.hud': 'HUD 提词器',
+    'copilot.intent.listening': '正在捕捉声音...',
+    'copilot.intent.analyzing': '正在拆解问题与上下文...',
+    'copilot.intent.generating': '正在成文解答...',
+    'copilot.source.sys': '系统',
+    'copilot.source.mic': '麦克',
 
     // Feedback labels
     'feedback.clarity': '清晰度',
@@ -1654,6 +1668,13 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.suggestedHint': '推薦提示',
     'copilot.copied': '已複製',
     'copilot.newMessages': '有新訊息',
+    'copilot.viewMode.normal': '標準檢視',
+    'copilot.viewMode.hud': 'HUD 提詞器',
+    'copilot.intent.listening': '正在捕捉聲音...',
+    'copilot.intent.analyzing': '正在拆解問題與上下文...',
+    'copilot.intent.generating': '正在成文解答...',
+    'copilot.source.sys': '系統',
+    'copilot.source.mic': '麥克',
 
     'feedback.clarity': '清晰度',
     'feedback.relevance': '相關性',

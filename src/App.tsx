@@ -406,10 +406,15 @@ export default function App() {
     return (
       <div
         ref={floatingRef}
-        className="h-[100dvh] w-screen overflow-hidden bg-transparent text-[var(--text-main)] outline-none"
+        className="h-[100dvh] w-screen overflow-hidden bg-transparent text-[var(--text-main)] outline-none select-none"
         tabIndex={-1}
         onKeyDown={(event) => {
-          if (event.key === 'Escape') void hide()
+          if (event.key === 'Escape') {
+            void hide()
+          } else if (event.altKey && (event.code === 'Space' || event.key === ' ')) {
+            event.preventDefault()
+            void hide()
+          }
         }}
       >
         <CopilotPanel floating windowStatus={windowStatus} onHide={() => void hide()} />

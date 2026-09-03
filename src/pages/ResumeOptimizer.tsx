@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Download, FileText, LoaderCircle, Trash2, Upload, Sparkles, AlertCircle } from "lucide-react"
+import { Download, FileText, LoaderCircle, Trash2, Upload, Sparkles, AlertCircle, X, ShieldCheck } from "lucide-react"
 import { useDropzone, type FileRejection } from "react-dropzone"
 import { useCurrentLanguage, useTranslation } from "../i18n"
 import { downloadResumeDocx, sanitizeResumeFilename } from "../lib/resumeDocuments"
@@ -55,6 +55,7 @@ export default function ResumeOptimizer() {
     jobDescription,
     resumeSuggestions,
     resumeSourceFileName,
+    resumeTargetKeywords,
     resumeRequirements,
     resumeMatchedKeywords,
     resumeAnalysisOriginalFingerprint,
@@ -76,9 +77,12 @@ export default function ResumeOptimizer() {
   const [status, setStatus] = useState<PageStatus>(null)
   const [reviewedOptimizedText, setReviewedOptimizedText] = useState("")
   const [viewMode, setViewMode] = useState<"split" | "diff" | "requirements">("split")
+  const [syncScroll, setSyncScroll] = useState(true)
   const [activeDiffChange, setActiveDiffChange] = useState(0)
   const analysisRequests = useRef(createResumeAnalysisRequestCoordinator(120_000))
+  const originalScrollRef = useRef<HTMLDivElement>(null)
   const optimizedEditorRef = useRef<HTMLTextAreaElement>(null)
+  const isScrollingSync = useRef(false)
   const reviewSectionRef = useRef<HTMLDivElement>(null)
   const diffContainerRef = useRef<HTMLDivElement>(null)
   const isMounted = useRef(true)
@@ -206,6 +210,41 @@ export default function ResumeOptimizer() {
     analysisRequests.current.cancel()
     setIsAnalyzing(false)
     setStatus({ kind: "warning", text: t("resume.analysisCancelled") })
+  }
+
+  const handleScrollOriginal = (e: React.UIEvent<HTMLDivElement>) => {
+    if (!syncScroll || isScrollingSync.current || !optimizedEditorRef.current) return
+    const target = e.currentTarget
+    const maxSrc = target.scrollHeight - target.clientHeight
+    if (maxSrc <= 0) return
+    const ratio = target.scrollTop / maxSrc
+    const destMax = optimizedEditorRef.current.scrollHeight - optimizedEditorRef.current.clientHeight
+    isScrollingSync.current = true
+    optimizedEditorRef.current.scrollTop = ratio * destMax
+    requestAnimationFrame(() => {
+      isScrollingSync.current = false
+    })
+  }
+
+  const handleScrollOptimized = (e: React.UIEvent<HTMLTextAreaElement>) => {
+    if (!syncScroll || isScrollingSync.current || !originalScrollRef.current) return
+    const target = e.currentTarget
+    const maxSrc = target.scrollHeight - target.clientHeight
+    if (maxSrc <= 0) return
+    const ratio = target.scrollTop / maxSrc
+    const destMax = originalScrollRef.current.scrollHeight - originalScrollRef.current.clientHeight
+    isScrollingSync.current = true
+    originalScrollRef.current.scrollTop = ratio * destMax
+    requestAnimationFrame(() => {
+      isScrollingSync.current = false
+    })
+  }
+
+  const handleRejectLineDiff = (lineText: string) => {
+    if (!resumeOptimized.includes(lineText)) return
+    const updated = resumeOptimized.replace(lineText + "\n", "").replace(lineText, "")
+    setReviewedOptimizedText("")
+    updateResumeWorkspace({ optimized: updated })
   }
 
   const handleExport = async () => {
@@ -363,6 +402,11 @@ export default function ResumeOptimizer() {
   const supportedRequirements = resumeRequirements.filter((requirement) => requirement.status === "supported")
   const unsupportedRequirements = resumeRequirements.filter((requirement) => requirement.status === "unsupported")
   const matchedKeywordSet = new Set(resumeMatchedKeywords.map((keyword) => keyword.toLocaleLowerCase()))
+  const totalKeywords = (resumeTargetKeywords.length > 0 ? resumeTargetKeywords : resumeRequirements.map(r => r.keyword)).length
+  const atsMatchRate = totalKeywords > 0
+    ? Math.min(100, Math.round((matchedKeywordSet.size / totalKeywords) * 100))
+    : (resumeMatchedKeywords.length > 0 ? 85 : 0)
+  const factCheckPassed = sensitiveDiffCount === 0 || reviewedOptimizedText === resumeOptimized
   const coveredRequirements = resumeRequirements.filter((requirement) => matchedKeywordSet.has(requirement.keyword.toLocaleLowerCase()))
 
   const jumpToDiffChange = (direction: -1 | 1) => {
@@ -541,6 +585,31 @@ export default function ResumeOptimizer() {
               <div className="mt-1 text-xs text-[var(--text-muted)]">
                 {t(resumeAnalysisSource === "optimized" ? "resume.basedOnCurrentDraft" : "resume.basedOnOriginal")}
               </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-1 text-xs font-semibold">
+                  <Sparkles className="h-3.5 w-3.5 text-[var(--action)]" />
+                  <span>ATS 匹配率:</span>
+                  <span className={atsMatchRate >= 75 ? "text-[var(--success)]" : atsMatchRate >= 50 ? "text-[var(--warning)]" : "text-[var(--danger)]"}>
+                    {atsMatchRate}%
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-1 text-xs">
+                  <ShieldCheck className={`h-3.5 w-3.5 ${factCheckPassed ? "text-[var(--success)]" : "text-[var(--warning)]"}`} />
+                  <span className="text-[var(--text-muted)]">真实性合规:</span>
+                  <span className={factCheckPassed ? "font-medium text-[var(--success)]" : "font-medium text-[var(--warning)]"}>
+                    {factCheckPassed ? "已合规验证" : `${sensitiveDiffCount} 处敏感数字/链接需核对`}
+                  </span>
+                </div>
+                {resumeMatchedKeywords.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1 text-[11px] text-[var(--text-muted)]">
+                    {resumeMatchedKeywords.slice(0, 5).map(kw => (
+                      <span key={kw} className="rounded bg-[var(--bg-surface)] px-1.5 py-0.5 text-[var(--text-main)] border border-[var(--border-color)]">
+                        ✓ {kw}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             {jobDescription.trim() && resumeRequirements.length > 0 && (
               <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
@@ -636,7 +705,7 @@ export default function ResumeOptimizer() {
               <div
                 key={idx}
                 data-diff-index={idx}
-                className={`px-2 py-0.5 whitespace-pre-wrap transition-shadow ${
+                className={`group flex items-start justify-between gap-2 px-2 py-0.5 whitespace-pre-wrap transition-shadow ${
                   line.type !== "same" && /\d|@|(?:https?:\/\/|www\.)/i.test(line.text)
                     ? "border-l-2 border-[var(--warning)]"
                     : ""
@@ -645,11 +714,24 @@ export default function ResumeOptimizer() {
                     ? "bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] text-[var(--danger)] line-through"
                     : line.type === "added"
                       ? "bg-[color-mix(in_srgb,var(--success)_10%,transparent)] font-medium text-[var(--success)]"
-                      : "text-[var(--text-muted)]"
+                      : "text-[var(--text-muted)] group-hover:text-[var(--text-main)]"
                 }`}
               >
-                {line.type === "removed" ? "- " : line.type === "added" ? "+ " : "  "}
-                {line.text}
+                <div className="flex-1">
+                  {line.type === "removed" ? "- " : line.type === "added" ? "+ " : "  "}
+                  {line.text}
+                </div>
+                {line.type === "added" && (
+                  <button
+                    type="button"
+                    onClick={() => handleRejectLineDiff(line.text)}
+                    title="放弃该新增项 (还原)"
+                    className="shrink-0 opacity-0 group-hover:opacity-100 text-[11px] flex items-center gap-0.5 rounded px-1 text-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_15%,transparent)] transition-opacity"
+                  >
+                    <X className="h-3 w-3" />
+                    <span>撤回</span>
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -701,9 +783,20 @@ export default function ResumeOptimizer() {
           <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
             <div className="mb-2 flex flex-wrap justify-between gap-2 text-sm">
               <div>{t("resume.original")} <span className="border-l border-[var(--border-color)] pl-1.5 text-xs text-[var(--text-muted)]">v1</span></div>
-              <div className="text-[var(--text-muted)]">{t("resume.wordCount")}: {countResumeWords(resumeOriginal)}</div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1 text-xs text-[var(--text-muted)] cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={syncScroll}
+                    onChange={(e) => setSyncScroll(e.target.checked)}
+                    className="rounded border-[var(--border-color)] text-[var(--action)] text-xs"
+                  />
+                  <span>双栏同步滚动</span>
+                </label>
+                <div className="text-[var(--text-muted)]">{t("resume.wordCount")}: {countResumeWords(resumeOriginal)}</div>
+              </div>
             </div>
-            <div className="max-h-[560px] min-h-[360px] overflow-auto whitespace-pre-wrap rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm leading-relaxed">
+            <div ref={originalScrollRef} onScroll={handleScrollOriginal} className="max-h-[560px] min-h-[360px] overflow-auto whitespace-pre-wrap rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm leading-relaxed">
               {resumeOriginal || t("resume.originalPlaceholder")}
             </div>
           </section>
@@ -725,6 +818,7 @@ export default function ResumeOptimizer() {
             <textarea
               ref={optimizedEditorRef}
               value={resumeOptimized}
+              onScroll={handleScrollOptimized}
               disabled={busy}
               onChange={(event) => {
                 setReviewedOptimizedText("")

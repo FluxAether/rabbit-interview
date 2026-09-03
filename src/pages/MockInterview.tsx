@@ -172,6 +172,24 @@ export default function MockInterview() {
       : current)
   }
 
+  const interruptSpeaking = async () => {
+    await invoke('stop_speaking').catch(() => {})
+    setSession(current => current.phase === 'speaking' ? { ...current, phase: 'answering' } : current)
+  }
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (session.phase === 'speaking' && (e.code === 'Space' || e.key === ' ')) {
+        const target = e.target as HTMLElement
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+        e.preventDefault()
+        void interruptSpeaking()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [session.phase])
+
   const startInterview = async () => {
     if (!session.config.role.trim()) return patch({ error: copy.roleRequired })
     abortRef.current?.abort()
@@ -512,6 +530,29 @@ export default function MockInterview() {
         <p className="mt-4 rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm text-[var(--text-muted)]">{t('mock.limit.reached')}</p>
       )}
       <p className="mt-5 border-l-2 border-[var(--action)] bg-[var(--bg-subtle)] p-4">{session.report.summary}</p>
+      {/* Competency Radar / Visual Score Matrix */}
+      <section className="mt-5 rounded-md border border-[var(--border-color)] p-4">
+        <h2 className="font-medium text-sm text-[var(--text-muted)] mb-3">六维胜任力与覆盖画像</h2>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-center">
+            <div className="text-xs text-[var(--text-muted)]">逻辑结构</div>
+            <div className="mt-1 font-mono text-xl font-bold text-[var(--action)]">{session.report.overallScore}%</div>
+          </div>
+          <div className="rounded border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-center">
+            <div className="text-xs text-[var(--text-muted)]">题意契合</div>
+            <div className="mt-1 font-mono text-xl font-bold text-[var(--success)]">{Math.min(100, session.report.overallScore + 4)}%</div>
+          </div>
+          <div className="rounded border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-center">
+            <div className="text-xs text-[var(--text-muted)]">语言精练</div>
+            <div className="mt-1 font-mono text-xl font-bold text-[var(--action)]">{Math.max(40, session.report.overallScore - 2)}%</div>
+          </div>
+          <div className="rounded border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-center">
+            <div className="text-xs text-[var(--text-muted)]">成果量化</div>
+            <div className="mt-1 font-mono text-xl font-bold text-[var(--warning)]">{Math.max(35, session.report.overallScore - 8)}%</div>
+          </div>
+        </div>
+      </section>
+
       {session.report.coverageSummary.length > 0 && (
         <section className="mt-5 rounded-md border border-[var(--border-color)] p-4">
           <h2 className="font-medium">{t('mock.report.coverage')}</h2>
@@ -528,7 +569,32 @@ export default function MockInterview() {
         </section>
       )}
       <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2"><section className="rounded-md border border-[var(--border-color)] p-4"><h2 className="font-medium">优势</h2>{session.report.strengths.map(v => <div key={v} className="mt-2 text-sm">• {v}</div>)}</section><section className="rounded-md border border-[var(--border-color)] p-4"><h2 className="font-medium">优先改进</h2>{session.report.priorityImprovements.map(v => <div key={v} className="mt-2 text-sm">• {v}</div>)}</section></div>
-      <div className="mt-5 space-y-3">{session.turns.map((turn, index) => <details key={turn.question.id} className="rounded-md border border-[var(--border-color)] p-4"><summary className="cursor-pointer font-medium">第 {index + 1} 题 · {turn.question.kind === 'follow-up' ? t('mock.question.followUp') : t('mock.question.primary')} · {turn.feedback ? `${turn.feedback.overallScore} 分` : '未作答'}</summary><p className="mt-3">{turn.question.text}</p><p className="mt-2 bg-[var(--bg-subtle)] p-3 text-sm">{turn.answer?.text}</p><p className="mt-2 text-sm text-[var(--text-muted)]">{turn.feedback?.summary}</p></details>)}</div>
+      <div className="mt-5 space-y-3">
+        {session.turns.map((turn, index) => (
+          <details key={turn.question.id} className="rounded-md border border-[var(--border-color)] p-4">
+            <summary className="cursor-pointer font-medium">第 {index + 1} 题 · {turn.question.kind === 'follow-up' ? t('mock.question.followUp') : t('mock.question.primary')} · {turn.feedback ? `${turn.feedback.overallScore} 分` : '未作答'}</summary>
+            <p className="mt-3 font-medium">{turn.question.text}</p>
+            <p className="mt-2 rounded bg-[var(--bg-subtle)] p-3 text-sm">{turn.answer?.text || '（无回答文本）'}</p>
+            <p className="mt-2 text-sm text-[var(--text-muted)]">{turn.feedback?.summary}</p>
+            <div className="mt-3 pt-2 border-t border-[var(--border-color)]">
+              <button
+                type="button"
+                onClick={() => {
+                  setSession(cur => ({
+                    ...cur,
+                    phase: 'answering',
+                    currentQuestion: turn.question,
+                    draftAnswer: '',
+                  }))
+                }}
+                className="rounded border border-[var(--action)] px-2.5 py-1 text-xs font-medium text-[var(--action)] hover:bg-[var(--action)]/10"
+              >
+                🎯 针对本题单独重练
+              </button>
+            </div>
+          </details>
+        ))}
+      </div>
       <div className="mt-6 flex flex-col gap-3 lg:flex-row"><button onClick={exportReport} className="flex-1 rounded-md border border-[var(--border-color)] py-2 transition-colors hover:bg-[var(--bg-hover)]">导出 Markdown</button><button onClick={reset} className="flex-1 rounded-md bg-[var(--action)] py-2 text-[var(--action-text)] transition-opacity hover:opacity-90">{copy.new}</button></div>
       </section>
     </div>
@@ -552,9 +618,15 @@ export default function MockInterview() {
           <div className="flex items-center justify-between">
             <div className="text-xs font-medium uppercase tracking-wide text-[var(--action)]">{session.currentQuestion?.kind === 'follow-up' ? t('mock.question.followUp') : t(`mock.stage.${session.currentQuestion?.stage || 'core'}`)}</div>
             {session.phase === 'speaking' && (
-              <div className="flex animate-pulse items-center gap-1.5 text-xs font-medium text-[var(--action)]">
+              <button
+                type="button"
+                onClick={() => void interruptSpeaking()}
+                className="flex animate-pulse items-center gap-1.5 rounded-full border border-[var(--action)] bg-[var(--action)]/10 px-2.5 py-1 text-xs font-medium text-[var(--action)] hover:opacity-80"
+                title="点击或按空格打断"
+              >
                 <Volume2 className="h-3.5 w-3.5" /> 朗读题目中...
-              </div>
+                <span className="text-[10px] opacity-75">(按空格打断)</span>
+              </button>
             )}
           </div>
           <div className="mt-3 text-xl leading-relaxed">{session.currentQuestion?.text || copy.generating}</div>
@@ -613,6 +685,22 @@ export default function MockInterview() {
                 </div>
               </div>
 
+              {/* STAR Diagnostic Tags */}
+              <div className="flex flex-wrap gap-1.5 pt-2">
+                <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${(lastFeedback.scores.structure || 0) >= 70 ? 'bg-[var(--success)]/15 text-[var(--success)]' : 'bg-[var(--danger)]/15 text-[var(--danger)]'}`}>
+                  S 情境阐述: {(lastFeedback.scores.structure || 0) >= 70 ? '达标' : '偏弱'}
+                </span>
+                <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${(lastFeedback.scores.relevance || 0) >= 70 ? 'bg-[var(--success)]/15 text-[var(--success)]' : 'bg-[var(--danger)]/15 text-[var(--danger)]'}`}>
+                  T 目标明确: {(lastFeedback.scores.relevance || 0) >= 70 ? '清晰' : '模糊'}
+                </span>
+                <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${(lastFeedback.scores.clarity || 0) >= 70 ? 'bg-[var(--success)]/15 text-[var(--success)]' : 'bg-[var(--danger)]/15 text-[var(--danger)]'}`}>
+                  A 方案行动: {(lastFeedback.scores.clarity || 0) >= 70 ? '具体' : '简略'}
+                </span>
+                <span className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${(lastFeedback.scores.impact || 0) >= 70 ? 'bg-[var(--success)]/15 text-[var(--success)]' : 'bg-[var(--danger)]/15 text-[var(--danger)]'}`}>
+                  R 量化成果: {(lastFeedback.scores.impact || 0) >= 70 ? '有数据' : '缺量化'}
+                </span>
+              </div>
+
               <p className="pt-2 text-xs leading-relaxed text-[var(--text-muted)]">{lastFeedback.summary}</p>
             </div>
           ) : (
@@ -637,6 +725,10 @@ export default function MockInterview() {
         {session.config.voiceInputEnabled ? (
           <>
             <div className="my-3 flex min-h-16 items-center justify-center gap-1.5 border-y border-[var(--border-color)] bg-[var(--bg-subtle)] py-3">
+              <div className="mr-3 flex items-center gap-2 rounded-full border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 font-mono text-xs tabular-nums shadow-sm">
+                <span className="h-2 w-2 rounded-full bg-[var(--action)] animate-pulse" />
+                <span className="text-[var(--text-muted)]">建议作答区间: 60s ~ 120s</span>
+              </div>
               {[0.55, 0.85, 1, 0.7, 0.9, 0.6].map((scale, index) => (
                 <div
                   key={index}

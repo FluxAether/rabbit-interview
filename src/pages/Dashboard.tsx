@@ -127,15 +127,19 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
         </div>
 
         <section className="mb-6 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="text-sm font-semibold">{t('dashboard.readiness.title')}</div>
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-semibold">{t('dashboard.readiness.title')}</div>
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${readinessLabel === 'ready' ? 'bg-[color-mix(in_srgb,var(--success)_15%,transparent)] text-[var(--success)]' : 'bg-[color-mix(in_srgb,var(--warning)_15%,transparent)] text-[var(--warning)]'}`}>
+                  {t(`dashboard.readiness.${readinessLabel}`)}
+                </span>
+              </div>
               <div className="mt-1 text-xs text-[var(--text-muted)]">
                 {targetRole || targetCompany
                   ? `${targetCompany ? targetCompany + ' · ' : ''}${targetRole || t('dashboard.readiness.noRole')}`
                   : t('dashboard.readiness.noProfile')}
               </div>
-              <div className="mt-2 text-xs font-medium">{t(`dashboard.readiness.${readinessLabel}`)}</div>
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => onNavigateToSettings?.(settingsTab)} className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-xs hover:bg-[var(--bg-hover)]">
@@ -147,6 +151,32 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
               <button type="button" onClick={launch} className="rounded-md bg-[var(--action)] px-3 py-1.5 text-xs font-medium text-[var(--action-text)]">
                 {t('common.launch')}
               </button>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-2 border-t border-[var(--border-color)] pt-3 sm:grid-cols-3">
+            <div className="flex items-center gap-2 text-xs">
+              <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${Boolean(targetRole || targetCompany) ? 'bg-[var(--success)] text-[var(--bg-app)]' : 'bg-[var(--bg-subtle)] text-[var(--text-muted)]'}`}>
+                1
+              </span>
+              <span className={Boolean(targetRole || targetCompany) ? 'text-[var(--text-main)]' : 'text-[var(--text-muted)]'}>
+                求职目标与岗位匹配
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${readinessLabel === 'ready' ? 'bg-[var(--success)] text-[var(--bg-app)]' : 'bg-[var(--bg-subtle)] text-[var(--text-muted)]'}`}>
+                2
+              </span>
+              <span className={readinessLabel === 'ready' ? 'text-[var(--text-main)]' : 'text-[var(--text-muted)]'}>
+                AI 与语音通道就绪
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--bg-subtle)] text-[10px] font-bold text-[var(--text-muted)]">
+                3
+              </span>
+              <span className="text-[var(--text-muted)]">
+                隐形悬浮窗 & 快捷键测试
+              </span>
             </div>
           </div>
         </section>

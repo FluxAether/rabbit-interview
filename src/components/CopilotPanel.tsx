@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent } from "react"
-import { ArrowDown, Check, ChevronDown, ChevronUp, Clipboard, Download, EyeOff, Loader2, Mic, RefreshCw, Shield, Sparkles, Square, Trash2, ZoomIn, ZoomOut } from "lucide-react"
+import { ArrowDown, Check, ChevronDown, ChevronUp, Clipboard, Download, EyeOff, LayoutTemplate, Loader2, Mic, RefreshCw, Shield, Sparkles, Square, Trash2, ZoomIn, ZoomOut } from "lucide-react"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { useTranslation } from "../i18n"
 import { sendCopilotCommand } from "../lib/copilotSession"
@@ -114,11 +114,20 @@ function CopilotWaveform({ amplitude, active }: { amplitude: number; active: boo
 // Extract key takeaways (first 1-3 bullet points or key sentences) from assistant text
 function extractKeyTakeaways(text: string): string[] {
   if (!text) return []
-  const lines = text
+  const rawLines = text
     .split(/\r?\n/)
-    .map((l) => l.trim().replace(/^[•\-*]\s*/, ""))
+    .map((l) => l.trim())
+    .filter(Boolean)
+  const bullets = rawLines
+    .filter((l) => /^[•\-*\d+.]\s+/.test(l))
+    .map((l) => l.replace(/^[•\-*\d+.]\s*/, "").replace(/^\*\*|\*\*$/g, "").trim())
     .filter((l) => l.length > 5)
-  return lines.slice(0, 3)
+  if (bullets.length > 0) return bullets.slice(0, 3)
+  const cleanLines = rawLines
+    .filter((l) => !l.startsWith("#"))
+    .map((l) => l.replace(/^\*\*|\*\*$/g, "").trim())
+    .filter((l) => l.length > 8)
+  return cleanLines.slice(0, 3)
 }
 
 function groupCopilotMessages(messages: CopilotMessage[], showMyBubbles = true): CopilotMessage[][] {
@@ -160,6 +169,7 @@ export default function CopilotPanel({
   const [opacity, setOpacity] = useState<number>(100)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [collapsedTakeaways, setCollapsedTakeaways] = useState<Record<number, boolean>>({})
+  const [hudMode, setHudMode] = useState<boolean>(false)
 
   const messagesRef = useRef<HTMLDivElement>(null)
   const running = copilot.phase === "starting" || copilot.phase === "listening"
@@ -336,6 +346,13 @@ export default function CopilotPanel({
     ? copilot.messages
     : copilot.messages.filter((m) => m.role !== "me")
 
+  const latestAssistantMessage = [...copilot.messages]
+    .reverse()
+    .find((m) => m.role === "assistant" && m.text)
+  const hudTakeaways = latestAssistantMessage
+    ? extractKeyTakeaways(latestAssistantMessage.text)
+    : []
+
   return (
     <section
       className={`floating-panel flex min-h-0 w-full flex-col border border-[var(--border-color)] bg-[var(--bg-surface)] p-3 text-sm text-[var(--text-main)] shadow-none transition-opacity duration-150 ${
@@ -370,30 +387,46 @@ export default function CopilotPanel({
             title={showMyBubbles ? t("copilot.hideMyBubbles") : t("copilot.showMyBubbles")}
             data-no-drag
           >
-            <span className="text-[10px] font-medium text-[var(--text-muted)] select-none">
-              {t("copilot.myBubbles")}
-            </span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={showMyBubbles}
-              disabled={!showMyBubblesReady}
-              onClick={toggleShowMyBubbles}
-              className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-40 ${
-                showMyBubbles ? "bg-[var(--action)]" : "bg-[var(--bg-hover)] border border-[var(--border-color)]"
+          <span className="text-[10px] font-medium text-[var(--text-muted)] select-none">
+            {t("copilot.myBubbles")}
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showMyBubbles}
+            disabled={!showMyBubblesReady}
+            onClick={toggleShowMyBubbles}
+            className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-40 ${
+              showMyBubbles ? "bg-[var(--action)]" : "bg-[var(--bg-hover)] border border-[var(--border-color)]"
+            }`}
+            aria-label={showMyBubbles ? t("copilot.hideMyBubbles") : t("copilot.showMyBubbles")}
+            data-no-drag
+          >
+            <span
+              className={`pointer-events-none inline-block h-3 w-3 rounded-full bg-[var(--bg-surface)] shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
+                showMyBubbles ? "translate-x-3.5 bg-white" : "translate-x-0.5"
               }`}
-              aria-label={showMyBubbles ? t("copilot.hideMyBubbles") : t("copilot.showMyBubbles")}
-              data-no-drag
-            >
-              <span
-                className={`pointer-events-none inline-block h-3 w-3 rounded-full bg-[var(--bg-surface)] shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
-                  showMyBubbles ? "translate-x-3.5 bg-white" : "translate-x-0.5"
-                }`}
-              />
-            </button>
-          </div>
+            />
+          </button>
+        </div>
 
-          <div className="flex items-center rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-0.5 text-xs">
+        {floating && (
+          <button
+            type="button"
+            onClick={() => setHudMode(!hudMode)}
+            className={`flex items-center gap-1 rounded-md border border-[var(--border-color)] px-2 py-1 text-xs transition-colors ${
+              hudMode ? "bg-[var(--action)] font-medium text-[var(--action-text)]" : "bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            }`}
+            title={hudMode ? t("copilot.viewMode.normal") : t("copilot.viewMode.hud")}
+            aria-label={hudMode ? t("copilot.viewMode.normal") : t("copilot.viewMode.hud")}
+            data-no-drag
+          >
+            <LayoutTemplate className="h-3.5 w-3.5" />
+            <span className="text-[10px] font-medium">{hudMode ? "HUD" : "Normal"}</span>
+          </button>
+        )}
+
+        <div className="flex items-center rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-0.5 text-xs">
             <button
               type="button"
               onClick={decreaseFontSize}
@@ -489,6 +522,69 @@ export default function CopilotPanel({
       </header>
 
       <CopilotWaveform amplitude={copilot.amplitude} active={running} />
+
+      {/* Intent & Audio Channel Meters Banner */}
+      <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-[var(--bg-subtle)] px-2.5 py-1 text-[11px] text-[var(--text-muted)]">
+        <div className="flex min-w-0 items-center gap-1.5 truncate">
+          <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${running ? "animate-pulse bg-[var(--success)]" : "bg-[var(--text-muted)]"}`} />
+          <span className="truncate">
+            {copilot.generatingReplyToIds && copilot.generatingReplyToIds.length > 0
+              ? t("copilot.intent.generating")
+              : running && copilot.amplitude > 0.05
+                ? t("copilot.intent.listening")
+                : running
+                  ? t("copilot.intent.analyzing")
+                  : t(`copilot.phase.${copilot.phase}`)}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 font-mono text-[9px]">
+          <div className="flex items-center gap-1">
+            <span className="opacity-70">{t("copilot.source.sys")}</span>
+            <div className="h-1.5 w-6 overflow-hidden rounded bg-[var(--bg-surface)]">
+              <div
+                className="h-full bg-[var(--action)] transition-all duration-75"
+                style={{ width: `${running ? Math.min(100, Math.round(copilot.amplitude * 120)) : 0}%` }}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="opacity-70">{t("copilot.source.mic")}</span>
+            <div className="h-1.5 w-6 overflow-hidden rounded bg-[var(--bg-surface)]">
+              <div
+                className="h-full bg-[var(--success)] transition-all duration-75"
+                style={{ width: `${running ? Math.min(100, Math.round(copilot.amplitude * 80)) : 0}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* HUD Teleprompter Overlay / View */}
+      {hudMode && floating && (
+        <div className="mb-2 shrink-0 rounded-lg border border-[var(--border-strong)] bg-slate-950/90 p-3 text-white backdrop-blur-md">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-1.5 text-[11px] font-semibold tracking-wider text-slate-300 uppercase">
+            <span className="flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-[var(--action)]" />
+              {t("copilot.keyPoints")} (HUD)
+            </span>
+            <span className="text-[9px] text-slate-400">Eye-Level Teleprompter</span>
+          </div>
+          {hudTakeaways.length > 0 ? (
+            <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+              {hudTakeaways.map((point, idx) => (
+                <div key={idx} className="rounded border border-slate-800/80 bg-slate-900/80 p-2 text-xs leading-relaxed text-slate-200">
+                  <div className="mb-1 font-mono text-[10px] font-bold text-[var(--action)]">0{idx + 1}</div>
+                  <p className="line-clamp-3 font-medium">{point}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-2 text-center text-xs text-slate-400">
+              {t("copilot.suggestions.empty")}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Chat & AI Suggestions Container */}
       <div className="relative min-h-0 flex-1">
