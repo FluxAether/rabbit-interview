@@ -25,7 +25,6 @@ import { buildInterviewContext, createSessionIdentity, interviewProfileFromWorks
 import { createRecoverySnapshot, parseRecoverySnapshot, SESSION_RECOVERY_KEY } from './sessionRecovery'
 import { mergeContinuationText, textSimilarity } from './copilotText'
 import { createCopilotInterviewRecord, type SavedRecording } from './copilotArchive'
-import { canGenerateSuggestion, deriveLicenseState, parseLicensePayload } from './license'
 import { buildRecentTurnsContext, collectCopilotTurns, scoreCopilotSession, type CopilotSessionScore } from './copilotScoring'
 import {
   getInterviewerCommitDelay,
@@ -1100,14 +1099,6 @@ class CopilotSessionHost {
       this.cancelActiveAnswer(sessionId)
     }
     this.answering = true
-    const usedSeconds = Math.max(0, Math.floor(((this.snapshot.startedAt ? Date.now() - this.snapshot.startedAt : 0) / 1000)))
-    const license = deriveLicenseState(parseLicensePayload((await loadSetting('season_pass_license').catch(() => null)) ?? ''), usedSeconds)
-    if (!canGenerateSuggestion(license)) {
-      this.answering = false
-      this.transition({ type: 'recoverable-error', sessionId, error: 'copilot.paywall.exhausted' })
-      this.resumePendingInterviewerAnswer(sessionId)
-      return
-    }
 
     this.lastRequestType = requestType
     const controller = new AbortController()
@@ -1248,12 +1239,6 @@ class CopilotSessionHost {
     replyToId: number,
   ): Promise<void> {
     if (!this.isCurrent(sessionId)) return
-    const usedSeconds = Math.max(0, Math.floor(((this.snapshot.startedAt ? Date.now() - this.snapshot.startedAt : 0) / 1000)))
-    const license = deriveLicenseState(parseLicensePayload((await loadSetting('season_pass_license').catch(() => null)) ?? ''), usedSeconds)
-    if (!canGenerateSuggestion(license)) {
-      this.transition({ type: 'recoverable-error', sessionId, error: 'copilot.paywall.exhausted' })
-      return
-    }
 
     const controller = new AbortController()
     const answerSequence = ++this.answerSequence

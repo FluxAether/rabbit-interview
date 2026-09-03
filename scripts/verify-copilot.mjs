@@ -2272,21 +2272,6 @@ check(tauriConfig.includes('thomas92118/rabbit-interview'), 'updater points at t
   check(landingApp.includes("/subscribe") && landingApp.includes("/admin"), 'landing routes the subscribe and admin pages')
   check(gateway.includes('/internal/accounts/lookup') && gateway.includes('/account/subscription/context'), 'gateway exposes admin email lookup and subscription context')
 }
-{
-  const licenseMod = loadTypeScriptModule('src/lib/license.ts', [
-    'PAYWALL_ENABLED',
-    'canGenerateSuggestion',
-    'shouldWarnPaywall',
-    'deriveLicenseState',
-  ])
-  const expiredState = licenseMod.deriveLicenseState(null, 999999)
-  check(
-    licenseMod.PAYWALL_ENABLED === false
-      && licenseMod.canGenerateSuggestion(expiredState) === true
-      && licenseMod.shouldWarnPaywall(expiredState) === false,
-    'paywall is paused so expired free copilot time still permits suggestions without warnings',
-  )
-}
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)
 if (failed > 0) process.exit(1)

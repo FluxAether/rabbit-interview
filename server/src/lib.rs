@@ -31,7 +31,7 @@ use chrono::{DateTime, Utc};
 use config::Config;
 use entitlement::{Account, Entitlement};
 use error::AppError;
-use protocol::{AccountLookupResponse, AdjustmentRequest, EntitlementResponse, LookupRequest};
+use protocol::{AccountLookupResponse, AdjustmentRequest, EntitlementResponse, LookupRequest, PortalSessionResponse};
 use subtle::ConstantTimeEq;
 use tokio::sync::{Mutex, Semaphore};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -71,6 +71,7 @@ struct StateInner {
     http: reqwest::Client,
     payments: Option<payments::PaymentService>,
     tickets: tickets::Tickets,
+    portal_tickets: tickets::PortalTickets,
     tracker: TaskTracker,
     shutdown: CancellationToken,
     concurrency: Arc<Semaphore>,
@@ -109,6 +110,7 @@ impl AppState {
             http,
             payments,
             tickets: tickets::Tickets::default(),
+            portal_tickets: tickets::PortalTickets::default(),
             tracker: TaskTracker::new(),
             shutdown: CancellationToken::new(),
             concurrency: Arc::new(Semaphore::new(config.global_concurrency_limit)),
@@ -140,6 +142,10 @@ impl AppState {
 
     pub fn tickets(&self) -> &tickets::Tickets {
         &self.0.tickets
+    }
+
+    pub fn portal_tickets(&self) -> &tickets::PortalTickets {
+        &self.0.portal_tickets
     }
 
     pub fn tracker(&self) -> &TaskTracker {
@@ -236,6 +242,7 @@ pub fn router(state: AppState) -> Router {
         .route("/readyz", get(ready))
         .route("/metrics", get(metrics))
         .route("/v1/me/entitlements", get(entitlements))
+        .route("/v1/me/portal-session", post(create_portal_session))
         .route("/v1/stt/sessions", post(sessions::create_session))
         .route(
             "/v1/stt/sessions/{session_id}/stream",
@@ -301,6 +308,24 @@ async fn entitlements(
         hosted_llm_enabled: state.config().hosted_llm_enabled,
         payments_enabled: state.config().payments_enabled,
         subscription_url: format!("{}/subscribe", state.config().landing_public_url),
+    }))
+}
+
+async fn create_portal_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<PortalSessionResponse>, AppError> {
+    let account = state.authenticated_account(&headers).await?;
+    state.require_eligible(&account)?;
+    let ticket = state
+        .portal_tickets()
+        .issue(account.id, std::time::Duration::from_secs(60))
+        .await;
+    let portal_url = format!("{}/auth/portal?ticket={}", state.config().gateway_public_url, ticket);
+    Ok(Json(PortalSessionResponse {
+        portal_url,
+        ticket,
+        expires_in: 60,
     }))
 }
 

@@ -289,15 +289,40 @@ export async function refreshHostedEntitlements(): Promise<HostedEntitlements> {
   }
 }
 
-export async function openHostedSubscription(): Promise<void> {
-  const configured = snapshot.entitlements?.subscription_url
-  if (!configured) throw new Error('Hosted subscription page is unavailable.')
-  const url = new URL(configured)
+function isSafePublicHttpUrl(url: URL, allowSearch = false): boolean {
   const local = url.hostname === '127.0.0.1' || url.hostname === 'localhost'
-  if ((url.protocol !== 'https:' && !(local && url.protocol === 'http:'))
-    || url.username || url.password || url.search || url.hash) {
-    throw new Error('Hosted subscription page is invalid.')
+  if (url.protocol !== 'https:' && !(local && url.protocol === 'http:')) return false
+  if (url.username || url.password || url.hash) return false
+  return allowSearch || !url.search
+}
+
+function isSafePortalUrl(url: URL): boolean {
+  if (!isSafePublicHttpUrl(url, true)) return false
+  const ticket = url.searchParams.get('ticket')
+  if (!ticket || url.searchParams.size !== 1) return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ticket)
+}
+
+export async function openHostedSubscription(): Promise<void> {
+  const fallback = snapshot.entitlements?.subscription_url
+  try {
+    const response = await hostedFetch('/v1/me/portal-session', { method: 'POST', cache: 'no-store' })
+    if (response.ok) {
+      const body = await response.json() as { portal_url?: string }
+      const portalUrl = typeof body.portal_url === 'string' ? new URL(body.portal_url) : null
+      if (portalUrl && isSafePortalUrl(portalUrl)) {
+        await openUrl(portalUrl.toString())
+        return
+      }
+    } else if (response.status !== 404) {
+      throw new Error(await safeError(response, 'Unable to open hosted subscription.'))
+    }
+  } catch (error) {
+    if (!fallback) throw error
   }
+  if (!fallback) throw new Error('Hosted subscription page is unavailable.')
+  const url = new URL(fallback)
+  if (!isSafePublicHttpUrl(url)) throw new Error('Hosted subscription page is invalid.')
   await openUrl(url.toString())
 }
 

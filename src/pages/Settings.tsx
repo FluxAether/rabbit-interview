@@ -24,7 +24,6 @@ import {
   History as HistoryIcon,
   Trash2,
 } from 'lucide-react'
-import { KeyRound } from 'lucide-react'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
 import { LANGUAGE_OPTIONS, SupportedLanguage, DEFAULT_LANGUAGE } from '../i18n/types'
@@ -41,8 +40,6 @@ import {
 } from '../lib/settingsStore'
 import type { SettingsTab } from '../lib/readiness'
 import type { Page } from '../lib/navigation'
-import { deriveLicenseState, parseLicensePayload } from '../lib/license'
-import { saveSetting } from '../lib/db'
 import { openHostedSubscription, refreshHostedEntitlements, signInHosted, signOutHosted, useHostedAuth } from '../lib/hostedAuth'
 
 type TabType = SettingsTab
@@ -166,8 +163,6 @@ export default function Settings({
   const [showSavedToast, setShowSavedToast] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [settingsHydrated, setSettingsHydrated] = useState(false)
-  const [licenseRaw, setLicenseRaw] = useState('')
-  const [licenseNotice, setLicenseNotice] = useState('')
   const toastTimeoutRef = useRef<number | null>(null)
 
   const saveTimeoutRef = useRef<number | null>(null)
@@ -889,17 +884,6 @@ export default function Settings({
             >
               <HardDrive className="w-4 h-4" />
               <span>{t('settings.tab.storage')}</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('license')} aria-current={activeTab === 'license' ? 'page' : undefined}
-              className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
-                activeTab === 'license'
-                  ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
-                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
-              }`}
-            >
-              <KeyRound className="w-4 h-4" />
-              <span>{t('settings.tab.license')}</span>
             </button>
           </nav>
 
@@ -1675,38 +1659,6 @@ export default function Settings({
                     <span>{storageNotice}</span>
                   </div>
                 )}
-              </div>
-            )}
-
-            {activeTab === 'license' && (
-              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
-                <div className="mb-2 font-semibold">{t('settings.license.title')}</div>
-                <p className="mb-4 text-sm text-[var(--text-muted)]">{t('settings.license.desc')}</p>
-                <textarea
-                  value={licenseRaw}
-                  onChange={(event) => setLicenseRaw(event.target.value)}
-                  className="h-32 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 font-mono text-xs outline-none"
-                  placeholder='{"kind":"season-pass-90","licenseId":"...","expiresAt":"...","issuedAt":"..."}'
-                  aria-label={t('settings.license.title')}
-                />
-                <button
-                  type="button"
-                  className="mt-3 rounded-md bg-[var(--action)] px-3 py-1.5 text-xs font-medium text-[var(--action-text)]"
-                  onClick={() => {
-                    const payload = parseLicensePayload(licenseRaw)
-                    const state = deriveLicenseState(payload, 0)
-                    if (!payload || state.status === 'invalid' || state.status === 'expired') {
-                      setLicenseNotice(t('settings.license.invalid'))
-                      return
-                    }
-                    void saveSetting('season_pass_license', licenseRaw).then(() => {
-                      setLicenseNotice(t('settings.license.activated', { date: payload.expiresAt.slice(0, 10) }))
-                    }).catch(() => setLicenseNotice(t('settings.saveFailed')))
-                  }}
-                >
-                  {t('settings.license.activate')}
-                </button>
-                {licenseNotice && <div className="mt-2 text-xs" role="status">{licenseNotice}</div>}
               </div>
             )}
 

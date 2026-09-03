@@ -88,6 +88,13 @@ pub struct SubscriptionContext {
     pub subscription: Option<SubscriptionSummary>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PortalSessionResponse {
+    pub portal_url: String,
+    pub ticket: String,
+    pub expires_in: u64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct PaymentProduct {
     pub code: &'static str,

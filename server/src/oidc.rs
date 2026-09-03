@@ -76,6 +76,7 @@ pub fn router() -> Router<AppState> {
             post(revoke_other_sessions),
         )
         .route("/account/subscription/context", get(subscription_context))
+        .route("/auth/portal", get(portal_redirect))
         .route("/internal/accounts/invitations", post(invite_account))
         .route(
             "/internal/accounts/{account_id}/suspend",
@@ -1495,11 +1496,62 @@ async fn security_page(State(state): State<AppState>) -> Response {
     landing_redirect(state.auth(), "/auth/security", &[])
 }
 
-async fn subscription_context(State(state): State<AppState>, jar: CookieJar) -> Response {
+#[derive(Debug, Deserialize, Default)]
+struct SubscriptionContextQuery {
+    ticket: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct PortalQuery {
+    ticket: Option<String>,
+}
+
+async fn portal_redirect(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<PortalQuery>,
+) -> Response {
+    let fallback_target = format!("{}/subscribe", state.config().landing_public_url);
+    let ticket = match query.ticket.as_deref().filter(|t| !t.is_empty()) {
+        Some(t) => t,
+        None => return Redirect::to(&fallback_target).into_response(),
+    };
+    let account_id = match state.portal_tickets().consume(ticket).await {
+        Ok(id) => id,
+        Err(_) => return Redirect::to(&fallback_target).into_response(),
+    };
     let auth = state.auth();
-    let session = match load_browser_session(auth, &jar).await {
-        Ok(Some(value)) => value,
-        _ => return auth_error(StatusCode::UNAUTHORIZED, "AUTH_REQUIRED", false),
+    let (_, cookie) = match create_browser_session(auth, &account_id, Utc::now()).await {
+        Ok(value) => value,
+        Err(_) => return Redirect::to(&fallback_target).into_response(),
+    };
+    let jar = jar.add(cookie);
+    let redirect_url = format!("{}/subscribe?ticket={}", state.config().landing_public_url, ticket);
+    (jar, Redirect::to(&redirect_url)).into_response()
+}
+
+async fn subscription_context(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<SubscriptionContextQuery>,
+) -> Response {
+    let auth = state.auth();
+    let (session, jar) = match load_browser_session(auth, &jar).await {
+        Ok(Some(value)) => (value, jar),
+        _ => {
+            if let Some(ticket) = query.ticket.as_deref().filter(|t| !t.is_empty()) {
+                if let Ok(account_id) = state.portal_tickets().consume(ticket).await {
+                    match create_browser_session(auth, &account_id, Utc::now()).await {
+                        Ok((new_session, cookie)) => (new_session, jar.add(cookie)),
+                        Err(_) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", true),
+                    }
+                } else {
+                    return auth_error(StatusCode::UNAUTHORIZED, "AUTH_REQUIRED", false);
+                }
+            } else {
+                return auth_error(StatusCode::UNAUTHORIZED, "AUTH_REQUIRED", false);
+            }
+        }
     };
     let identity = match auth.identity_by_id(&session.account_id).await {
         Ok(value) => value,
@@ -1509,7 +1561,7 @@ async fn subscription_context(State(state): State<AppState>, jar: CookieJar) -> 
         Ok(value) => value,
         Err(_) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", true),
     };
-    auth_response(SubscriptionContext {
+    let body = SubscriptionContext {
         email: identity.email,
         status: identity.status,
         balances,
@@ -1534,7 +1586,8 @@ async fn subscription_context(State(state): State<AppState>, jar: CookieJar) -> 
             },
             None => None,
         },
-    })
+    };
+    (jar, auth_response(body)).into_response()
 }
 
 async fn security_context(State(state): State<AppState>, jar: CookieJar) -> Response {
@@ -2033,7 +2086,7 @@ pub(crate) async fn load_browser_session(
         "SELECT s.id, s.account_id, s.auth_time \
          FROM oidc_browser_sessions s JOIN accounts a ON a.id = s.account_id \
          WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > UTC_TIMESTAMP(6) \
-           AND s.last_seen_at > UTC_TIMESTAMP(6) - INTERVAL 60 MINUTE AND a.status = 'ACTIVE'",
+           AND s.last_seen_at > UTC_TIMESTAMP(6) - INTERVAL 12 HOUR AND a.status = 'ACTIVE'",
     )
     .bind(secret_hash(&raw_token))
     .fetch_optional(auth.pool())

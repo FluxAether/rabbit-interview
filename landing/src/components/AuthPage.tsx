@@ -730,8 +730,19 @@ function SubscribePage({ t }: { t: T }) {
 
   useEffect(() => {
     let active = true
-    const returnedOrder = new URLSearchParams(window.location.search).get('out_trade_no')
-    jsonApi<SubscriptionContext>('/account/subscription/context')
+    const params = new URLSearchParams(window.location.search)
+    const returnedOrder = params.get('out_trade_no')
+    const ticket = params.get('ticket')
+    const contextPath = ticket
+      ? `/account/subscription/context?ticket=${encodeURIComponent(ticket)}`
+      : '/account/subscription/context'
+    if (ticket || returnedOrder) {
+      const next = new URLSearchParams()
+      if (returnedOrder) next.set('out_trade_no', returnedOrder)
+      const query = next.toString()
+      window.history.replaceState(null, '', query ? `${window.location.pathname}?${query}` : window.location.pathname)
+    }
+    jsonApi<SubscriptionContext>(contextPath)
       .then(async (value) => {
         if (!active) return
         setContext(value)

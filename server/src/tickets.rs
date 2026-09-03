@@ -70,3 +70,89 @@ impl Tickets {
         self.inner.lock().await.remove(ticket);
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct PortalClaim {
+    pub account_id: String,
+    pub expires_at: DateTime<Utc>,
+    pub uses_left: u8,
+}
+
+#[derive(Clone, Default)]
+pub struct PortalTickets {
+    inner: Arc<Mutex<HashMap<String, PortalClaim>>>,
+}
+
+impl PortalTickets {
+    pub async fn issue(&self, account_id: String, ttl: Duration) -> String {
+        let now = Utc::now();
+        let expires_at = now
+            + chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::seconds(60));
+        let ticket = Uuid::new_v4().to_string();
+        let mut tickets = self.inner.lock().await;
+        tickets.retain(|_, claim| claim.expires_at > now && claim.uses_left > 0);
+        tickets.insert(
+            ticket.clone(),
+            PortalClaim {
+                account_id,
+                expires_at,
+                uses_left: 2,
+            },
+        );
+        ticket
+    }
+
+    pub async fn consume(&self, ticket: &str) -> Result<String, AppError> {
+        let mut tickets = self.inner.lock().await;
+        let claim = tickets.get_mut(ticket).ok_or(AppError::Unauthorized)?;
+        if claim.expires_at <= Utc::now() || claim.uses_left == 0 {
+            tickets.remove(ticket);
+            return Err(AppError::Unauthorized);
+        }
+        claim.uses_left -= 1;
+        let account_id = claim.account_id.clone();
+        if claim.uses_left == 0 {
+            tickets.remove(ticket);
+        }
+        Ok(account_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn portal_ticket_allows_two_consumes() {
+        let tickets = PortalTickets::default();
+        let ticket = tickets
+            .issue("acct-1".into(), Duration::from_secs(60))
+            .await;
+        assert_eq!(tickets.consume(&ticket).await.unwrap(), "acct-1");
+        assert_eq!(tickets.consume(&ticket).await.unwrap(), "acct-1");
+        assert!(matches!(
+            tickets.consume(&ticket).await,
+            Err(AppError::Unauthorized)
+        ));
+    }
+
+    #[tokio::test]
+    async fn portal_ticket_unknown_is_unauthorized() {
+        let tickets = PortalTickets::default();
+        assert!(matches!(
+            tickets.consume("missing").await,
+            Err(AppError::Unauthorized)
+        ));
+    }
+
+    #[tokio::test]
+    async fn portal_ticket_expired_is_unauthorized() {
+        let tickets = PortalTickets::default();
+        let ticket = tickets.issue("acct-1".into(), Duration::ZERO).await;
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        assert!(matches!(
+            tickets.consume(&ticket).await,
+            Err(AppError::Unauthorized)
+        ));
+    }
+}

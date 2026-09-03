@@ -1,6 +1,6 @@
 import type { AppSettings, SttProvider } from './settingsStore'
 
-export type SettingsTab = 'general' | 'ai' | 'stt' | 'shortcuts_privacy' | 'storage' | 'license'
+export type SettingsTab = 'general' | 'ai' | 'stt' | 'shortcuts_privacy' | 'storage'
 export type LlmProvider = 'groq' | 'openai' | 'anthropic' | 'gemini' | 'hosted'
 export type ReadinessStatus = 'loading' | 'unconfigured' | 'testing' | 'ready' | 'degraded' | 'error'
 export type ReadinessIssueCode =
