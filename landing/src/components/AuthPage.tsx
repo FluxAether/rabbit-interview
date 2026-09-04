@@ -1,5 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
-import { ArrowLeft, Check, KeyRound, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, Check, Cpu, KeyRound, Mic, ShieldCheck, Sparkles } from 'lucide-react'
 import { authCopy, type AuthLang } from '../locales/authContent'
 
 type Interaction =
@@ -678,9 +678,9 @@ function formatUnits(units: number | undefined): string {
 }
 
 function formatDate(value: string | undefined, lang: string): string {
-  if (!value) return '—'
+  if (!value) return '-'
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString(lang)
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString(lang)
 }
 
 function addDays(date: Date, days: number): Date {
@@ -720,6 +720,25 @@ function paidOrderCopy(order: PaymentOrder, products: PaymentProduct[], lang: st
     end: formatDate(end.toISOString(), lang),
   })
 }
+
+const DEFAULT_PRODUCTS: PaymentProduct[] = [
+  {
+    code: 'PRO_MONTH',
+    price_minor: 8_900,
+    currency: 'CNY',
+    duration_days: 30,
+    stt_ms: 54_000_000,
+    llm_units: 2_000_000,
+  },
+  {
+    code: 'PRO_QUARTER',
+    price_minor: 19_900,
+    currency: 'CNY',
+    duration_days: 90,
+    stt_ms: 180_000_000,
+    llm_units: 8_000_000,
+  },
+]
 
 function SubscribePage({ t }: { t: T }) {
   const [context, setContext] = useState<SubscriptionContext | null>(null)
@@ -801,96 +820,206 @@ function SubscribePage({ t }: { t: T }) {
     ? t.subscribe.quarterPlan
     : t.subscribe.monthPlan
 
-  return (
-    <>
-      <Intro title={t.subscribe.title} body={t.subscribe.subtitle} />
-      <div className="mt-7 space-y-4">
-        <section className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
-          <h2 className="text-sm font-semibold">{t.subscribe.hostedTitle}</h2>
-          <p className="mt-2 text-sm leading-6 text-mute">{t.subscribe.hostedBody}</p>
-        </section>
-        <section className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
-          <h2 className="text-sm font-semibold">{t.subscribe.byokTitle}</h2>
-          <p className="mt-2 text-sm leading-6 text-mute">{t.subscribe.byokBody}</p>
-        </section>
-        <section className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
-          <h2 className="text-sm font-semibold">{t.subscribe.grantTitle}</h2>
-          <p className="mt-2 text-sm leading-6 text-mute">{t.subscribe.grantBody}</p>
-        </section>
-        <p className="text-sm leading-6 text-mute">{t.subscribe.paymentsNote}</p>
-      </div>
-      {error ? <ErrorMessage>{errorText(t, new Error(error))}</ErrorMessage> : null}
-      {loading ? <Loading t={t} /> : context ? (
-        <div className="mt-7 space-y-4">
-          <section className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
-            <p className="text-xs text-mute">{t.subscribe.signedIn}</p>
-            <p className="mt-1 break-all text-sm font-medium">{context.email}</p>
-            <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-              <div>
-                <dt className="text-mute">{t.subscribe.stt}</dt>
-                <dd className="mt-1 font-medium">{formatMinutes(context.balances.STT_AUDIO_MS)}</dd>
+  const renderPlanCard = (product: PaymentProduct, preview?: { start: string; end: string; renewing: boolean }) => {
+    const isQuarter = product.code === 'PRO_QUARTER'
+    const price = (product.price_minor / 100).toFixed(0)
+    const dailyPrice = (product.price_minor / 100 / product.duration_days).toFixed(1)
+    const action = preview
+      ? (isQuarter
+          ? (preview.renewing ? t.subscribe.renewQuarter : t.subscribe.buyQuarter)
+          : (preview.renewing ? t.subscribe.renewMonth : t.subscribe.buyMonth))
+      : (isQuarter ? t.subscribe.buyQuarter : t.subscribe.buyMonth)
+
+    return (
+      <section
+        key={product.code}
+        className={`relative flex flex-col justify-between rounded-2xl border p-6 transition-all duration-200 ${
+          isQuarter
+            ? 'border-emerald-500/30 bg-gradient-to-b from-emerald-950/15 via-white/[0.03] to-white/[0.015] shadow-lg shadow-emerald-950/20 ring-1 ring-emerald-500/20'
+            : 'border-white/10 bg-white/[0.025] hover:border-white/15'
+        }`}
+      >
+        {isQuarter ? (
+          <div className="absolute -top-3 right-6 inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300 backdrop-blur-md">
+            <Sparkles className="h-3 w-3" aria-hidden="true" />
+            <span>{t.htmlLang === 'en' ? 'Most Popular' : '超值推荐'}</span>
+          </div>
+        ) : null}
+
+        <div>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-semibold text-ink">{planName(product.code)}</h2>
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-xs text-mute">
+              {product.duration_days} {t.subscribe.days}
+            </span>
+          </div>
+
+          <div className="mt-4 flex items-baseline gap-1.5">
+            <span className="text-3xl font-bold tracking-tight text-ink">¥{price}</span>
+            <span className="text-xs text-mute">/ {product.duration_days} {t.subscribe.days} (约 ¥{dailyPrice}/天)</span>
+          </div>
+
+          <div className="mt-6 space-y-3 border-t border-white/10 pt-5 text-xs">
+            <div className="flex items-center gap-2.5 text-ink/90">
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-emerald-400">
+                <Mic className="h-3.5 w-3.5" aria-hidden="true" />
               </div>
-              <div>
-                <dt className="text-mute">{t.subscribe.llm}</dt>
-                <dd className="mt-1 font-medium">{formatUnits(context.balances.LLM_TOKEN_UNITS)}</dd>
+              <span>
+                <strong className="font-semibold text-ink">{formatMinutes(product.stt_ms)}</strong> {t.subscribe.sttMinutes}
+              </span>
+            </div>
+            <div className="flex items-center gap-2.5 text-ink/90">
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-purple-400">
+                <Cpu className="h-3.5 w-3.5" aria-hidden="true" />
               </div>
-            </dl>
-            {context.subscription ? (
-              <p className="mt-4 text-xs text-mute">
-                {t.subscribe.currentPlan}: {planName(context.subscription.product_code)} · {t.subscribe.paidThrough} {formatDate(context.subscription.paid_through, t.htmlLang)}
+              <span>
+                <strong className="font-semibold text-ink">{formatUnits(product.llm_units)}</strong> {t.subscribe.llmUnits}
+              </span>
+            </div>
+            <div className="flex items-center gap-2.5 text-ink/90">
+              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-blue-400">
+                <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+              </div>
+              <span className="text-mute">{t.subscribe.oneTimeNote}</span>
+            </div>
+          </div>
+
+          {preview ? (
+            <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-xs text-mute">
+              <p className="font-medium text-ink">{t.subscribe.renewLabel}</p>
+              <p className="mt-1 leading-relaxed">
+                {fillTemplate(preview.renewing ? t.subscribe.renewPreview : t.subscribe.buyPreview, {
+                  start: preview.start,
+                  end: preview.end,
+                })}
               </p>
-            ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-6">
+          {context && context.payments_enabled ? (
+            <button
+              type="button"
+              className={`${isQuarter ? primaryButton : secondaryButton} w-full shadow-sm`}
+              disabled={Boolean(busyProduct)}
+              onClick={() => void buy(product.code)}
+            >
+              {busyProduct === product.code ? t.subscribe.redirecting : action}
+            </button>
+          ) : (
+            <a
+              href={authHref('/auth/register')}
+              className={`${isQuarter ? primaryButton : secondaryButton} w-full shadow-sm`}
+            >
+              {t.login.register}
+            </a>
+          )}
+          <p className="mt-2 text-center text-[11px] text-mute">
+            {preview?.renewing ? t.subscribe.renewNote : t.subscribe.paymentsNote}
+          </p>
+        </div>
+      </section>
+    )
+  }
+
+  return (
+    <div className="space-y-7">
+      <div>
+        <Intro title={t.subscribe.title} body={t.subscribe.subtitle} />
+      </div>
+
+      {error ? <ErrorMessage>{errorText(t, new Error(error))}</ErrorMessage> : null}
+
+      {loading ? <Loading t={t} /> : context ? (
+        <div className="space-y-6">
+          <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs text-mute">{t.subscribe.signedIn}</p>
+                <p className="mt-0.5 break-all text-sm font-semibold text-ink">{context.email}</p>
+              </div>
+              {context.subscription ? (
+                <div className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-300">
+                  {planName(context.subscription.product_code)} · {t.subscribe.paidThrough} {formatDate(context.subscription.paid_through, t.htmlLang)}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-black/20 p-3">
+                <Mic className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+                <div>
+                  <p className="text-[11px] text-mute">{t.subscribe.stt}</p>
+                  <p className="text-sm font-semibold text-ink">{formatMinutes(context.balances.STT_AUDIO_MS)}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-black/20 p-3">
+                <Cpu className="h-4 w-4 text-purple-400" aria-hidden="true" />
+                <div>
+                  <p className="text-[11px] text-mute">{t.subscribe.llm}</p>
+                  <p className="text-sm font-semibold text-ink">{formatUnits(context.balances.LLM_TOKEN_UNITS)}</p>
+                </div>
+              </div>
+            </div>
           </section>
+
           {order ? (
             <p className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3 text-sm">
               {order.status === 'PAID'
                 ? paidOrderCopy(order, context.products, t.htmlLang, t)
-                : order.status === 'CLOSED' ? t.subscribe.paymentClosed : t.subscribe.paymentPending}
+                : order.status === 'CLOSED'
+                  ? t.subscribe.paymentClosed
+                  : t.subscribe.paymentPending}
             </p>
           ) : null}
+
           {context.payments_enabled ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-5 sm:grid-cols-2">
               {context.products.map((product) => {
                 const preview = periodPreview(product, context.subscription?.paid_through, t.htmlLang)
-                const action = product.code === 'PRO_QUARTER'
-                  ? (preview.renewing ? t.subscribe.renewQuarter : t.subscribe.buyQuarter)
-                  : (preview.renewing ? t.subscribe.renewMonth : t.subscribe.buyMonth)
-                return (
-                  <section key={product.code} className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
-                    <h2 className="text-sm font-semibold">{planName(product.code)}</h2>
-                    <p className="mt-2 text-2xl font-semibold">¥{(product.price_minor / 100).toFixed(0)}</p>
-                    <p className="mt-2 text-xs leading-5 text-mute">
-                      {product.duration_days} {t.subscribe.days} · {formatMinutes(product.stt_ms)} {t.subscribe.sttMinutes} · {formatUnits(product.llm_units)} {t.subscribe.llmUnits}
-                    </p>
-                    <div className="mt-4 space-y-1 text-xs leading-5 text-mute">
-                      <p className="font-medium text-ink">{t.subscribe.renewLabel}</p>
-                      <p>{fillTemplate(preview.renewing ? t.subscribe.renewPreview : t.subscribe.buyPreview, { start: preview.start, end: preview.end })}</p>
-                    </div>
-                    <button
-                      type="button"
-                      className={`${primaryButton} mt-4 w-full`}
-                      disabled={Boolean(busyProduct)}
-                      onClick={() => void buy(product.code)}
-                    >
-                      {busyProduct === product.code ? t.subscribe.redirecting : action}
-                    </button>
-                    <p className="mt-2 text-xs leading-5 text-mute">
-                      {preview.renewing ? t.subscribe.renewNote : t.subscribe.oneTimeNote}
-                    </p>
-                  </section>
-                )
+                return renderPlanCard(product, preview)
               })}
             </div>
-          ) : <p className="text-xs text-mute">{t.subscribe.paymentsOff}</p>}
+          ) : (
+            <p className="text-xs text-mute">{t.subscribe.paymentsOff}</p>
+          )}
         </div>
-      ) : !error ? (
-        <p className="mt-7 text-sm leading-6 text-mute">{t.subscribe.signedOut}</p>
-      ) : null}
-      <div className="mt-7 grid gap-3 sm:grid-cols-2">
-        <a className={primaryButton} href={authHref('/auth/register')}>{t.login.register}</a>
-        <a className={secondaryButton} href="/">{t.backHome}</a>
+      ) : (
+        <div className="space-y-6">
+          <div className="grid gap-5 sm:grid-cols-2">
+            {DEFAULT_PRODUCTS.map((product) => renderPlanCard(product))}
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-center">
+            <p className="text-sm text-mute">{t.subscribe.signedOut}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Info & Policy Features */}
+      <div className="grid gap-4 border-t border-white/10 pt-6 text-xs sm:grid-cols-3">
+        <div className="rounded-xl border border-white/5 bg-white/[0.015] p-3.5">
+          <h3 className="font-semibold text-ink">{t.subscribe.hostedTitle}</h3>
+          <p className="mt-1.5 leading-relaxed text-mute">{t.subscribe.hostedBody}</p>
+        </div>
+        <div className="rounded-xl border border-white/5 bg-white/[0.015] p-3.5">
+          <h3 className="font-semibold text-ink">{t.subscribe.byokTitle}</h3>
+          <p className="mt-1.5 leading-relaxed text-mute">{t.subscribe.byokBody}</p>
+        </div>
+        <div className="rounded-xl border border-white/5 bg-white/[0.015] p-3.5">
+          <h3 className="font-semibold text-ink">{t.subscribe.grantTitle}</h3>
+          <p className="mt-1.5 leading-relaxed text-mute">{t.subscribe.grantBody}</p>
+        </div>
       </div>
-    </>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
+        <a className={secondaryButton} href="/">
+          <ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />
+          {t.backHome}
+        </a>
+        <a className={secondaryButton} href={authHref('/auth/register')}>{t.login.register}</a>
+      </div>
+    </div>
   )
 }
 
@@ -1033,7 +1162,17 @@ function StaticPage({ title, body, t }: { title: string; body: string; t: T }) {
   )
 }
 
-function AuthShell({ children, lang, setLang }: { children: ReactNode; lang: AuthLang; setLang: (lang: AuthLang) => void }) {
+function AuthShell({
+  children,
+  lang,
+  setLang,
+  maxWidth = 'max-w-xl',
+}: {
+  children: ReactNode
+  lang: AuthLang
+  setLang: (lang: AuthLang) => void
+  maxWidth?: string
+}) {
   return (
     <div className="relative min-h-dvh overflow-hidden bg-canvas text-ink">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(244,244,247,0.13),transparent_43%)]" />
@@ -1056,7 +1195,7 @@ function AuthShell({ children, lang, setLang }: { children: ReactNode; lang: Aut
           ))}
         </div>
       </header>
-      <main className="relative mx-auto flex w-full max-w-xl items-center px-5 pb-16 pt-8 sm:min-h-[calc(100dvh-152px)] sm:pt-4">
+      <main className={`relative mx-auto flex w-full ${maxWidth} items-center px-5 pb-16 pt-8 sm:min-h-[calc(100dvh-152px)] sm:pt-4`}>
         <div className="w-full rounded-2xl border border-white/10 bg-surface/90 p-6 shadow-glow backdrop-blur-xl sm:p-9">
           <div className="mb-7 flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
             <KeyRound className="h-5 w-5 text-mute" aria-hidden="true" />
@@ -1103,5 +1242,6 @@ export default function AuthPage() {
     content = <StaticPage t={t} title={t.errorTitle} body={t.errors[code] || t.errors.INTERNAL_ERROR} />
   }
 
-  return <AuthShell lang={lang} setLang={setLang}>{content}</AuthShell>
+  const maxWidth = path === '/subscribe' ? 'max-w-4xl' : 'max-w-xl'
+  return <AuthShell lang={lang} setLang={setLang} maxWidth={maxWidth}>{content}</AuthShell>
 }

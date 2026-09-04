@@ -187,7 +187,7 @@ const sharedErrors = {
     INVALID_DISPLAY_NAME: '请输入不超过 128 个字符的显示名称。',
     INVALID_OR_EXPIRED_LINK: '此链接无效或已过期。',
     PASSWORD_MISMATCH: '两次输入的密码不一致。',
-    INVALID_PASSWORD: '密码长度必须为 12–128 个字符。',
+    INVALID_PASSWORD: '密码长度必须为 12-128 个字符。',
     TOTP_ALREADY_ENABLED: '验证器 MFA 已启用。',
     TOTP_RESTART: '请重新开始验证器设置。',
     TOTP_INCORRECT: '验证码不正确。',
@@ -220,7 +220,7 @@ const sharedErrors = {
     INVALID_DISPLAY_NAME: '請輸入不超過 128 個字元的顯示名稱。',
     INVALID_OR_EXPIRED_LINK: '此連結無效或已過期。',
     PASSWORD_MISMATCH: '兩次輸入的密碼不一致。',
-    INVALID_PASSWORD: '密碼長度必須為 12–128 個字元。',
+    INVALID_PASSWORD: '密碼長度必須為 12-128 個字元。',
     TOTP_ALREADY_ENABLED: '驗證器 MFA 已啟用。',
     TOTP_RESTART: '請重新開始驗證器設定。',
     TOTP_INCORRECT: '驗證碼不正確。',
@@ -297,7 +297,7 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     password: {
       setupTitle: 'Set your password',
       resetTitle: 'Reset your password',
-      subtitle: 'Use 12–128 characters.',
+      subtitle: 'Use 12-128 characters.',
       value: 'New password',
       confirm: 'Confirm password',
       submit: 'Save password',
@@ -332,7 +332,7 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     subscribe: {
       title: 'Hosted access',
       subtitle: 'Buy fixed hosted-access periods with Alipay, or keep using your own provider keys.',
-      hostedTitle: 'Rabbit hosted',
+      hostedTitle: 'OnCue hosted',
       hostedBody: 'Sign in from the desktop app to use gateway STT and Gemini. Remaining quota is shown below after a browser session exists.',
       byokTitle: 'Bring your own keys',
       byokBody: 'Deepgram, Gemini, Groq, and Apple stay on this device. Hosted quota is not required.',
@@ -440,7 +440,7 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     password: {
       setupTitle: '设置密码',
       resetTitle: '重置密码',
-      subtitle: '请使用 12–128 个字符。',
+      subtitle: '请使用 12-128 个字符。',
       value: '新密码',
       confirm: '确认密码',
       submit: '保存密码',
@@ -475,7 +475,7 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     subscribe: {
       title: '云托管额度',
       subtitle: '可通过支付宝购买固定期限的云托管服务，也可以继续使用自备密钥。',
-      hostedTitle: 'Rabbit 云托管',
+      hostedTitle: 'OnCue 云托管',
       hostedBody: '从桌面应用登录后，可使用网关 STT 和 Gemini。浏览器里若已有登录会话，下方会显示剩余额度。',
       byokTitle: '自备密钥',
       byokBody: 'Deepgram、Gemini、Groq 和 Apple 仍走本机。不需要云托管额度。',
@@ -583,7 +583,7 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     password: {
       setupTitle: '設定密碼',
       resetTitle: '重設密碼',
-      subtitle: '請使用 12–128 個字元。',
+      subtitle: '請使用 12-128 個字元。',
       value: '新密碼',
       confirm: '確認密碼',
       submit: '儲存密碼',
@@ -618,7 +618,7 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     subscribe: {
       title: '雲端代管額度',
       subtitle: '可透過支付寶購買固定期限的雲端代管服務，也可以繼續使用自備金鑰。',
-      hostedTitle: 'Rabbit 雲端代管',
+      hostedTitle: 'OnCue 雲端代管',
       hostedBody: '從桌面應用程式登入後，可使用閘道 STT 與 Gemini。瀏覽器若已有登入工作階段，下方會顯示剩餘額度。',
       byokTitle: '自備金鑰',
       byokBody: 'Deepgram、Gemini、Groq 與 Apple 仍走本機。不需要雲端代管額度。',
