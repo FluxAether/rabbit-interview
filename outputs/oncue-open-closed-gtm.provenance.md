@@ -1,0 +1,23 @@
+# Provenance: OnCue 开源 / 闭源 / 开源商业路径
+
+- **Date:** 2026-09-04
+- **Rounds:** 3 (product facts + official pricing/license fetches + researcher cross-check)
+- **Sources consulted:** ~70 URLs and local files (competitor pricing, OSS business-model posts, CAC/MIIT pages, GitHub licenses, OnCue repo)
+- **Sources accepted:** 39 cited in `outputs/oncue-open-closed-gtm.md` §9
+- **Sources rejected / discounted:**
+  - HireMe aggregator pages still listing ¥49/¥79 (stale vs official ¥69/¥129)
+  - Recruiter-side TAM reports used as OnCue TAM (HireVue/Eightfold, not candidate copilots)
+  - Interview Coder / Sensei / Beyz checkout numbers not present in fetched HTML
+  - Cluely 83k-breach blogs without a company incident report
+  - 2026-08-27 internal weighted scorecard (ideal-path latency, pre-hosted product)
+- **Verification:** PASS with documented contradictions (Final Round $90 vs $148; Cluely title $11.99 vs card $19.99)
+- **Plan:** outputs/.plans/oncue-open-closed-gtm.md
+- **Research files:**
+  - `outputs/.drafts/oncue-go-to-market-research.md` (researcher memo)
+  - `outputs/oncue-open-closed-gtm.md` (decision brief)
+- **Product facts frozen from:**
+  - `LICENSE` MIT
+  - `package.json` 0.15.0
+  - `server/src/payments.rs` PRO_MONTH 8900 / PRO_QUARTER 19900
+  - `docs/vendor_contract.md` production gate still open
+  - `docs/PRIVACY.md` / `docs/TERMS.md` local-first + no invisibility promise

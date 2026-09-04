@@ -544,6 +544,12 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.intent.generating': 'Synthesizing response...',
     'copilot.source.sys': 'SYS',
     'copilot.source.mic': 'MIC',
+    'copilot.moreActions': 'More actions',
+    'copilot.pinCurrentQuestion': 'Current Question',
+    'copilot.quick.brief': 'Brief summary',
+    'copilot.quick.star': 'STAR framework',
+    'copilot.quick.metrics': 'Add metrics/data',
+    'copilot.quick.followUp': 'Follow-up question',
 
     // Feedback labels (used in mock)
     'feedback.clarity': 'Clarity',
@@ -1099,6 +1105,12 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.intent.generating': '正在成文解答...',
     'copilot.source.sys': '系统',
     'copilot.source.mic': '麦克',
+    'copilot.moreActions': '更多操作',
+    'copilot.pinCurrentQuestion': '当前问题',
+    'copilot.quick.brief': '简要概括',
+    'copilot.quick.star': 'STAR 框架',
+    'copilot.quick.metrics': '补充量化数据',
+    'copilot.quick.followUp': '反问追问',
 
     // Feedback labels
     'feedback.clarity': '清晰度',
@@ -1651,6 +1663,12 @@ export const translations: Record<SupportedLanguage, Record<string, string>> = {
     'copilot.intent.generating': '正在成文解答...',
     'copilot.source.sys': '系統',
     'copilot.source.mic': '麥克',
+    'copilot.moreActions': '更多操作',
+    'copilot.pinCurrentQuestion': '當前問題',
+    'copilot.quick.brief': '簡要概括',
+    'copilot.quick.star': 'STAR 框架',
+    'copilot.quick.metrics': '補充數據指標',
+    'copilot.quick.followUp': '反問追問',
 
     'feedback.clarity': '清晰度',
     'feedback.relevance': '相關性',

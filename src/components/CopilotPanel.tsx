@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent } from "react"
-import { ArrowDown, Check, ChevronDown, ChevronUp, Clipboard, Download, EyeOff, LayoutTemplate, Loader2, Mic, RefreshCw, Shield, Sparkles, Square, Trash2, ZoomIn, ZoomOut } from "lucide-react"
+import { ArrowDown, Check, ChevronDown, ChevronUp, Clipboard, Download, ExternalLink, EyeOff, LayoutTemplate, Loader2, Mic, MoreHorizontal, RefreshCw, Shield, Sparkles, Square, Trash2, ZoomIn, ZoomOut } from "lucide-react"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { useTranslation } from "../i18n"
 import { sendCopilotCommand } from "../lib/copilotSession"
@@ -14,6 +14,7 @@ interface CopilotPanelProps {
   floating?: boolean
   windowStatus?: CopilotWindowStatus | null
   onHide?: () => void
+  onDetach?: () => void
   onExportRecording?: () => void
   canExportRecording?: boolean
 }
@@ -154,6 +155,7 @@ export default function CopilotPanel({
   floating = false,
   windowStatus = null,
   onHide,
+  onDetach,
   onExportRecording,
   canExportRecording = false,
 }: CopilotPanelProps) {
@@ -170,8 +172,28 @@ export default function CopilotPanel({
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [collapsedTakeaways, setCollapsedTakeaways] = useState<Record<number, boolean>>({})
   const [hudMode, setHudMode] = useState<boolean>(false)
+  const [moreActionsOpen, setMoreActionsOpen] = useState(false)
 
   const messagesRef = useRef<HTMLDivElement>(null)
+  const moreMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!moreActionsOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreActionsOpen(false)
+    }
+    const handleClickOutside = (event: globalThis.MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target as Node)) {
+        setMoreActionsOpen(false)
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown)
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown)
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [moreActionsOpen])
   const running = copilot.phase === "starting" || copilot.phase === "listening"
   const busy = copilot.phase === "stopping"
   const roleLabels = {
@@ -210,6 +232,13 @@ export default function CopilotPanel({
     void sendCopilotCommand({ type: "follow-up", text })
     setFollowUp("")
   }
+
+  const quickPrompts = [
+    { key: "copilot.quick.brief", label: `💡 ${t("copilot.quick.brief")}`, prompt: t("copilot.quick.brief") },
+    { key: "copilot.quick.star", label: `📐 ${t("copilot.quick.star")}`, prompt: t("copilot.quick.star") },
+    { key: "copilot.quick.metrics", label: `📊 ${t("copilot.quick.metrics")}`, prompt: t("copilot.quick.metrics") },
+    { key: "copilot.quick.followUp", label: `❓ ${t("copilot.quick.followUp")}`, prompt: t("copilot.quick.followUp") },
+  ]
 
   const protectionLabel = t(protectionMessageKey(windowStatus))
 
@@ -382,6 +411,19 @@ export default function CopilotPanel({
 
         {/* Toolbar: Show/Hide My Bubbles, Font Size, Opacity (floating mode) & Duration */}
         <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
+          {!floating && onDetach && (
+            <button
+              type="button"
+              onClick={onDetach}
+              className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-2 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
+              title={t("copilot.detach")}
+              aria-label={t("copilot.detach")}
+              data-no-drag
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              <span className="text-[10px] font-medium">{t("copilot.detach")}</span>
+            </button>
+          )}
           <div
             className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-2 py-1 text-xs"
             title={showMyBubbles ? t("copilot.hideMyBubbles") : t("copilot.showMyBubbles")}
@@ -559,6 +601,32 @@ export default function CopilotPanel({
         </div>
       </div>
 
+      {/* Pinned Current Question Banner */}
+      {copilot.question && (
+        <div className="mb-2 flex shrink-0 items-start justify-between gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-subtle)] p-2.5">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 text-[10px] font-semibold text-[var(--action)]">
+              <Sparkles className="h-3 w-3" />
+              <span>{t("copilot.pinCurrentQuestion")}</span>
+            </div>
+            <p className="mt-0.5 line-clamp-2 text-xs font-medium text-[var(--text-main)]">
+              {copilot.question}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void sendCopilotCommand({ type: "retry" })}
+            disabled={!running}
+            className="flex shrink-0 items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-surface)] px-1.5 py-1 text-[10px] font-medium text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-40"
+            title={t("copilot.retry")}
+            aria-label={t("copilot.retry")}
+          >
+            <RefreshCw className="h-3 w-3" />
+            <span>{t("copilot.retry")}</span>
+          </button>
+        </div>
+      )}
+
       {/* HUD Teleprompter Overlay / View */}
       {hudMode && floating && (
         <div className="mb-2 shrink-0 rounded-lg border border-[var(--border-strong)] bg-slate-950/90 p-3 text-white backdrop-blur-md">
@@ -642,7 +710,7 @@ export default function CopilotPanel({
                               <div className={`rounded-lg border border-[var(--border-color)] bg-[var(--bg-subtle)] p-2.5 text-[var(--text-main)] ${takeawaySizeClass}`}>
                                 <div className="flex items-center justify-between font-semibold text-[var(--text-main)]">
                                   <div className="flex items-center gap-1.5">
-                                    <Sparkles className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                                    <Sparkles className="h-3.5 w-3.5 text-[var(--action)]" />
                                     {t("copilot.keyPoints")}
                                   </div>
                                   <button
@@ -662,7 +730,7 @@ export default function CopilotPanel({
                                   <ul className="mt-1.5 space-y-1 pl-1">
                                     {keyTakeaways.map((point, idx) => (
                                       <li key={idx} className="flex items-start gap-1.5">
-                                        <span className="font-bold text-[var(--text-muted)]">•</span>
+                                        <span className="font-bold text-[var(--action)]">•</span>
                                         <span className="leading-relaxed">{point}</span>
                                       </li>
                                     ))}
@@ -785,6 +853,21 @@ export default function CopilotPanel({
         </div>
       )}
 
+      {/* Quick Prompts */}
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {quickPrompts.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => void sendCopilotCommand({ type: "follow-up", text: item.prompt })}
+            disabled={!running}
+            className="rounded-full border border-[var(--border-color)] bg-[var(--bg-surface)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-40"
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
       {/* Follow-up Form */}
       <form className="mt-2 flex gap-2" onSubmit={submitFollowUp}>
         <input
@@ -827,30 +910,53 @@ export default function CopilotPanel({
           <RefreshCw className="h-3.5 w-3.5" /> {t("copilot.retry")}
         </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            const hasContent = Boolean(copilot.question || copilot.messages.length || copilot.suggestions.length)
-            if (copilot.archiveStatus === "saving") return
-            if (hasContent && !window.confirm(t("copilot.clearConfirm"))) return
-            void sendCopilotCommand({ type: "clear" })
-          }}
-          disabled={copilot.archiveStatus === "saving"}
-          className="flex items-center gap-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
-        >
-          <Trash2 className="h-3.5 w-3.5" /> {t("copilot.clear")}
-        </button>
-
-        {!floating && onExportRecording && (
+        <div className="relative" ref={moreMenuRef}>
           <button
             type="button"
-            onClick={onExportRecording}
-            disabled={!canExportRecording}
-            className="flex items-center gap-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-40"
+            onClick={() => setMoreActionsOpen((prev) => !prev)}
+            className="flex items-center justify-center rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] px-2 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]"
+            title={t("copilot.moreActions")}
+            aria-label={t("copilot.moreActions")}
+            aria-expanded={moreActionsOpen}
           >
-            <Download className="h-3.5 w-3.5" /> {t("copilot.exportRecording")}
+            <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
-        )}
+
+          {moreActionsOpen && (
+            <div className="absolute bottom-full left-0 mb-1.5 z-20 min-w-[140px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-1 shadow-lg">
+              {!floating && onExportRecording && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreActionsOpen(false)
+                    onExportRecording()
+                  }}
+                  disabled={!canExportRecording}
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-[var(--text-main)] hover:bg-[var(--bg-hover)] disabled:opacity-40"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>{t("copilot.exportRecording")}</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreActionsOpen(false)
+                  const hasContent = Boolean(copilot.question || copilot.messages.length || copilot.suggestions.length)
+                  if (copilot.archiveStatus === "saving") return
+                  if (hasContent && !window.confirm(t("copilot.clearConfirm"))) return
+                  void sendCopilotCommand({ type: "clear" })
+                }}
+                disabled={copilot.archiveStatus === "saving"}
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-[var(--danger)] hover:bg-[var(--bg-hover)] disabled:opacity-40"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>{t("copilot.clear")}</span>
+              </button>
+            </div>
+          )}
+        </div>
 
         <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 text-[10px] text-[var(--text-muted)]">
           <span className={`flex items-center gap-1 rounded-md bg-[var(--bg-subtle)] px-2 py-1 ${windowStatus?.protection_applied ? "text-[var(--success)]" : "text-[var(--warning)]"}`} title={t("copilot.protection.caveat")}>

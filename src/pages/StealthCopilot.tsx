@@ -292,6 +292,7 @@ export default function StealthCopilot({
         <div className="min-h-0 flex-1">
           <CopilotPanel
             windowStatus={windowStatus}
+            onDetach={() => void showCopilotWindow().then(setWindowStatus)}
             onExportRecording={handleExportRecording}
             canExportRecording={copilot.hasRecording}
           />
