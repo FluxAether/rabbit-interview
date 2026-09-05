@@ -1,3 +1,4 @@
+pub mod access;
 pub mod auth;
 pub mod config;
 pub mod entitlement;
@@ -24,6 +25,7 @@ use auth::AuthService;
 use axum::{
     extract::{DefaultBodyLimit, Path, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
+    middleware,
     response::{IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
@@ -38,7 +40,6 @@ use tokio::sync::{Mutex, Semaphore};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
-    trace::TraceLayer,
 };
 
 #[derive(Clone)]
@@ -269,7 +270,10 @@ pub fn router(state: AppState) -> Router {
         .merge(payments::router())
         .layer(DefaultBodyLimit::max(max_json_bytes))
         .layer(cors)
-        .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            access::access_log,
+        ))
         .with_state(state)
 }
 

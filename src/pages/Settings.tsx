@@ -151,6 +151,7 @@ export default function Settings({
   const [sttLanguage, setSttLanguage] = useState<SttLanguage>('zh-CN')
   const [appleStt, setAppleStt] = useState<{ available: boolean; reason: string | null }>({ available: false, reason: null })
   const [appleTest, setAppleTest] = useState<TestResult>({ loading: false })
+  const byokSttRef = useRef<{ provider: SttProvider; model: string }>({ provider: 'deepgram', model: 'nova-3' })
 
   const [recordingStorage, setRecordingStorage] = useState<RecordingStorageUsage>({ bytes: 0, fileCount: 0 })
   const [historyStorage, setHistoryStorage] = useState<HistoryStorageUsage>({ bytes: 0, recordCount: 0 })
@@ -384,6 +385,9 @@ export default function Settings({
     if (settings.sttProvider) setSttProvider(settings.sttProvider as SttProvider)
     if (settings.sttModel) setSttModel(settings.sttModel as string)
     if (settings.sttLanguage) setSttLanguage(settings.sttLanguage as SttLanguage)
+    if (settings.sttProvider && settings.sttProvider !== 'hosted') {
+      byokSttRef.current = { provider: settings.sttProvider as SttProvider, model: (settings.sttModel as string) || 'nova-3' }
+    }
   }, [settings])
 
   useEffect(() => {
@@ -510,6 +514,7 @@ export default function Settings({
   const updateSttConfig = (provider: SttProvider, model: string) => {
     setSttProvider(provider)
     setSttModel(model)
+    if (provider !== 'hosted') byokSttRef.current = { provider, model }
 
     useAppStore.setState((s) => ({
       settings: {
@@ -522,7 +527,23 @@ export default function Settings({
 
   const updateAiAccessMode = (mode: AiAccessMode) => {
     setAiAccessMode(mode)
-    useAppStore.setState((state) => ({ settings: { ...state.settings, aiAccessMode: mode } }))
+    if (mode === 'hosted') {
+      if (sttProvider !== 'hosted') byokSttRef.current = { provider: sttProvider, model: sttModel }
+      setSttProvider('hosted')
+      setSttModel(HOSTED_STT_MODEL)
+      useAppStore.setState((state) => ({
+        settings: { ...state.settings, aiAccessMode: mode, sttProvider: 'hosted', sttModel: HOSTED_STT_MODEL },
+      }))
+      return
+    }
+    const restored = byokSttRef.current.provider === 'hosted'
+      ? { provider: 'deepgram' as const, model: 'nova-3' }
+      : byokSttRef.current
+    setSttProvider(restored.provider)
+    setSttModel(restored.model)
+    useAppStore.setState((state) => ({
+      settings: { ...state.settings, aiAccessMode: mode, sttProvider: restored.provider, sttModel: restored.model },
+    }))
   }
 
   const handleHostedAuth = async () => {
@@ -1373,7 +1394,8 @@ export default function Settings({
                         <button
                           type="button"
                           onClick={() => updateSttConfig('deepgram', 'nova-3')}
-                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+                          disabled={aiAccessMode === 'hosted'}
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t('settings.useProvider', { name: 'Deepgram' })}
                         </button>
@@ -1386,7 +1408,8 @@ export default function Settings({
                         <select
                           value={sttProvider === 'deepgram' ? sttModel : 'nova-3'}
                           onChange={(e) => updateSttConfig('deepgram', e.target.value)}
-                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
+                          disabled={aiAccessMode === 'hosted'}
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm disabled:opacity-50"
                         >
                           <option value="nova-3">nova-3 (Recommended - multilingual)</option>
                           <option value="nova-2">nova-2 (general)</option>
@@ -1422,7 +1445,8 @@ export default function Settings({
                         <button
                           type="button"
                           onClick={() => updateSttConfig('gemini', GEMINI_LIVE_TRANSLATE_MODEL)}
-                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+                          disabled={aiAccessMode === 'hosted'}
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t('settings.useProvider', { name: 'Google AI Studio' })}
                         </button>
@@ -1435,7 +1459,8 @@ export default function Settings({
                         <select
                           value={sttProvider === 'gemini' ? sttModel : GEMINI_LIVE_TRANSLATE_MODEL}
                           onChange={(e) => updateSttConfig('gemini', e.target.value)}
-                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
+                          disabled={aiAccessMode === 'hosted'}
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm disabled:opacity-50"
                         >
                           <option value={GEMINI_LIVE_TRANSCRIBE_MODEL}>{GEMINI_LIVE_TRANSCRIBE_MODEL}</option>
                           <option value={GEMINI_LIVE_TRANSLATE_MODEL}>{GEMINI_LIVE_TRANSLATE_MODEL}</option>
@@ -1467,9 +1492,9 @@ export default function Settings({
                       ) : (
                         <button
                           type="button"
-                          disabled={!appleStt.available || sttLanguage === 'multi'}
+                          disabled={aiAccessMode === 'hosted' || !appleStt.available || sttLanguage === 'multi'}
                           onClick={() => updateSttConfig('apple', APPLE_STT_MODEL)}
-                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t('settings.useProvider', { name: t('settings.stt.appleTitle') })}
                         </button>

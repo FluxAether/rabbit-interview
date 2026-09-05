@@ -1170,7 +1170,8 @@ export async function startDeepgramStream(
   onSocketChange?: (ws: WebSocket) => void,
   options: DeepgramStreamOptions = {},
 ): Promise<WebSocket> {
-  const configured = useAppStore.getState().settings?.sttProvider;
+  const settings = useAppStore.getState().settings;
+  const configured = settings?.aiAccessMode === 'hosted' ? 'hosted' : settings?.sttProvider;
   const provider = configured === 'hosted' ? 'hosted' : configured === 'gemini' ? 'gemini' : configured === 'apple' ? 'apple' : 'deepgram';
   const ws = await (provider === 'hosted'
     ? openHostedSttSocket(sampleRate, onTranscript, onError, options)

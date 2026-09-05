@@ -1112,7 +1112,8 @@ class CopilotSessionHost {
       requestType,
       emittedText: false,
     }
-    const category = String(useAppStore.getState().settings?.aiModel || 'AI')
+    const settings = useAppStore.getState().settings
+    const category = settings?.aiAccessMode === 'hosted' ? 'hosted' : String(settings?.aiModel || 'AI')
     const replyToId = this.replyAnchorId(question, requestType)
     this.transition({
       type: 'stream-answer',
@@ -1244,7 +1245,8 @@ class CopilotSessionHost {
     const answerSequence = ++this.answerSequence
     const idBase = sessionId * 1_000_000 + answerSequence * 100
     this.backgroundAnswers.set(idBase, controller)
-    const category = String(useAppStore.getState().settings?.aiModel || 'AI')
+    const settings = useAppStore.getState().settings
+    const category = settings?.aiAccessMode === 'hosted' ? 'hosted' : String(settings?.aiModel || 'AI')
     this.transition({
       type: 'regenerate-start',
       sessionId,

@@ -80,9 +80,11 @@ export function sttRequiresCloudKey(provider: SttProvider): boolean {
 
 export function deriveReadiness(input: ReadinessInput): ReadinessState {
   const llmProvider = resolveLlmProvider(input.settings?.aiModel, input.settings?.aiAccessMode)
-  const sttProvider = input.settings?.sttProvider === 'gemini' || input.settings?.sttProvider === 'apple' || input.settings?.sttProvider === 'hosted'
-    ? input.settings.sttProvider
-    : 'deepgram'
+  const sttProvider = input.settings?.aiAccessMode === 'hosted' || input.settings?.sttProvider === 'hosted'
+    ? 'hosted'
+    : input.settings?.sttProvider === 'gemini' || input.settings?.sttProvider === 'apple'
+      ? input.settings.sttProvider
+      : 'deepgram'
   const issues: ReadinessIssue[] = []
 
   if (input.loading) {

@@ -84,7 +84,7 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
   }
   const aiAccessMode: AiAccessMode = saved?.aiAccessMode === 'hosted' ? 'hosted' : 'byok';
   const savedSttProvider = saved?.sttProvider as string | undefined;
-  const sttProvider: SttProvider = savedSttProvider === 'hosted'
+  const sttProvider: SttProvider = aiAccessMode === 'hosted' || savedSttProvider === 'hosted'
     ? 'hosted'
     : savedSttProvider === 'gemini'
     ? 'gemini'

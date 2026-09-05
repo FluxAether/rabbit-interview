@@ -1,6 +1,10 @@
 use std::{io::ErrorKind, time::Duration};
 
-use rabbit_gateway::{config::Config, router, AppState};
+use rabbit_gateway::{
+    access::{LoggedListener, PeerAddr},
+    config::Config,
+    router, AppState,
+};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -10,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
         .json()
         .with_env_filter(
             EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,tower_http=info")),
+                .unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
     let config = Config::from_env()?;
@@ -18,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(config).await?;
     state.start_reaper();
     let app = router(state.clone());
-    let listener = tokio::net::TcpListener::bind(listen_addr).await?;
+    let listener = LoggedListener::new(tokio::net::TcpListener::bind(listen_addr).await?);
     tracing::info!(%listen_addr, "gateway listening");
 
     let shutdown = state.shutdown().clone();
@@ -30,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let server_shutdown = state.shutdown().clone();
     axum::serve(
         listener,
-        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        app.into_make_service_with_connect_info::<PeerAddr>(),
     )
     .with_graceful_shutdown(server_shutdown.cancelled_owned())
     .await?;

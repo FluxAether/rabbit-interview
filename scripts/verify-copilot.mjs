@@ -172,6 +172,14 @@ check(
   'STT settings expose Apple on-device speech and the shared facade can start it',
 )
 check(
+  settingsPage.includes("if (mode === 'hosted')")
+    && settingsPage.includes("sttProvider: 'hosted', sttModel: HOSTED_STT_MODEL")
+    && settingsPage.includes('byokSttRef')
+    && llm.includes("if (useAppStore.getState().settings?.aiAccessMode === 'hosted')")
+    && llm.includes("settings?.aiAccessMode === 'hosted' ? 'hosted' : settings?.sttProvider"),
+  'hosted AI access also selects hosted STT for Copilot',
+)
+check(
   appleSttSwift.includes('ingestQueue')
     && appleSttSwift.includes('ingestQueue.async')
     && appleSttSwift.includes('prepareToAnalyze')
@@ -496,6 +504,14 @@ check(
     && normalizedHostedSettings.sttModel === 'hosted-managed'
     && DEFAULT_SETTINGS.aiAccessMode === 'byok',
   'hosted settings normalize to the gateway model without changing the BYOK default',
+)
+storedSettings = JSON.stringify({ aiAccessMode: 'hosted', sttProvider: 'deepgram', sttModel: 'nova-3' })
+const normalizedHostedAccessSettings = await loadAppSettings()
+check(
+  normalizedHostedAccessSettings.aiAccessMode === 'hosted'
+    && normalizedHostedAccessSettings.sttProvider === 'hosted'
+    && normalizedHostedAccessSettings.sttModel === 'hosted-managed',
+  'hosted AI access normalizes leftover BYOK STT onto the gateway',
 )
 
 const { deriveReadiness: deriveHostedReadiness } = loadTypeScriptModule('src/lib/readiness.ts', ['deriveReadiness'])
