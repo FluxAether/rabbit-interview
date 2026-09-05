@@ -12,6 +12,8 @@ const FOLLOW_UP_SYSTEM = 'You are an interview copilot handling a user follow-up
 
 type ByokLlmProvider = 'groq' | 'openai' | 'anthropic' | 'gemini';
 type LlmProvider = ByokLlmProvider | 'hosted';
+export type HostedLlmProvider = 'gemini' | 'openai' | 'anthropic' | 'groq';
+export type HostedSttProvider = 'volcengine' | 'deepgram' | 'gemini_live';
 
 function answerTokenBudget(provider: LlmProvider, model: string): number {
   const normalizedModel = model.toLowerCase();
@@ -85,6 +87,7 @@ export interface LlmStreamResult {
   finishReason: string | null;
   provider: LlmProvider;
   model: string;
+  upstreamProvider?: HostedLlmProvider;
 }
 
 export interface SuggestionStreamHandlers {
@@ -131,6 +134,14 @@ async function resolveConfiguredProvider(allowProviderFallback = true): Promise<
 interface ParsedStreamEvent {
   delta: string | null;
   finishReason?: string | null;
+  upstreamProvider?: HostedLlmProvider;
+  model?: string;
+}
+
+function hostedLlmProvider(value: unknown): HostedLlmProvider | undefined {
+  return value === 'gemini' || value === 'openai' || value === 'anthropic' || value === 'groq'
+    ? value
+    : undefined;
 }
 
 function classifyStreamStatus(finishReason: string | null): LlmStreamStatus {
@@ -164,34 +175,41 @@ async function consumeSse(
   let accumulated = '';
   let finishReason: string | null = null;
   let streamError: Error | null = null;
+  let upstreamProvider: HostedLlmProvider | undefined;
+  let resolvedModel = model;
 
   const processEvent = (event: string) => {
     const data = parseSseEventData(event);
     if (!data || data === '[DONE]') return;
     const parsed = parsePayload(JSON.parse(data));
     if (parsed.finishReason) finishReason = parsed.finishReason;
+    if (parsed.upstreamProvider) upstreamProvider = parsed.upstreamProvider;
+    if (parsed.model) resolvedModel = parsed.model;
     if (!parsed.delta) return;
     accumulated += parsed.delta;
     handlers.onDelta(parsed.delta, accumulated);
   };
 
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      buffer += decoder.decode(value, { stream: !done });
-      buffer = buffer.replace(/\r\n/g, '\n');
-      const events = buffer.split('\n\n');
-      buffer = events.pop() || '';
-      events.forEach(processEvent);
-      if (done) {
-        if (buffer.trim()) processEvent(buffer);
-        break;
-      }
+  while (true) {
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      if (normalized.name === 'AbortError') throw normalized;
+      streamError = normalized;
+      break;
     }
-  } catch (error) {
-    const normalized = error instanceof Error ? error : new Error(String(error));
-    if (normalized.name === 'AbortError') throw normalized;
-    streamError = normalized;
+    const { value, done } = chunk;
+    buffer += decoder.decode(value, { stream: !done });
+    buffer = buffer.replace(/\r\n/g, '\n');
+    const events = buffer.split('\n\n');
+    buffer = events.pop() || '';
+    events.forEach(processEvent);
+    if (done) {
+      if (buffer.trim()) processEvent(buffer);
+      break;
+    }
   }
 
   const result: LlmStreamResult = {
@@ -199,7 +217,8 @@ async function consumeSse(
     status: streamError ? 'incomplete' : classifyStreamStatus(finishReason),
     finishReason: streamError ? 'connection_lost' : finishReason,
     provider,
-    model,
+    model: resolvedModel,
+    ...(upstreamProvider ? { upstreamProvider } : {}),
   };
   handlers.onComplete?.(result);
   return result;
@@ -375,6 +394,10 @@ async function generateHostedSuggestionsStream(
         return {
           delta: typeof payload?.delta === 'string' ? payload.delta : null,
           finishReason: payload?.finish_reason || null,
+          upstreamProvider: hostedLlmProvider(payload?.provider),
+          model: typeof payload?.model === 'string' && payload.model.length <= 128
+            ? payload.model
+            : undefined,
         };
       },
       handlers,
@@ -439,6 +462,8 @@ export interface DeepgramStreamOptions {
 
 export interface DeepgramStream extends WebSocket {
   __sttProvider?: 'deepgram' | 'gemini' | 'apple' | 'hosted';
+  __hostedProvider?: HostedSttProvider;
+  __hostedModel?: string;
   __deepgramManaged?: boolean;
   __deepgramClosedByClient?: boolean;
   __deepgramKeepAliveTimer?: ReturnType<typeof globalThis.setInterval> | null;
@@ -1084,7 +1109,7 @@ async function openHostedSttSocket(
     ws.onmessage = (event) => {
       try {
         const payload = JSON.parse(String(event.data));
-        if (payload.type === 'stt.ready') {
+        if (applyHostedSttReady(ws, payload)) {
           if (!ready) {
             ready = true;
             globalThis.clearTimeout(timer);
@@ -1125,6 +1150,17 @@ async function openHostedSttSocket(
       if (!ready) reject(new Error('Hosted STT closed before it was ready'));
     };
   });
+}
+
+function applyHostedSttReady(ws: DeepgramStream, payload: any): boolean {
+  if (payload?.type !== 'stt.ready') return false;
+  if (payload.provider === 'volcengine' || payload.provider === 'deepgram' || payload.provider === 'gemini_live') {
+    ws.__hostedProvider = payload.provider;
+  }
+  if (typeof payload.model === 'string' && payload.model.length <= 128) {
+    ws.__hostedModel = payload.model;
+  }
+  return true;
 }
 
 export async function startDeepgramStream(

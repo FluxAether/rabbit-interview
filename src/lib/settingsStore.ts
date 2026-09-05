@@ -13,7 +13,7 @@ export type CopilotFontSize = 'sm' | 'base' | 'lg';
 export const GEMINI_LIVE_TRANSCRIBE_MODEL = 'gemini-3.5-transcribe-live';
 export const GEMINI_LIVE_TRANSLATE_MODEL = 'gemini-3.5-live-translate-preview';
 export const APPLE_STT_MODEL = 'speech-transcriber';
-export const HOSTED_STT_MODEL = 'volcengine-bigmodel';
+export const HOSTED_STT_MODEL = 'hosted-managed';
 
 export interface AppSettings {
   theme: 'Light' | 'Dark' | 'System';

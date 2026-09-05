@@ -1,4 +1,6 @@
-use std::{env, net::SocketAddr, path::PathBuf, str::FromStr, time::Duration};
+use std::{
+    collections::HashSet, env, net::SocketAddr, path::PathBuf, str::FromStr, time::Duration,
+};
 
 use anyhow::{anyhow, Context, Result};
 use ipnet::IpNet;
@@ -31,8 +33,25 @@ pub struct Config {
     pub volcengine_api_key: Option<String>,
     pub volcengine_resource_id: String,
     pub volcengine_url: String,
+    pub volcengine_stt_models: Vec<String>,
+    pub deepgram_api_key: Option<String>,
+    pub deepgram_stt_url: String,
+    pub deepgram_stt_models: Vec<String>,
     pub gemini_api_key: Option<String>,
     pub gemini_model: String,
+    pub gemini_live_url: String,
+    pub gemini_stt_models: Vec<String>,
+    pub gemini_llm_url: String,
+    pub gemini_llm_models: Vec<String>,
+    pub openai_api_key: Option<String>,
+    pub openai_llm_url: String,
+    pub openai_llm_models: Vec<String>,
+    pub anthropic_api_key: Option<String>,
+    pub anthropic_llm_url: String,
+    pub anthropic_llm_models: Vec<String>,
+    pub groq_api_key: Option<String>,
+    pub groq_llm_url: String,
+    pub groq_llm_models: Vec<String>,
     pub initial_stt_hold_ms: i64,
     pub stt_top_up_ms: i64,
     pub stt_top_up_threshold_ms: i64,
@@ -59,6 +78,8 @@ impl Config {
             allowed_origins.push(landing_public_url.clone());
         }
         include_loopback_aliases(&mut allowed_origins, &landing_public_url);
+        let gemini_model =
+            env::var("GEMINI_HOSTED_MODEL").unwrap_or_else(|_| "gemini-3.7-flash".to_owned());
         Ok(Self {
             listen_addr: parse("GATEWAY_LISTEN_ADDR", "127.0.0.1:8787")?,
             database_url: required("DATABASE_URL")?,
@@ -104,9 +125,34 @@ impl Config {
             volcengine_url: env::var("VOLCENGINE_STT_URL").unwrap_or_else(|_| {
                 "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel".to_owned()
             }),
+            volcengine_stt_models: model_list("VOLCENGINE_STT_MODELS", "bigmodel")?,
+            deepgram_api_key: optional("DEEPGRAM_API_KEY"),
+            deepgram_stt_url: env::var("DEEPGRAM_STT_URL")
+                .unwrap_or_else(|_| "wss://api.deepgram.com/v1/listen".to_owned()),
+            deepgram_stt_models: model_list("DEEPGRAM_STT_MODELS", "")?,
             gemini_api_key: optional("GEMINI_API_KEY"),
-            gemini_model: env::var("GEMINI_HOSTED_MODEL")
-                .unwrap_or_else(|_| "gemini-3.7-flash".to_owned()),
+            gemini_model: gemini_model.clone(),
+            gemini_live_url: env::var("GEMINI_LIVE_URL").unwrap_or_else(|_| {
+                "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent".to_owned()
+            }),
+            gemini_stt_models: model_list("GEMINI_STT_MODELS", "")?,
+            gemini_llm_url: env::var("GEMINI_LLM_URL").unwrap_or_else(|_| {
+                "https://generativelanguage.googleapis.com/v1beta/interactions".to_owned()
+            }),
+            gemini_llm_models: model_list("GEMINI_LLM_MODELS", &gemini_model)?,
+            openai_api_key: optional("OPENAI_API_KEY"),
+            openai_llm_url: env::var("OPENAI_LLM_URL")
+                .unwrap_or_else(|_| "https://api.openai.com/v1/responses".to_owned()),
+            openai_llm_models: model_list("OPENAI_LLM_MODELS", "")?,
+            anthropic_api_key: optional("ANTHROPIC_API_KEY"),
+            anthropic_llm_url: env::var("ANTHROPIC_LLM_URL")
+                .unwrap_or_else(|_| "https://api.anthropic.com/v1/messages".to_owned()),
+            anthropic_llm_models: model_list("ANTHROPIC_LLM_MODELS", "")?,
+            groq_api_key: optional("GROQ_API_KEY"),
+            groq_llm_url: env::var("GROQ_LLM_URL").unwrap_or_else(|_| {
+                "https://api.groq.com/openai/v1/chat/completions".to_owned()
+            }),
+            groq_llm_models: model_list("GROQ_LLM_MODELS", "")?,
             initial_stt_hold_ms: parse("STT_INITIAL_HOLD_MS", "60000")?,
             stt_top_up_ms: parse("STT_TOP_UP_MS", "60000")?,
             stt_top_up_threshold_ms: parse("STT_TOP_UP_THRESHOLD_MS", "15000")?,
@@ -167,11 +213,31 @@ impl Config {
             "ws",
             false,
         )?;
-        if self.hosted_stt_enabled && self.volcengine_api_key.is_none() {
-            return Err(anyhow!("HOSTED_STT_ENABLED requires VOLCENGINE_API_KEY"));
+        validate_secure_url(
+            "DEEPGRAM_STT_URL",
+            &self.deepgram_stt_url,
+            "wss",
+            "ws",
+            false,
+        )?;
+        validate_secure_url("GEMINI_LIVE_URL", &self.gemini_live_url, "wss", "ws", false)?;
+        for (name, value) in [
+            ("GEMINI_LLM_URL", &self.gemini_llm_url),
+            ("OPENAI_LLM_URL", &self.openai_llm_url),
+            ("ANTHROPIC_LLM_URL", &self.anthropic_llm_url),
+            ("GROQ_LLM_URL", &self.groq_llm_url),
+        ] {
+            validate_secure_url(name, value, "https", "http", false)?;
         }
-        if self.hosted_llm_enabled && self.gemini_api_key.is_none() {
-            return Err(anyhow!("HOSTED_LLM_ENABLED requires GEMINI_API_KEY"));
+        if self.hosted_stt_enabled && !self.has_selectable_stt_provider() {
+            return Err(anyhow!(
+                "HOSTED_STT_ENABLED requires at least one configured STT provider"
+            ));
+        }
+        if self.hosted_llm_enabled && !self.has_selectable_llm_provider() {
+            return Err(anyhow!(
+                "HOSTED_LLM_ENABLED requires at least one configured LLM provider"
+            ));
         }
         validate_secure_url(
             "ALIPAY_GATEWAY_URL",
@@ -200,6 +266,21 @@ impl Config {
             return Err(anyhow!("GLOBAL_CONCURRENCY_LIMIT must be positive"));
         }
         Ok(())
+    }
+
+    fn has_selectable_stt_provider(&self) -> bool {
+        (self.volcengine_api_key.is_some()
+            && !self.volcengine_resource_id.trim().is_empty()
+            && !self.volcengine_stt_models.is_empty())
+            || (self.deepgram_api_key.is_some() && !self.deepgram_stt_models.is_empty())
+            || (self.gemini_api_key.is_some() && !self.gemini_stt_models.is_empty())
+    }
+
+    fn has_selectable_llm_provider(&self) -> bool {
+        (self.gemini_api_key.is_some() && !self.gemini_llm_models.is_empty())
+            || (self.openai_api_key.is_some() && !self.openai_llm_models.is_empty())
+            || (self.anthropic_api_key.is_some() && !self.anthropic_llm_models.is_empty())
+            || (self.groq_api_key.is_some() && !self.groq_llm_models.is_empty())
     }
 }
 
@@ -306,6 +387,30 @@ fn list(name: &str, default: &str) -> Vec<String> {
         .collect()
 }
 
+fn model_list(name: &str, default: &str) -> Result<Vec<String>> {
+    parse_model_list(name, &env::var(name).unwrap_or_else(|_| default.to_owned()))
+}
+
+fn parse_model_list(name: &str, value: &str) -> Result<Vec<String>> {
+    let mut seen = HashSet::new();
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if value.len() > 128 || value.chars().any(char::is_control) {
+                return Err(anyhow!("invalid model in {name}"));
+            }
+            Ok(value.to_owned())
+        })
+        .filter_map(|value| match value {
+            Ok(value) if seen.insert(value.clone()) => Some(Ok(value)),
+            Ok(_) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect()
+}
+
 fn include_loopback_aliases(origins: &mut Vec<String>, landing_public_url: &str) {
     for (from, to) in [("localhost", "127.0.0.1"), ("127.0.0.1", "localhost")] {
         if landing_public_url.contains(from) {
@@ -320,7 +425,9 @@ fn include_loopback_aliases(origins: &mut Vec<String>, landing_public_url: &str)
 #[cfg(test)]
 mod tests {
     use super::include_loopback_aliases;
-    use super::{validate_from_mailbox, validate_redirect_uri, validate_secure_url};
+    use super::{
+        parse_model_list, validate_from_mailbox, validate_redirect_uri, validate_secure_url,
+    };
 
     #[test]
     fn secure_url_validation_does_not_accept_localhost_prefixes() {
@@ -374,5 +481,15 @@ mod tests {
                 "http://127.0.0.1:4174".to_owned(),
             ]
         );
+    }
+
+    #[test]
+    fn model_lists_are_trimmed_deduplicated_and_bounded() {
+        assert_eq!(
+            parse_model_list("MODELS", "alpha, beta,alpha,, beta").unwrap(),
+            vec!["alpha", "beta"]
+        );
+        assert!(parse_model_list("MODELS", &"x".repeat(129)).is_err());
+        assert!(parse_model_list("MODELS", "bad\nmodel").is_err());
     }
 }

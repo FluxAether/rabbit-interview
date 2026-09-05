@@ -32,7 +32,9 @@ Do not run multiple replicas in this version. Login throttles, one-time WebSocke
 - `RESEND_FROM`: verified sender, either `no-reply@example.com` or `OnCue <no-reply@example.com>`.
 - `RESEND_API_URL`: optional Resend-compatible API origin; defaults to `https://api.resend.com`.
 - `GATEWAY_ADMIN_TOKEN`: secret used only by account and quota administration APIs.
-- `VOLCENGINE_API_KEY` and `GEMINI_API_KEY`: deployment secrets, never desktop build variables.
+- Provider credentials are deployment secrets, never desktop build variables. STT supports `VOLCENGINE_API_KEY`, `DEEPGRAM_API_KEY`, and `GEMINI_API_KEY`; LLM supports `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GROQ_API_KEY`.
+- Provider model allowlists are comma-separated and case-sensitive: `VOLCENGINE_STT_MODELS`, `DEEPGRAM_STT_MODELS`, `GEMINI_STT_MODELS`, `GEMINI_LLM_MODELS`, `OPENAI_LLM_MODELS`, `ANTHROPIC_LLM_MODELS`, and `GROQ_LLM_MODELS`. A provider without a credential or an explicit non-empty model list is not selectable. The legacy Volcengine `bigmodel` and `GEMINI_HOSTED_MODEL` defaults remain valid.
+- Provider API origins default to their official endpoints and may be overridden with `VOLCENGINE_STT_URL`, `DEEPGRAM_STT_URL`, `GEMINI_LIVE_URL`, `GEMINI_LLM_URL`, `OPENAI_LLM_URL`, `ANTHROPIC_LLM_URL`, and `GROQ_LLM_URL`. Non-local overrides must use HTTPS or WSS.
 - `ALIPAY_APP_ID` and `ALIPAY_SELLER_ID`: the identifiers for the selected Alipay application and merchant.
 - `ALIPAY_PRIVATE_KEY`: the unarmored Base64 application RSA2 private key from Alipay. Do not wrap it as PEM.
 - `ALIPAY_PUBLIC_KEY`: the unarmored Base64 Alipay RSA2 public key from Alipay. This integration uses public-key mode, not certificate mode.
@@ -143,6 +145,32 @@ curl -fsS -X POST \
 
 Use `LLM_TOKEN_UNITS` for LLM grants. Account and quota changes write security audit events. Audio, transcripts, prompts, and answers are not persisted by the Gateway.
 
+## AI provider routing
+
+The active STT and LLM routes are global operator settings stored in MySQL. Each new request reads one route snapshot; changing a route does not move an existing STT ticket, WebSocket, or LLM stream. There is no automatic cross-provider fallback.
+
+Inspect the current routes and the redacted provider catalog:
+
+```bash
+curl -fsS \
+  -H "X-Admin-Token: $GATEWAY_ADMIN_TOKEN" \
+  -H "X-Admin-Actor: operator@example.com" \
+  https://your-gateway.example/internal/ai-routing
+```
+
+Activate one allowlisted provider/model pair for new requests:
+
+```bash
+curl -fsS -X POST \
+  -H "X-Admin-Token: $GATEWAY_ADMIN_TOKEN" \
+  -H "X-Admin-Actor: operator@example.com" \
+  -H "Content-Type: application/json" \
+  https://your-gateway.example/internal/ai-routing/stt \
+  -d '{"provider":"deepgram","model":"nova-3"}'
+```
+
+Use `/internal/ai-routing/llm` for LLM routes. The unlinked `/admin` page exposes the same two selectors without exposing credentials or endpoint URLs. Activation validates only the startup catalog; it does not make a paid provider request. Before selecting a new model in production, update the environment on the gateway instance, restart it, and run a real staging STT or LLM probe. Before removing a model, switch away from it first. Roll back by selecting the previous pair.
+
 ## Subscription payments
 
 The self-serve products are one-time purchases with no automatic renewal:
@@ -170,7 +198,7 @@ curl -fsS https://your-gateway.example/readyz
 curl -fsS https://your-gateway.example/metrics
 ```
 
-1. Set `HOSTED_STT_ENABLED=false` and/or `HOSTED_LLM_ENABLED=false`, then restart gracefully. BYOK and Apple remain available.
+1. For a provider incident, switch the affected workload back to its previous provider/model. To disable hosted access entirely, set `HOSTED_STT_ENABLED=false` and/or `HOSTED_LLM_ENABLED=false`, then restart gracefully. BYOK and Apple remain available.
 2. Preserve MySQL; never roll back an applied migration with an older image.
 3. Rotate leaked OIDC, Resend, provider, or admin credentials in the secret manager and restart. Revoking the affected accounts' sessions invalidates refresh-token families immediately; access tokens expire within five minutes.
 4. Back up MySQL and both OIDC key files together. Test restoration into an isolated environment before production rollout.

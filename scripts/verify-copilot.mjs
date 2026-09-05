@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import ts from 'typescript'
@@ -197,7 +198,7 @@ check(
 check(
   settingsStore.includes("export type AiAccessMode = 'byok' | 'hosted'")
     && settingsStore.includes("aiAccessMode: 'byok'")
-    && settingsStore.includes("HOSTED_STT_MODEL = 'volcengine-bigmodel'"),
+    && settingsStore.includes("HOSTED_STT_MODEL = 'hosted-managed'"),
   'hosted access is opt-in and preserves BYOK as the default',
 )
 check(
@@ -224,10 +225,12 @@ check(
   llm.includes("hostedFetch('/v1/llm/answers'")
     && llm.includes("'Idempotency-Key': requestId")
     && llm.includes("method: 'DELETE'")
+    && llm.includes('upstreamProvider: hostedLlmProvider(payload?.provider)')
+    && llm.includes('ws.__hostedProvider = payload.provider')
     && llm.includes("payload.type === 'transcript'")
     && llm.includes("if (result.status === 'max-tokens') throw new Error('llm-output-truncated')")
     && llm.includes("ws.__deepgramManaged = provider !== 'hosted'"),
-  'hosted LLM cancellation and source-aware STT use the shared Copilot facades',
+  'hosted LLM/STT preserve the hosted facade while capturing upstream route metadata',
 )
 check(
   cargo.includes('tauri-plugin-deep-link')
@@ -490,7 +493,7 @@ const normalizedHostedSettings = await loadAppSettings()
 check(
   normalizedHostedSettings.aiAccessMode === 'hosted'
     && normalizedHostedSettings.sttProvider === 'hosted'
-    && normalizedHostedSettings.sttModel === 'volcengine-bigmodel'
+    && normalizedHostedSettings.sttModel === 'hosted-managed'
     && DEFAULT_SETTINGS.aiAccessMode === 'byok',
   'hosted settings normalize to the gateway model without changing the BYOK default',
 )
@@ -1074,6 +1077,55 @@ check(
 const { parseSseEventData } = loadTypeScriptModule('src/lib/llm.ts', ['parseSseEventData'])
 const multilineSse = parseSseEventData('event: message\ndata: {\ndata: "value": 1\ndata: }')
 check(JSON.parse(multilineSse).value === 1, 'multi-line SSE data fields are reassembled before parsing')
+const { consumeSse } = loadTypeScriptModule('src/lib/llm.ts', ['consumeSse'])
+const parseHostedPayload = (payload) => {
+  if (payload?.code) throw new Error(payload.code)
+  return {
+    delta: typeof payload.delta === 'string' ? payload.delta : null,
+    finishReason: payload.finish_reason || null,
+    upstreamProvider: payload.provider,
+    model: payload.model,
+  }
+}
+const hostedMetadataResult = await consumeSse(
+  new Response(
+    'event: answer.started\ndata: {"provider":"openai","model":"gpt-test"}\n\n'
+      + 'event: answer.delta\ndata: {"delta":"ok"}\n\n'
+      + 'event: answer.completed\ndata: {"finish_reason":"stop","provider":"openai","model":"gpt-test"}\n\n',
+  ),
+  parseHostedPayload,
+  { onDelta: () => {} },
+  'hosted',
+  'gemini-3.7-flash',
+)
+check(
+  hostedMetadataResult.provider === 'hosted'
+    && hostedMetadataResult.upstreamProvider === 'openai'
+    && hostedMetadataResult.model === 'gpt-test'
+    && hostedMetadataResult.status === 'complete',
+  'hosted SSE keeps access mode separate from the selected upstream provider and model',
+)
+await assert.rejects(
+  () => consumeSse(
+    new Response('event: answer.error\ndata: {"code":"PROVIDER_REJECTED","provider":"openai","model":"gpt-test"}\n\n'),
+    parseHostedPayload,
+    { onDelta: () => {} },
+    'hosted',
+    'gemini-3.7-flash',
+  ),
+  /PROVIDER_REJECTED/,
+)
+await assert.rejects(
+  () => consumeSse(
+    new Response('event: answer.delta\ndata: {not-json}\n\n'),
+    parseHostedPayload,
+    { onDelta: () => {} },
+    'hosted',
+    'gemini-3.7-flash',
+  ),
+  SyntaxError,
+)
+check(true, 'hosted SSE propagates provider error frames and malformed events')
 
 let followUpRequest = null
 const { generateSuggestionsStream: generateFollowUp } = loadTypeScriptModule(
@@ -1336,6 +1388,19 @@ class FakeWebSocket {
     this.close(1006)
   }
 }
+
+const { applyHostedSttReady } = loadTypeScriptModule('src/lib/llm.ts', ['applyHostedSttReady'])
+const legacyHostedSocket = new FakeWebSocket('wss://gateway.example/stt')
+const routedHostedSocket = new FakeWebSocket('wss://gateway.example/stt')
+check(
+  applyHostedSttReady(legacyHostedSocket, { type: 'stt.ready' })
+    && legacyHostedSocket.__hostedProvider === undefined
+    && legacyHostedSocket.__hostedModel === undefined
+    && applyHostedSttReady(routedHostedSocket, { type: 'stt.ready', provider: 'deepgram', model: 'nova-3' })
+    && routedHostedSocket.__hostedProvider === 'deepgram'
+    && routedHostedSocket.__hostedModel === 'nova-3',
+  'hosted STT accepts legacy ready frames and captures new route metadata',
+)
 
 const flushTasks = () => new Promise((resolve) => setImmediate(resolve))
 
@@ -2271,6 +2336,13 @@ check(tauriConfig.includes('thomas92118/rabbit-interview'), 'updater points at t
   check(authPage.includes("if (showSuccess) setInteraction(next)\n      window.location.assign(next.redirect_to)") && authPage.includes("decision === 'allow'") && authPage.includes('t.login.successTitle'), 'landing replaces the login form with a success page before returning to the desktop app')
   check(landingApp.includes("/subscribe") && landingApp.includes("/admin"), 'landing routes the subscribe and admin pages')
   check(gateway.includes('/internal/accounts/lookup') && gateway.includes('/account/subscription/context'), 'gateway exposes admin email lookup and subscription context')
+  check(
+    gateway.includes('/internal/ai-routing/{kind}')
+      && authPage.includes("routeCard('stt'")
+      && authPage.includes("routeCard('llm'")
+      && authPage.includes("jsonApi<RoutingResponse>('/internal/ai-routing'"),
+    'admin page loads and switches the global hosted STT and LLM routes',
+  )
 }
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)

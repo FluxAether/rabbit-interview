@@ -134,6 +134,20 @@ type AuthCopy = {
     validUntil: string
     grant: string
     granted: string
+    routingTitle: string
+    routingSubtitle: string
+    loadRouting: string
+    sttRoute: string
+    llmRoute: string
+    provider: string
+    model: string
+    activeRoute: string
+    routeInvalid: string
+    unavailable: string
+    updatedBy: string
+    activate: string
+    routeActivated: string
+    routingErrors: Record<string, string>
   }
   errorTitle: string
   errors: Record<string, string>
@@ -333,9 +347,9 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       title: 'Hosted access',
       subtitle: 'Buy fixed hosted-access periods with Alipay, or keep using your own provider keys.',
       hostedTitle: 'OnCue hosted',
-      hostedBody: 'Sign in from the desktop app to use gateway STT and Gemini. Remaining quota is shown below after a browser session exists.',
+      hostedBody: 'Sign in from the desktop app to use gateway-managed STT and LLM providers. Remaining quota is shown below after a browser session exists.',
       byokTitle: 'Bring your own keys',
-      byokBody: 'Deepgram, Gemini, Groq, and Apple stay on this device. Hosted quota is not required.',
+      byokBody: 'Your configured BYOK providers and Apple speech recognition stay direct from this device. Hosted quota is not required.',
       grantTitle: 'Fixed periods, no renewal',
       grantBody: 'Each successful payment adds a separate 30- or 90-day quota period. Renewing early schedules the next period after the current one.',
       paymentsNote: 'Alipay purchases are one-time payments. There is no automatic renewal.',
@@ -368,8 +382,8 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       paymentRenewed: 'Renewal verified. Access now lasts through {end}. New quota is available from {start}.',
     },
     admin: {
-      title: 'Grant hosted quota',
-      subtitle: 'Look up an account by email, then add STT minutes. Tokens stay in this tab.',
+      title: 'Hosted administration',
+      subtitle: 'Manage global AI routing and account quota. Admin credentials stay in this tab.',
       token: 'Admin token',
       actor: 'Operator',
       email: 'Account email',
@@ -381,6 +395,25 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       validUntil: 'Valid until (optional)',
       grant: 'Grant quota',
       granted: 'Quota granted.',
+      routingTitle: 'Hosted AI routing',
+      routingSubtitle: 'Choose the provider and model used by new hosted requests.',
+      loadRouting: 'Load AI routing',
+      sttRoute: 'Speech-to-text',
+      llmRoute: 'Language model',
+      provider: 'Provider',
+      model: 'Model',
+      activeRoute: 'Active',
+      routeInvalid: 'configuration unavailable',
+      unavailable: 'unavailable',
+      updatedBy: 'Last changed by',
+      activate: 'Activate',
+      routeActivated: 'Hosted AI route activated.',
+      routingErrors: {
+        AUTH_REQUIRED: 'The admin token or operator is invalid.',
+        INVALID_REQUEST: 'Choose a configured provider and allowlisted model.',
+        NETWORK_ERROR: 'Unable to reach the gateway. Check your connection and try again.',
+        INTERNAL_ERROR: 'Unable to load or update hosted AI routing right now.',
+      },
     },
     errorTitle: 'Unable to continue',
     errors: sharedErrors.en,
@@ -476,9 +509,9 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       title: '云托管额度',
       subtitle: '可通过支付宝购买固定期限的云托管服务，也可以继续使用自备密钥。',
       hostedTitle: 'OnCue 云托管',
-      hostedBody: '从桌面应用登录后，可使用网关 STT 和 Gemini。浏览器里若已有登录会话，下方会显示剩余额度。',
+      hostedBody: '从桌面应用登录后，可使用网关管理的 STT 和 LLM 渠道。浏览器里若已有登录会话，下方会显示剩余额度。',
       byokTitle: '自备密钥',
-      byokBody: 'Deepgram、Gemini、Groq 和 Apple 仍走本机。不需要云托管额度。',
+      byokBody: '已配置的 BYOK 渠道和 Apple 语音识别仍由本机直连，不需要云托管额度。',
       grantTitle: '固定期限，不自动续费',
       grantBody: '每笔成功支付会增加一个独立的 30 天或 90 天额度周期。提前续费时，新周期会接在当前周期之后。',
       paymentsNote: '支付宝购买为一次性支付，不会自动续费。',
@@ -511,8 +544,8 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       paymentRenewed: '续费成功。有效期已延长至 {end}，新增额度将从 {start} 可用。',
     },
     admin: {
-      title: '发放云托管额度',
-      subtitle: '按邮箱查找账号，再增加 STT 分钟。管理令牌只留在当前标签页。',
+      title: '云托管管理',
+      subtitle: '管理全局 AI 路由和账号额度。管理凭据只留在当前标签页。',
       token: '管理令牌',
       actor: '操作者',
       email: '账号邮箱',
@@ -524,6 +557,25 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       validUntil: '有效期（可选）',
       grant: '发放额度',
       granted: '额度已发放。',
+      routingTitle: '云托管 AI 路由',
+      routingSubtitle: '选择新建云托管请求使用的渠道和模型。',
+      loadRouting: '加载 AI 路由',
+      sttRoute: '语音转文字',
+      llmRoute: '语言模型',
+      provider: '渠道',
+      model: '模型',
+      activeRoute: '当前使用',
+      routeInvalid: '配置不可用',
+      unavailable: '不可用',
+      updatedBy: '最后修改人',
+      activate: '启用',
+      routeActivated: '云托管 AI 路由已启用。',
+      routingErrors: {
+        AUTH_REQUIRED: '管理令牌或操作者无效。',
+        INVALID_REQUEST: '请选择已配置的渠道和允许使用的模型。',
+        NETWORK_ERROR: '无法连接网关，请检查网络后重试。',
+        INTERNAL_ERROR: '暂时无法加载或更新云托管 AI 路由。',
+      },
     },
     errorTitle: '无法继续',
     errors: sharedErrors.zhCN,
@@ -619,9 +671,9 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       title: '雲端代管額度',
       subtitle: '可透過支付寶購買固定期限的雲端代管服務，也可以繼續使用自備金鑰。',
       hostedTitle: 'OnCue 雲端代管',
-      hostedBody: '從桌面應用程式登入後，可使用閘道 STT 與 Gemini。瀏覽器若已有登入工作階段，下方會顯示剩餘額度。',
+      hostedBody: '從桌面應用程式登入後，可使用閘道管理的 STT 與 LLM 渠道。瀏覽器若已有登入工作階段，下方會顯示剩餘額度。',
       byokTitle: '自備金鑰',
-      byokBody: 'Deepgram、Gemini、Groq 與 Apple 仍走本機。不需要雲端代管額度。',
+      byokBody: '已設定的 BYOK 渠道與 Apple 語音辨識仍由本機直連，不需要雲端代管額度。',
       grantTitle: '固定期限，不自動續費',
       grantBody: '每筆成功付款會增加一個獨立的 30 天或 90 天額度週期。提前續費時，新週期會接在目前週期之後。',
       paymentsNote: '支付寶購買為一次性付款，不會自動續費。',
@@ -654,8 +706,8 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       paymentRenewed: '續費成功。有效期已延長至 {end}，新增額度將從 {start} 可用。',
     },
     admin: {
-      title: '發放雲端代管額度',
-      subtitle: '依電子郵件查找帳號，再增加 STT 分鐘。管理權杖只留在目前分頁。',
+      title: '雲端代管管理',
+      subtitle: '管理全域 AI 路由和帳號額度。管理憑據只留在目前分頁。',
       token: '管理權杖',
       actor: '操作者',
       email: '帳號電子郵件',
@@ -667,6 +719,25 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       validUntil: '有效期（選填）',
       grant: '發放額度',
       granted: '額度已發放。',
+      routingTitle: '雲端代管 AI 路由',
+      routingSubtitle: '選擇新建雲端代管請求使用的渠道和模型。',
+      loadRouting: '載入 AI 路由',
+      sttRoute: '語音轉文字',
+      llmRoute: '語言模型',
+      provider: '渠道',
+      model: '模型',
+      activeRoute: '目前使用',
+      routeInvalid: '設定不可用',
+      unavailable: '不可用',
+      updatedBy: '最後修改人',
+      activate: '啟用',
+      routeActivated: '雲端代管 AI 路由已啟用。',
+      routingErrors: {
+        AUTH_REQUIRED: '管理權杖或操作者無效。',
+        INVALID_REQUEST: '請選擇已設定的渠道和允許使用的模型。',
+        NETWORK_ERROR: '無法連線閘道，請檢查網路後再試。',
+        INTERNAL_ERROR: '暫時無法載入或更新雲端代管 AI 路由。',
+      },
     },
     errorTitle: '無法繼續',
     errors: sharedErrors.zhTW,

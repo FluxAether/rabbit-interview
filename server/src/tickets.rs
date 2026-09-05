@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::error::AppError;
+use crate::{error::AppError, routing::RouteSnapshot};
 
 #[derive(Clone, Debug)]
 pub struct TicketClaim {
@@ -13,6 +13,7 @@ pub struct TicketClaim {
     pub reservation_id: String,
     pub source: String,
     pub language: String,
+    pub route: RouteSnapshot,
     pub expires_at: DateTime<Utc>,
 }
 
@@ -24,6 +25,7 @@ pub struct Tickets {
 }
 
 impl Tickets {
+    #[allow(clippy::too_many_arguments)]
     pub async fn issue(
         &self,
         ttl: Duration,
@@ -32,6 +34,7 @@ impl Tickets {
         reservation_id: String,
         source: String,
         language: String,
+        route: RouteSnapshot,
     ) -> (String, DateTime<Utc>) {
         let now = Utc::now();
         let expires_at =
@@ -47,6 +50,7 @@ impl Tickets {
                 reservation_id,
                 source,
                 language,
+                route,
                 expires_at,
             },
         );
@@ -86,8 +90,8 @@ pub struct PortalTickets {
 impl PortalTickets {
     pub async fn issue(&self, account_id: String, ttl: Duration) -> String {
         let now = Utc::now();
-        let expires_at = now
-            + chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::seconds(60));
+        let expires_at =
+            now + chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::seconds(60));
         let ticket = Uuid::new_v4().to_string();
         let mut tickets = self.inner.lock().await;
         tickets.retain(|_, claim| claim.expires_at > now && claim.uses_left > 0);
@@ -121,6 +125,32 @@ impl PortalTickets {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::routing::RouteKind;
+
+    #[tokio::test]
+    async fn stt_ticket_keeps_the_route_selected_at_creation() {
+        let tickets = Tickets::default();
+        let route = RouteSnapshot {
+            kind: RouteKind::Stt,
+            provider: "deepgram".into(),
+            model: "nova-3".into(),
+        };
+        let (ticket, _) = tickets
+            .issue(
+                Duration::from_secs(60),
+                "acct-1".into(),
+                "session-1".into(),
+                "reservation-1".into(),
+                "microphone".into(),
+                "en-US".into(),
+                route.clone(),
+            )
+            .await;
+        assert_eq!(
+            tickets.consume(&ticket, "session-1").await.unwrap().route,
+            route
+        );
+    }
 
     #[tokio::test]
     async fn portal_ticket_allows_two_consumes() {

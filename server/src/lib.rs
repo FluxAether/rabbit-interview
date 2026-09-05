@@ -7,6 +7,7 @@ pub mod oidc;
 pub mod payments;
 pub mod protocol;
 pub mod providers;
+pub mod routing;
 pub mod sessions;
 pub mod storage;
 pub mod tickets;
@@ -70,6 +71,7 @@ struct StateInner {
     auth: AuthService,
     http: reqwest::Client,
     payments: Option<payments::PaymentService>,
+    routing: routing::Routing,
     tickets: tickets::Tickets,
     portal_tickets: tickets::PortalTickets,
     tracker: TaskTracker,
@@ -99,6 +101,7 @@ impl AppState {
             .user_agent("rabbit-interview-gateway/0.1")
             .build()?;
         let auth = AuthService::new(pool.clone(), config.clone(), http.clone())?;
+        let routing = routing::Routing::new(pool.clone(), &config).await?;
         let payments = payments::PaymentService::from_config(
             pool.clone(),
             http.clone(),
@@ -109,6 +112,7 @@ impl AppState {
             auth,
             http,
             payments,
+            routing,
             tickets: tickets::Tickets::default(),
             portal_tickets: tickets::PortalTickets::default(),
             tracker: TaskTracker::new(),
@@ -138,6 +142,10 @@ impl AppState {
 
     pub fn payments(&self) -> Option<&payments::PaymentService> {
         self.0.payments.as_ref()
+    }
+
+    pub fn routing(&self) -> &routing::Routing {
+        &self.0.routing
     }
 
     pub fn tickets(&self) -> &tickets::Tickets {
@@ -251,6 +259,8 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/llm/answers", post(llm::create_answer))
         .route("/v1/llm/answers/{request_id}", delete(llm::cancel_answer))
         .route("/internal/accounts/lookup", post(lookup_account))
+        .route("/internal/ai-routing", get(get_ai_routing))
+        .route("/internal/ai-routing/{kind}", post(switch_ai_routing))
         .route(
             "/internal/accounts/{account_id}/quota-adjustments",
             post(adjust_quota),
@@ -386,6 +396,39 @@ async fn adjust_quota(
         )
         .await?;
     Ok(Json(serde_json::json!({"bucket_id":bucket_id})))
+}
+
+async fn get_ai_routing(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<routing::AdminRoutingResponse>, AppError> {
+    require_admin_actor(state.config(), &headers)?;
+    Ok(Json(state.routing().admin_response().await?))
+}
+
+async fn switch_ai_routing(
+    State(state): State<AppState>,
+    Path(kind): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<routing::SwitchRouteRequest>,
+) -> Result<Json<routing::RouteState>, AppError> {
+    let actor = require_admin_actor(state.config(), &headers)?;
+    let kind = kind.parse::<routing::RouteKind>()?;
+    Ok(Json(
+        state
+            .routing()
+            .switch(kind, &request.provider, &request.model, actor)
+            .await?,
+    ))
+}
+
+fn require_admin_actor<'a>(config: &Config, headers: &'a HeaderMap) -> Result<&'a str, AppError> {
+    require_admin(config, headers)?;
+    headers
+        .get("X-Admin-Actor")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .ok_or(AppError::Unauthorized)
 }
 
 pub(crate) fn require_admin(config: &Config, headers: &HeaderMap) -> Result<(), AppError> {

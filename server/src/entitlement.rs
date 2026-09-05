@@ -27,7 +27,7 @@ pub struct ReserveInput {
     pub interview_id: Option<String>,
     pub kind: &'static str,
     pub audio_source: Option<String>,
-    pub provider: &'static str,
+    pub provider: String,
     pub model: String,
     pub metric: &'static str,
     pub units: i64,
@@ -177,7 +177,7 @@ impl Entitlement {
         .bind(&input.interview_id)
         .bind(input.kind)
         .bind(&input.audio_source)
-        .bind(input.provider)
+        .bind(&input.provider)
         .bind(&input.model)
         .bind(&input.pricing_policy_version)
         .bind(expires_at)

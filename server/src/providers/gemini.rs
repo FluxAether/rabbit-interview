@@ -1,117 +1,71 @@
-use bytes::Bytes;
 use serde_json::{json, Value};
 
-use crate::error::AppError;
+use super::llm::{
+    checked_response, json_data, number, optional_number, provider_error, sse_stream, LlmAdapter,
+    LlmEvent, LlmFuture, LlmInput, ProviderError, Usage,
+};
 
 #[derive(Clone)]
 pub struct GeminiClient {
     client: reqwest::Client,
     api_key: String,
+    endpoint: String,
     model: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Usage {
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub reasoning_tokens: i64,
-    pub total_tokens: i64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Event {
-    Created(String),
-    Delta(String),
-    Completed(Usage, bool),
-    Failed,
-}
-
 impl GeminiClient {
-    pub fn new(
-        client: reqwest::Client,
-        api_key: Option<String>,
-        model: String,
-    ) -> Result<Self, AppError> {
-        Ok(Self {
+    pub fn new(client: reqwest::Client, api_key: String, endpoint: String, model: String) -> Self {
+        Self {
             client,
-            api_key: api_key.ok_or(AppError::ProviderUnavailable)?,
+            api_key,
+            endpoint,
             model,
+        }
+    }
+}
+
+impl LlmAdapter for GeminiClient {
+    fn stream(&self, input: LlmInput) -> LlmFuture {
+        let client = self.client.clone();
+        let api_key = self.api_key.clone();
+        let endpoint = self.endpoint.clone();
+        let model = self.model.clone();
+        Box::pin(async move {
+            let body = request_body(&model, input);
+            let response = checked_response(
+                client
+                    .post(endpoint)
+                    .query(&[("alt", "sse")])
+                    .header("x-goog-api-key", api_key)
+                    .json(&body),
+            )
+            .await?;
+            Ok(sse_stream(response, parse_event))
         })
     }
-
-    pub async fn stream(
-        &self,
-        input: String,
-        json_response: bool,
-        max_output_tokens: i64,
-    ) -> Result<reqwest::Response, AppError> {
-        let mut body = json!({
-            "model": self.model,
-            "input": input,
-            "stream": true,
-            "generation_config": {"max_output_tokens": max_output_tokens}
-        });
-        if json_response {
-            body["response_format"] = json!({"type": "text", "mime_type": "application/json"});
-        }
-        let response = self
-            .client
-            .post("https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse")
-            .header("x-goog-api-key", &self.api_key)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|_| AppError::ProviderUnavailable)?;
-        if !response.status().is_success() {
-            return Err(if response.status().is_server_error() {
-                AppError::ProviderUnavailable
-            } else {
-                AppError::ProviderProtocol
-            });
-        }
-        Ok(response)
-    }
 }
 
-#[derive(Default)]
-pub struct SseDecoder {
-    buffer: String,
+fn request_body(model: &str, input: LlmInput) -> Value {
+    let mut body = json!({
+        "model": model,
+        "input": format!(
+            "System instructions:\n{}\n\nUser input:\n{}",
+            input.system, input.prompt
+        ),
+        "stream": true,
+        "store": false,
+        "generation_config": {"max_output_tokens": input.max_output_tokens}
+    });
+    if input.json_response {
+        body["response_format"] = json!({"type": "text", "mime_type": "application/json"});
+    }
+    body
 }
 
-impl SseDecoder {
-    pub fn push(&mut self, chunk: Bytes) -> Result<Vec<Event>, AppError> {
-        self.buffer.push_str(&String::from_utf8_lossy(&chunk));
-        self.buffer = self.buffer.replace("\r\n", "\n");
-        let mut events = Vec::new();
-        while let Some(index) = self.buffer.find("\n\n") {
-            let raw = self.buffer[..index].to_owned();
-            self.buffer.drain(..index + 2);
-            if let Some(event) = parse_event(&raw)? {
-                events.push(event);
-            }
-        }
-        Ok(events)
-    }
-
-    pub fn finish(&mut self) -> Result<Vec<Event>, AppError> {
-        if self.buffer.trim().is_empty() {
-            return Ok(Vec::new());
-        }
-        let raw = std::mem::take(&mut self.buffer);
-        Ok(parse_event(&raw)?.into_iter().collect())
-    }
-}
-
-fn parse_event(raw: &str) -> Result<Option<Event>, AppError> {
-    let data = raw
-        .lines()
-        .filter_map(|line| line.strip_prefix("data:").map(str::trim_start))
-        .collect::<Vec<_>>()
-        .join("\n");
-    if data.is_empty() || data == "[DONE]" {
-        return Ok(None);
-    }
-    let value: Value = serde_json::from_str(&data).map_err(|_| AppError::ProviderProtocol)?;
+fn parse_event(raw: &str) -> Result<Vec<LlmEvent>, ProviderError> {
+    let Some(value) = json_data(raw)? else {
+        return Ok(Vec::new());
+    };
     let event_type = value
         .get("event_type")
         .or_else(|| value.get("type"))
@@ -121,75 +75,102 @@ fn parse_event(raw: &str) -> Result<Option<Event>, AppError> {
         "interaction.created" => Ok(value
             .pointer("/interaction/id")
             .and_then(Value::as_str)
-            .map(|id| Event::Created(id.to_owned()))),
+            .map(|id| vec![LlmEvent::Created(id.to_owned())])
+            .unwrap_or_default()),
         "step.delta" if value.pointer("/delta/type").and_then(Value::as_str) == Some("text") => {
             Ok(value
                 .pointer("/delta/text")
                 .and_then(Value::as_str)
                 .filter(|text| !text.is_empty())
-                .map(|text| Event::Delta(text.to_owned())))
+                .map(|text| vec![LlmEvent::Delta(text.to_owned())])
+                .unwrap_or_default())
         }
         "interaction.completed" => {
             let truncated =
                 value.pointer("/interaction/status").and_then(Value::as_str) == Some("incomplete");
-            let usage = value.pointer("/interaction/usage").unwrap_or(&Value::Null);
-            let input = number(usage, &["total_input_tokens", "prompt_tokens"]);
-            let output = number(usage, &["total_output_tokens", "completion_tokens"]);
-            let reasoning = number(usage, &["total_thought_tokens", "reasoning_tokens"]);
-            let total = number(usage, &["total_tokens"]).max(input + output + reasoning);
-            Ok(Some(Event::Completed(
-                Usage {
-                    input_tokens: input,
-                    output_tokens: output,
-                    reasoning_tokens: reasoning,
-                    total_tokens: total,
-                },
+            let mut events = Vec::new();
+            if let Some(usage) = value
+                .pointer("/interaction/usage")
+                .filter(|usage| usage.is_object())
+            {
+                let input = number(usage, &["total_input_tokens", "prompt_tokens"]);
+                let output = number(usage, &["total_output_tokens", "completion_tokens"]);
+                let reasoning = number(usage, &["total_thought_tokens", "reasoning_tokens"]);
+                let total =
+                    optional_number(usage, &["total_tokens"]).unwrap_or(input + output + reasoning);
+                if input > 0 || output > 0 || reasoning > 0 || total > 0 {
+                    events.push(LlmEvent::Usage(Usage {
+                        input_tokens: input,
+                        output_tokens: output,
+                        reasoning_tokens: reasoning,
+                        total_tokens: total,
+                    }));
+                }
+            }
+            events.push(LlmEvent::Completed {
+                finish_reason: if truncated { "length" } else { "stop" }.to_owned(),
                 truncated,
-            )))
+            });
+            Ok(events)
         }
-        "interaction.failed" | "error" => Ok(Some(Event::Failed)),
-        _ => Ok(None),
+        "interaction.failed" | "error" => Err(provider_error(&value)),
+        _ => Ok(Vec::new()),
     }
-}
-
-fn number(value: &Value, names: &[&str]) -> i64 {
-    names
-        .iter()
-        .find_map(|name| value.get(*name).and_then(Value::as_i64))
-        .unwrap_or(0)
-        .max(0)
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-
-    use super::{Event, SseDecoder, Usage};
+    use super::{parse_event, request_body};
+    use crate::providers::llm::{LlmEvent, LlmInput, Usage};
 
     #[test]
-    fn decodes_split_interaction_stream_without_thought_leakage() {
-        let mut decoder = SseDecoder::default();
-        assert!(decoder
-            .push(Bytes::from_static(
-                b"event: step.delta\ndata: {\"event_type\":\"step.delta\",\"delta\":{\"type\":\"te"
-            ))
-            .unwrap()
-            .is_empty());
-        let events = decoder.push(Bytes::from_static(b"xt\",\"text\":\"hello\"}}\n\nevent: interaction.completed\ndata: {\"event_type\":\"interaction.completed\",\"interaction\":{\"status\":\"incomplete\",\"usage\":{\"total_input_tokens\":3,\"total_output_tokens\":2,\"total_thought_tokens\":1,\"total_tokens\":6}}}\n\n")).unwrap();
+    fn decodes_text_and_completed_usage_without_thought_leakage() {
         assert_eq!(
-            events,
+            parse_event("data: {\"event_type\":\"step.delta\",\"delta\":{\"type\":\"text\",\"text\":\"hello\"}}")
+                .unwrap(),
+            vec![LlmEvent::Delta("hello".into())]
+        );
+        assert_eq!(
+            parse_event("data: {\"event_type\":\"interaction.completed\",\"interaction\":{\"status\":\"incomplete\",\"usage\":{\"total_input_tokens\":3,\"total_output_tokens\":2,\"total_thought_tokens\":1,\"total_tokens\":6}}}")
+                .unwrap(),
             vec![
-                Event::Delta("hello".into()),
-                Event::Completed(
-                    Usage {
-                        input_tokens: 3,
-                        output_tokens: 2,
-                        reasoning_tokens: 1,
-                        total_tokens: 6
-                    },
-                    true,
-                ),
+                LlmEvent::Usage(Usage {
+                    input_tokens: 3,
+                    output_tokens: 2,
+                    reasoning_tokens: 1,
+                    total_tokens: 6,
+                }),
+                LlmEvent::Completed {
+                    finish_reason: "length".into(),
+                    truncated: true,
+                },
             ]
+        );
+        assert_eq!(
+            parse_event("data: {\"event_type\":\"interaction.completed\",\"interaction\":{\"status\":\"completed\",\"usage\":null}}")
+                .unwrap(),
+            vec![LlmEvent::Completed {
+                finish_reason: "stop".into(),
+                truncated: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn interactions_requests_disable_storage() {
+        let body = request_body(
+            "gemini-test",
+            LlmInput {
+                system: "system".into(),
+                prompt: "prompt".into(),
+                json_response: true,
+                max_output_tokens: 128,
+            },
+        );
+        assert_eq!(body["store"], false);
+        assert_eq!(
+            body.pointer("/response_format/mime_type").unwrap(),
+            "application/json"
         );
     }
 }

@@ -28,6 +28,8 @@ pub enum AppError {
     ProviderUnavailable,
     #[error("provider protocol error")]
     ProviderProtocol,
+    #[error("provider rejected request")]
+    ProviderRejected,
     #[error("rate limited")]
     RateLimited,
     #[error("database error")]
@@ -102,6 +104,12 @@ impl IntoResponse for AppError {
                 StatusCode::BAD_GATEWAY,
                 "PROVIDER_PROTOCOL_ERROR",
                 "The upstream provider returned an invalid response.",
+                false,
+            ),
+            Self::ProviderRejected => (
+                StatusCode::BAD_GATEWAY,
+                "PROVIDER_REJECTED",
+                "The upstream provider rejected the request.",
                 false,
             ),
             Self::RateLimited => (

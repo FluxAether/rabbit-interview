@@ -50,6 +50,24 @@ type AccountLookup = {
   status: string
   balances: { STT_AUDIO_MS: number; LLM_TOKEN_UNITS: number }
 }
+type RoutingKind = 'stt' | 'llm'
+type RouteState = {
+  provider: string
+  model: string
+  valid: boolean
+  updated_by: string
+  updated_at: string
+}
+type ProviderOption = {
+  provider: string
+  models: string[]
+  selectable: boolean
+  reason_code?: string
+}
+type RoutingResponse = {
+  routes: Record<RoutingKind, RouteState>
+  catalog: Record<RoutingKind, ProviderOption[]>
+}
 type T = (typeof authCopy)[AuthLang]
 
 const inputClass = 'mt-2 h-11 w-full rounded-xl border border-white/15 bg-black/20 px-3.5 text-sm text-ink placeholder:text-mute/60 focus:border-white/35 focus:outline-none'
@@ -149,6 +167,11 @@ function authHref(path: string): string {
 function errorText(t: T, error: unknown): string {
   const code = error instanceof Error ? error.message : 'INTERNAL_ERROR'
   return t.errors[code] || t.errors.INTERNAL_ERROR
+}
+
+function routingErrorText(t: T, error: unknown): string {
+  const code = error instanceof Error ? error.message : 'INTERNAL_ERROR'
+  return t.admin.routingErrors[code] || t.admin.routingErrors.INTERNAL_ERROR
 }
 
 function formValue(form: HTMLFormElement, name: string): string {
@@ -1032,13 +1055,20 @@ function AdminPage({ t }: { t: T }) {
   const [reason, setReason] = useState('')
   const [validUntil, setValidUntil] = useState('')
   const [error, setError] = useState('')
+  const [errorScope, setErrorScope] = useState<'general' | 'routing'>('general')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [routing, setRouting] = useState<RoutingResponse | null>(null)
+  const [routeDrafts, setRouteDrafts] = useState<Record<RoutingKind, { provider: string; model: string }>>({
+    stt: { provider: '', model: '' },
+    llm: { provider: '', model: '' },
+  })
 
   const headers = () => ({ 'X-Admin-Token': token, 'X-Admin-Actor': actor })
 
   const lookup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    setErrorScope('general')
     setBusy(true)
     setError('')
     setNotice('')
@@ -1055,8 +1085,106 @@ function AdminPage({ t }: { t: T }) {
     }
   }
 
+  const loadRouting = async () => {
+    setErrorScope('routing')
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const next = await jsonApi<RoutingResponse>('/internal/ai-routing', { headers: headers() })
+      setRouting(next)
+      setRouteDrafts({
+        stt: { provider: next.routes.stt.provider, model: next.routes.stt.model },
+        llm: { provider: next.routes.llm.provider, model: next.routes.llm.model },
+      })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'INTERNAL_ERROR')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const selectRouteProvider = (kind: RoutingKind, provider: string) => {
+    const option = routing?.catalog[kind].find((candidate) => candidate.provider === provider)
+    setRouteDrafts((current) => ({
+      ...current,
+      [kind]: { provider, model: option?.models[0] || '' },
+    }))
+  }
+
+  const activateRoute = async (kind: RoutingKind) => {
+    const draft = routeDrafts[kind]
+    if (!draft.provider || !draft.model) return
+    setErrorScope('routing')
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const route = await jsonApi<RouteState>(`/internal/ai-routing/${kind}`, {
+        json: draft,
+        headers: headers(),
+      })
+      setRouting((current) => current ? {
+        ...current,
+        routes: { ...current.routes, [kind]: route },
+      } : current)
+      setNotice(t.admin.routeActivated)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'INTERNAL_ERROR')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const routeCard = (kind: RoutingKind, title: string) => {
+    if (!routing) return null
+    const current = routing.routes[kind]
+    const draft = routeDrafts[kind]
+    const providers = routing.catalog[kind]
+    const selected = providers.find((option) => option.provider === draft.provider)
+    const unchanged = current.provider === draft.provider && current.model === draft.model
+    return (
+      <section className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+        <h3 className="text-sm font-semibold text-ink">{title}</h3>
+        <p className="mt-2 text-xs text-mute">
+          {t.admin.activeRoute}: <span className="text-ink">{current.provider} / {current.model}</span>
+          {!current.valid ? <span className="ml-2 text-amber-200">{t.admin.routeInvalid}</span> : null}
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="block text-sm font-medium">
+            {t.admin.provider}
+            <select className={inputClass} value={draft.provider} onChange={(event) => selectRouteProvider(kind, event.target.value)}>
+              {providers.map((option) => (
+                <option key={option.provider} value={option.provider} disabled={!option.selectable}>
+                  {option.provider}{option.selectable ? '' : ` (${option.reason_code || t.admin.unavailable})`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm font-medium">
+            {t.admin.model}
+            <select
+              className={inputClass}
+              value={draft.model}
+              onChange={(event) => setRouteDrafts((value) => ({ ...value, [kind]: { ...value[kind], model: event.target.value } }))}
+            >
+              {(selected?.models || []).map((model) => <option key={model} value={model}>{model}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-mute">{t.admin.updatedBy}: {current.updated_by} · {new Date(current.updated_at).toLocaleString()}</p>
+          <button type="button" className={secondaryButton} disabled={busy || unchanged || !selected?.selectable || !draft.model} onClick={() => void activateRoute(kind)}>
+            {t.admin.activate}
+          </button>
+        </div>
+      </section>
+    )
+  }
+
   const grant = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    setErrorScope('general')
     if (!account) return
     const minutes = Number(sttMinutes)
     if (!Number.isFinite(minutes) || minutes <= 0 || !reason.trim()) {
@@ -1101,7 +1229,7 @@ function AdminPage({ t }: { t: T }) {
   return (
     <>
       <Intro title={t.admin.title} body={t.admin.subtitle} />
-      {error ? <ErrorMessage>{errorText(t, new Error(error))}</ErrorMessage> : null}
+      {error ? <ErrorMessage>{errorScope === 'routing' ? routingErrorText(t, new Error(error)) : errorText(t, new Error(error))}</ErrorMessage> : null}
       {notice ? <p role="status" className="mt-5 rounded-xl border border-emerald-200/15 bg-emerald-200/[0.05] px-3.5 py-3 text-sm text-emerald-100">{notice}</p> : null}
       <form className="mt-7 space-y-5" onSubmit={lookup} aria-busy={busy}>
         <label className="block text-sm font-medium">
@@ -1116,8 +1244,21 @@ function AdminPage({ t }: { t: T }) {
           {t.admin.email}
           <input className={inputClass} type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
         </label>
-        <button className={`${primaryButton} w-full`} disabled={busy}>{t.admin.lookup}</button>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button className={primaryButton} disabled={busy}>{t.admin.lookup}</button>
+          <button type="button" className={secondaryButton} disabled={busy || !token || !actor} onClick={() => void loadRouting()}>{t.admin.loadRouting}</button>
+        </div>
       </form>
+      {routing ? (
+        <div className="mt-7 space-y-4">
+          <div>
+            <h2 className="text-base font-semibold text-ink">{t.admin.routingTitle}</h2>
+            <p className="mt-1 text-sm text-mute">{t.admin.routingSubtitle}</p>
+          </div>
+          {routeCard('stt', t.admin.sttRoute)}
+          {routeCard('llm', t.admin.llmRoute)}
+        </div>
+      ) : null}
       {account ? (
         <>
           <div className="mt-7 rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4 text-sm">

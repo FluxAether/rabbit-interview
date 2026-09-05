@@ -97,7 +97,7 @@ async fn concurrent_reservations_never_overspend_and_use_earliest_expiry() -> an
                     interview_id: None,
                     kind: "LLM",
                     audio_source: None,
-                    provider: "GEMINI",
+                    provider: "GEMINI".to_owned(),
                     model: "gemini-3.7-flash".to_owned(),
                     metric: LLM_METRIC,
                     units: 10,

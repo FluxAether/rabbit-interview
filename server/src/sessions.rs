@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap, future::Future, time::Instant};
 
 use axum::{
     extract::{
@@ -13,7 +13,6 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::time::{interval, sleep, timeout, MissedTickBehavior};
-use tokio_tungstenite::tungstenite::Message as ProviderMessage;
 use url::Url;
 use uuid::Uuid;
 
@@ -21,7 +20,13 @@ use crate::{
     entitlement::{hash_json, ReserveInput, ReserveOutcome, UsageInput, STT_METRIC},
     error::AppError,
     protocol::{CreateSttSession, CreateSttSessionResponse},
-    providers::volcengine::{audio_frame, parse_response, VolcengineClient},
+    providers::{
+        deepgram::DeepgramClient,
+        gemini_live::GeminiLiveClient,
+        stt::{SttAdapter, SttConnect, SttEvent, SttSink},
+        volcengine::VolcengineClient,
+    },
+    routing::RouteKind,
     AppState,
 };
 
@@ -43,6 +48,7 @@ pub async fn create_session(
     validate_request(&request)?;
     let idempotency_key = idempotency_key(&headers)?;
     let request_hash = hash_json(&request)?;
+    let route = state.routing().current(RouteKind::Stt).await?;
     let session_id = Uuid::new_v4().to_string();
     let reservation_id = Uuid::new_v4().to_string();
     let (ticket, ticket_expires_at) = state
@@ -54,6 +60,7 @@ pub async fn create_session(
             reservation_id.clone(),
             request.source.clone(),
             request.language.clone(),
+            route.clone(),
         )
         .await;
     let response = CreateSttSessionResponse {
@@ -75,8 +82,8 @@ pub async fn create_session(
             interview_id: request.interview_id.clone(),
             kind: "STT",
             audio_source: Some(source),
-            provider: "VOLCENGINE",
-            model: "bigmodel".to_owned(),
+            provider: route.provider.to_ascii_uppercase(),
+            model: route.model,
             metric: STT_METRIC,
             units: state.config().initial_stt_hold_ms,
             idempotency_key,
@@ -154,11 +161,7 @@ async fn proxy_stt(
     socket: WebSocket,
     claim: &crate::tickets::TicketClaim,
 ) -> Result<(), AppError> {
-    let provider = match VolcengineClient::new(
-        state.config().volcengine_url.clone(),
-        state.config().volcengine_api_key.clone(),
-        state.config().volcengine_resource_id.clone(),
-    ) {
+    let provider = match stt_adapter(state, &claim.route.provider) {
         Ok(provider) => provider,
         Err(error) => {
             let _ = state
@@ -168,8 +171,14 @@ async fn proxy_stt(
             return Err(error);
         }
     };
-    let connection = provider.connect(&claim.session_id, &claim.language).await;
-    let (provider_socket, provider_request_id) = match connection {
+    let connection = provider
+        .connect(SttConnect {
+            session_id: claim.session_id.clone(),
+            language: claim.language.clone(),
+            model: claim.route.model.clone(),
+        })
+        .await;
+    let connection = match connection {
         Ok(value) => value,
         Err(error) => {
             let _ = state
@@ -181,7 +190,7 @@ async fn proxy_stt(
     };
     if let Err(error) = state
         .entitlement()
-        .mark_active(&claim.session_id, provider_request_id.as_deref())
+        .mark_active(&claim.session_id, connection.provider_request_id.as_deref())
         .await
     {
         let _ = state
@@ -191,7 +200,8 @@ async fn proxy_stt(
         return Err(error);
     }
     let (mut client_tx, mut client_rx) = socket.split();
-    let (mut provider_tx, mut provider_rx) = provider_socket.split();
+    let mut provider_tx = connection.sink;
+    let mut provider_rx = connection.events;
     let mut seq = 1_u64;
     let mut received_samples = 0_i64;
     let mut forwarded_samples = 0_i64;
@@ -209,7 +219,14 @@ async fn proxy_stt(
     let proxy_result = async {
         send_json(
             &mut client_tx,
-            json!({"type":"stt.ready","seq":seq,"session_id":claim.session_id,"source":claim.source}),
+            json!({
+                "type":"stt.ready",
+                "seq":seq,
+                "session_id":claim.session_id,
+                "source":claim.source,
+                "provider":claim.route.provider,
+                "model":claim.route.model
+            }),
         )
         .await?;
         loop {
@@ -266,7 +283,7 @@ async fn proxy_stt(
                                 Err(error) => return Err(error),
                             }
                         }
-                        provider_tx.send(ProviderMessage::Binary(audio_frame(&pcm, false)?.into())).await.map_err(|_| AppError::ProviderUnavailable)?;
+                        provider_tx.send_pcm(pcm).await?;
                         received_samples += samples;
                         forwarded_samples += samples;
                     }
@@ -293,34 +310,16 @@ async fn proxy_stt(
             }
             message = provider_rx.next() => {
                 match message {
-                    Some(Ok(ProviderMessage::Binary(frame))) => {
-                        if let Some(transcript) = parse_response(&frame)? {
-                            seq += 1;
-                            send_json(&mut client_tx, json!({
-                                "type":"transcript",
-                                "seq":seq,
-                                "session_id":claim.session_id,
-                                "source":claim.source,
-                                "boundary":transcript.boundary,
-                                "text":transcript.text,
-                                "provider_offset_ms":transcript.provider_offset_ms
-                            })).await?;
-                        }
+                    Some(Ok(transcript)) => {
+                        seq += 1;
+                        send_transcript(&mut client_tx, seq, claim, transcript).await?;
                     }
-                    Some(Ok(ProviderMessage::Ping(payload))) => {
-                        provider_tx.send(ProviderMessage::Pong(payload)).await.map_err(|_| AppError::ProviderUnavailable)?;
-                    }
-                    Some(Ok(ProviderMessage::Close(_))) | None => {
+                    Some(Err(error)) => return Err(error),
+                    None => {
                         terminate_reason = "provider_disconnected";
                         usage_status = "ESTIMATED";
                         break;
                     }
-                    Some(Err(_)) => {
-                        terminate_reason = "provider_error";
-                        usage_status = "ESTIMATED";
-                        break;
-                    }
-                    _ => {}
                 }
             }
             }
@@ -333,30 +332,26 @@ async fn proxy_stt(
         usage_status = "ESTIMATED";
     }
 
-    if let Ok(frame) = audio_frame(&[], true) {
-        let _ = provider_tx
-            .send(ProviderMessage::Binary(frame.into()))
-            .await;
-    }
     let drain = async {
-        while let Some(Ok(message)) = provider_rx.next().await {
-            if let ProviderMessage::Binary(frame) = message {
-                if let Some(transcript) = parse_response(&frame)? {
-                    seq += 1;
-                    send_json(&mut client_tx, json!({
-                        "type":"transcript","seq":seq,"session_id":claim.session_id,
-                        "source":claim.source,"boundary":transcript.boundary,"text":transcript.text,
-                        "provider_offset_ms":transcript.provider_offset_ms
-                    })).await?;
-                    if transcript.final_packet {
-                        break;
-                    }
-                }
+        while let Some(event) = provider_rx.next().await {
+            let transcript = event?;
+            let terminal = transcript.terminal;
+            seq += 1;
+            send_transcript(&mut client_tx, seq, claim, transcript).await?;
+            if terminal {
+                break;
             }
         }
         Ok::<(), AppError>(())
     };
-    let _ = timeout(std::time::Duration::from_secs(2), drain).await;
+    let _ = timeout(
+        std::time::Duration::from_secs(2),
+        finish_while_draining(provider_tx.as_mut(), drain),
+    )
+    .await;
+    drop(provider_rx);
+    let _ = timeout(std::time::Duration::from_secs(1), provider_tx.close()).await;
+    drop(provider_tx);
     let accepted_ms = received_samples * 1000 / 16_000;
     let forwarded_ms = forwarded_samples * 1000 / 16_000;
     let settle_result = state
@@ -389,10 +384,58 @@ async fn proxy_stt(
         }),
     )
     .await;
-    let _ = provider_tx.close().await;
     let _ = client_tx.close().await;
     settle_result?;
     proxy_result
+}
+
+async fn finish_while_draining<F>(provider: &mut dyn SttSink, drain: F) -> Result<(), AppError>
+where
+    F: Future<Output = Result<(), AppError>>,
+{
+    let (finish, drain) = tokio::join!(provider.finish(), drain);
+    finish?;
+    drain
+}
+
+fn stt_adapter(state: &AppState, provider: &str) -> Result<Box<dyn SttAdapter>, AppError> {
+    match provider {
+        "volcengine" => Ok(Box::new(VolcengineClient::new(
+            state.config().volcengine_url.clone(),
+            state.config().volcengine_api_key.clone(),
+            state.config().volcengine_resource_id.clone(),
+        )?)),
+        "deepgram" => Ok(Box::new(DeepgramClient::new(
+            state.config().deepgram_stt_url.clone(),
+            state.config().deepgram_api_key.clone(),
+        )?)),
+        "gemini_live" => Ok(Box::new(GeminiLiveClient::new(
+            state.config().gemini_live_url.clone(),
+            state.config().gemini_api_key.clone(),
+        )?)),
+        _ => Err(AppError::ProviderUnavailable),
+    }
+}
+
+async fn send_transcript(
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    seq: u64,
+    claim: &crate::tickets::TicketClaim,
+    transcript: SttEvent,
+) -> Result<(), AppError> {
+    send_json(
+        sink,
+        json!({
+            "type":"transcript",
+            "seq":seq,
+            "session_id":claim.session_id,
+            "source":claim.source,
+            "boundary":transcript.boundary,
+            "text":transcript.text,
+            "provider_offset_ms":transcript.provider_offset_ms
+        }),
+    )
+    .await
 }
 
 async fn send_json(
@@ -446,7 +489,52 @@ fn ws_url(public_url: &str, session_id: &str) -> Result<String, AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::ws_url;
+    use bytes::Bytes;
+    use futures_util::future::BoxFuture;
+    use tokio::sync::oneshot;
+
+    use super::{finish_while_draining, ws_url};
+    use crate::{error::AppError, providers::stt::SttSink};
+
+    struct BackpressuredSink {
+        finish_gate: Option<oneshot::Receiver<()>>,
+    }
+
+    impl SttSink for BackpressuredSink {
+        fn send_pcm(&mut self, _pcm: Bytes) -> BoxFuture<'static, Result<(), AppError>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn finish(&mut self) -> BoxFuture<'static, Result<(), AppError>> {
+            let gate = self.finish_gate.take().unwrap();
+            Box::pin(async move {
+                gate.await.map_err(|_| AppError::ProviderUnavailable)?;
+                Ok(())
+            })
+        }
+
+        fn close(&mut self) -> BoxFuture<'static, Result<(), AppError>> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn finish_and_drain_advance_concurrently_under_backpressure() {
+        let (release_finish, finish_gate) = oneshot::channel();
+        let mut provider = BackpressuredSink {
+            finish_gate: Some(finish_gate),
+        };
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            finish_while_draining(&mut provider, async move {
+                release_finish.send(()).unwrap();
+                Ok(())
+            }),
+        )
+        .await
+        .expect("finish and drain deadlocked")
+        .unwrap();
+    }
 
     #[test]
     fn websocket_url_never_contains_credentials() {

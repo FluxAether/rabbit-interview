@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: 2026-08-30
+Last updated: 2026-09-05
 
 OnCue is a local-first desktop app. BYOK and Apple speech recognition work without a Rabbit account. The optional hosted mode uses a Rabbit account and gateway for authentication and metered STT and LLM access.
 
@@ -16,7 +16,7 @@ OnCue is a local-first desktop app. BYOK and Apple speech recognition work witho
 
 In BYOK mode, audio, transcripts, resume text, and job descriptions may be sent directly to the provider you select, such as Groq, OpenAI, Anthropic, Gemini, or Deepgram.
 
-In hosted mode, the selected system-audio and microphone streams pass through the Rabbit gateway to Volcengine for transcription. Questions and the context needed to generate an answer pass through the gateway to Gemini. The gateway does not persist audio, transcripts, prompts, resumes, or answers.
+In hosted mode, the selected system-audio and microphone streams pass through the Rabbit gateway to the operator-selected transcription provider (Volcengine, Deepgram, or Gemini Live). Questions and the context needed to generate an answer pass through the gateway to the operator-selected LLM provider (Gemini, OpenAI, Anthropic, or Groq). The active provider and model may change between new requests. The gateway does not persist audio, transcripts, prompts, resumes, or answers. Third-party provider processing remains subject to that provider's terms; when Gemini Live session resumption is used, Google may retain resumable session state during its two-hour handle-validity window.
 
 If you choose a hosted subscription, Alipay receives the merchant order number, product description, and payment amount needed to complete payment. Rabbit does not receive or store your Alipay password or payment credential.
 
