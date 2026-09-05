@@ -758,13 +758,13 @@ async fn add_hold_locked(
 ) -> Result<(), AppError> {
     let buckets = lock_buckets(tx, account_id, metric).await?;
     let plan = plan_allocations(&buckets, units).ok_or(AppError::QuotaInsufficient)?;
-    let max_order: Option<i32> = sqlx::query_scalar(
+    let max_order: Option<u16> = sqlx::query_scalar(
         "SELECT MAX(allocation_order) FROM quota_reservation_allocations WHERE reservation_id = ?",
     )
     .bind(reservation_id)
     .fetch_one(&mut **tx)
     .await?;
-    let mut next_order = max_order.unwrap_or(-1) + 1;
+    let mut next_order = max_order.map_or(0, |order| i32::from(order) + 1);
     for allocation in plan {
         sqlx::query("UPDATE quota_buckets SET remaining_units = remaining_units - ? WHERE id = ?")
             .bind(allocation.units)

@@ -148,7 +148,7 @@ async fn run_session(state: AppState, socket: WebSocket, claim: crate::tickets::
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let result = proxy_stt(&state, socket, &claim).await;
     if let Err(error) = result {
-        tracing::warn!(session_id = %claim.session_id, error_code = %error, "STT session ended with an error");
+        tracing::warn!(session_id = %claim.session_id, error_code = %error, error = ?error, "STT session ended with an error");
     }
     state
         .metrics()
