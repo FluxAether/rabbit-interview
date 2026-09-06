@@ -49,6 +49,8 @@ const settingsStore = source('src/lib/settingsStore.ts')
 const translations = source('src/i18n/translations.ts')
 const historyPage = source('src/pages/History.tsx')
 const panel = source('src/components/CopilotPanel.tsx')
+const chat = source('src/components/CopilotChat.tsx')
+const presentation = source('src/lib/copilotPresentation.ts')
 const session = source('src/lib/copilotSession.ts')
 const sessionState = source('src/lib/copilotSessionState.ts')
 const db = source('src/lib/db.ts')
@@ -67,6 +69,8 @@ const defaultCapability = source('src-tauri/capabilities/default.json')
 const tauriConfig = source('src-tauri/tauri.conf.json')
 const { recordingBytes } = loadTypeScriptModule('src/lib/recordingBytes.ts', ['recordingBytes'])
 const { waveformSampleLevel } = loadTypeScriptModule('src/lib/copilotWaveform.ts', ['waveformSampleLevel'])
+const copilotStateApi = loadTypeScriptModule('src/lib/copilotSessionState.ts', ['createInitialSnapshot', 'reduceCopilotSnapshot', 'orderCopilotMessagesForDisplay', 'reconcileCopilotSnapshot'])
+const { groupCopilotMessages, extractKeyTakeaways } = loadTypeScriptModule('src/lib/copilotPresentation.ts', ['groupCopilotMessages', 'extractKeyTakeaways'], copilotStateApi)
 
 check(session.length > 0, 'single Copilot session host exists')
 check(panel.length > 0 && app.includes('CopilotPanel') && page.includes('CopilotPanel'), 'main and floating views share CopilotPanel')
@@ -88,11 +92,11 @@ check(
 )
 check(
   panel.includes('const displayLevel = Math.min(1, baseLevel * 1.35)')
-    && (panel.includes('h-16') || panel.includes('h-[64px]'))
+    && panel.includes('h-6 w-20')
     && panel.includes('level * (height - 4)'),
-  'Copilot waveform uses a 64px canvas and a capped 35% display gain',
+  'Copilot waveform stays compact and retains the capped 35% display gain',
 )
-check(panel.includes('orderCopilotMessagesForDisplay') && panel.includes('groupCopilotMessages('), 'live chat renders AI replies under the matching interviewer question')
+check(presentation.includes('orderCopilotMessagesForDisplay') && chat.includes('groupCopilotMessages('), 'live chat renders AI replies under the matching interviewer question')
 check(
   session.includes('replyAnchorId')
     && session.includes('const replyToId = this.replyAnchorId(question, requestType)')
@@ -115,37 +119,26 @@ check(
     { id: 2, role: 'me', source: 'microphone-stt', text: 'A1', createdAt: 2 },
     { id: 3, role: 'assistant', source: 'llm', text: 'S1', createdAt: 3 },
   ]
-  const groupFn = new Function('messages', 'showMyBubbles = true', 'orderCopilotMessagesForDisplay', `
-    const ordered = orderCopilotMessagesForDisplay(messages);
-    const filtered = showMyBubbles ? ordered : ordered.filter((m) => m.role !== 'me');
-    const groups = [];
-    for (const message of filtered) {
-      const previous = groups[groups.length - 1];
-      if (message.role === 'assistant' && previous && (message.replyToId == null || message.replyToId === previous[0].id) && (previous[0].role === 'interviewer' || previous[0].source === 'follow-up')) {
-        previous.push(message);
-        continue;
-      }
-      groups.push([message]);
-    }
-    return groups;
-  `)
-  const shown = groupFn(sampleMessages, true, (m) => m).flat()
-  const hidden = groupFn(sampleMessages, false, (m) => m).flat()
+  const shown = groupCopilotMessages(sampleMessages, true).flat()
+  const hidden = groupCopilotMessages(sampleMessages, false).flat()
   check(
     shown.length === 3 && hidden.length === 2 && !hidden.some((m) => m.role === 'me'),
     'groupCopilotMessages filters out user bubbles when showMyBubbles is false',
   )
 }
 check(
-  panel.includes('sendCopilotCommand({ type: "retry", messageId: message.id })')
-    && panel.includes('message.role === "interviewer"')
-    && panel.includes('isRegenerating')
-    && panel.includes('disabled={!running || isRegenerating}')
-    && panel.includes('animate-spin')
+  chat.includes('sendCopilotCommand({ type: "retry", messageId: message.id })')
+    && chat.includes('message.role === "interviewer"')
+    && chat.includes('isRegenerating')
+    && chat.includes('disabled={!running || isRegenerating}')
+    && chat.includes('animate-spin')
     && session.includes('regenerateAnswer'),
   'interviewer bubbles provide a per-question regenerate button that shows spinning loading state while generating',
 )
-check(!panel.includes('assistant ? "w-full"') && !panel.includes('bg-transparent px-1 py-2'), 'AI replies use compact chat bubbles instead of a full-width document block')
+check(extractKeyTakeaways('A plain answer without bullets.').length === 0, 'plain answers are not repeated as manufactured takeaways')
+check(JSON.stringify(extractKeyTakeaways('10. First concrete point\n11) Second concrete point\n- **Third concrete point**')) === JSON.stringify(['First concrete point', 'Second concrete point', 'Third concrete point']), 'answer summaries recognize explicit multi-digit bullets without duplicating the body')
+check(chat.includes('aria-expanded={expanded}') && chat.includes('aria-controls=') && panel.includes('aria-label={t("copilot.myBubbles")}'), 'answer disclosure and bubble switch expose stable accessible state')
+check(!chat.includes('assistant ? "w-full"') && !chat.includes('bg-transparent px-1 py-2'), 'AI replies use compact chat bubbles instead of a full-width document block')
 check(page.includes('values.includes(preferredDevice) ? preferredDevice : preferredDevice || values[0] ||'), 'saved microphone is kept until a device list is available')
 check(!page.includes('return loadDevices(settings.micDevice'), 'Copilot page load does not enumerate microphones before permission')
 check(!app.includes('startDeepgramStream') && !page.includes('startDeepgramStream'), 'views do not own STT connections')
@@ -375,15 +368,15 @@ check(
 check(session.includes('MAX_AUTO_CONTINUATIONS') && session.includes('continuationAttempt < MAX_AUTO_CONTINUATIONS'), 'token-limited answers are automatically continued with a bounded retry count')
 check(
   (session.match(/suggestion: \{ id: idBase, text: '', category \}/g) || []).length === 2
-    && panel.includes('const isGeneratingAnswer = assistant && !message.text')
-    && panel.includes('motion-reduce:animate-none')
-    && panel.includes('t("copilot.answer.generating")'),
+    && chat.includes('const isGeneratingAnswer = assistant && !message.text')
+    && chat.includes('motion-reduce:animate-none')
+    && chat.includes('t("copilot.answer.generating")'),
   'AI answer bubbles appear before the first model token with a motion-aware loading state',
 )
 check(
-  panel.includes('border-l-2 border-l-[var(--action)]')
-    && panel.includes('bg-[var(--action)]')
-    && panel.includes('bg-[var(--bg-hover)]'),
+  chat.includes('border-l-2 border-l-[var(--action)]')
+    && chat.includes('bg-[var(--action)]')
+    && chat.includes('bg-[var(--bg-hover)]'),
   'interviewer, candidate, and AI bubbles use distinct visual treatments',
 )
 check(session.includes('textSimilarity') && session.includes('isLikelyEcho'), 'system-audio echo is filtered against recent AI and microphone text')
@@ -427,7 +420,7 @@ check(
   'copilot.archive.limitReached is translated in all locales',
 )
 check(sessionState.includes('createdAt: number') && sessionState.includes('startedAt: number | null'), 'chat messages and sessions track timestamps')
-check(panel.includes('formatClock') && panel.includes('formatElapsed') && panel.includes('copilot.sessionDuration'), 'chat UI shows message times and interview duration')
+check(chat.includes('<time') && chat.includes('date.toISOString()') && panel.includes('copilot.sessionDuration') && panel.includes('CopilotElapsed'), 'chat UI shows message times and interview duration')
 
 check(rustWindow.includes('.content_protected(protected)') && rustWindow.includes('set_content_protected(protected)'), 'window protection is applied on create and reuse')
 check(rustWindow.includes('protection_requested') && rustWindow.includes('protection_applied'), 'native window returns truthful protection status')
@@ -806,6 +799,27 @@ if (sessionState) {
   )
   const msg = (id, role, source, text) => ({ id, role, source, text, createdAt: id })
   const displayRoles = (messages) => orderCopilotMessagesForDisplay(messages).map((message) => `${message.role}:${message.id}`).join(',')
+  const longDisplay = Array.from({ length: 1000 }, (_, index) => ({
+    ...msg(index + 1, index % 2 ? 'assistant' : 'interviewer', index % 2 ? 'llm' : 'system-stt', 'text'),
+    ...(index % 2 ? { replyToId: index } : {}),
+  }))
+  let displayVisits = 0
+  const countedDisplay = new Proxy(longDisplay, {
+    get(target, key, receiver) {
+      if (key === Symbol.iterator) return function* () {
+        for (const message of target) { displayVisits += 1; yield message }
+      }
+      if (key === 'find') return (predicate) => target.find((message) => {
+        displayVisits += 1
+        return predicate(message)
+      })
+      return Reflect.get(target, key, receiver)
+    },
+  })
+  check(
+    orderCopilotMessagesForDisplay(countedDisplay).length === 1000 && displayVisits <= 8000,
+    `long chat ordering uses linear scans (${displayVisits} visits for 1000 messages)`,
+  )
   check(
     displayRoles([
       msg(1, 'interviewer', 'system-stt', 'Q'),
@@ -1739,6 +1753,93 @@ function createCopilotSessionHost(sessionId) {
       return lastTranscript
     },
   }
+}
+
+// Exercise the real publication path; the speech-only harness above replaces transition.
+{
+  const timers = createFakeTimers()
+  const events = []
+  const writes = []
+  const lifecycle = []
+  let current = { ...copilotStateApi.createInitialSnapshot(), phase: 'listening', sessionId: 41, startedAt: 1000,
+    messages: [{ id: 1, role: 'interviewer', source: 'system-stt', text: 'Question', createdAt: 1000 }] }
+  const store = { getState: () => ({ copilot: current, setCopilotSnapshot: (next) => { current = next }, addHistory: () => {} }) }
+  const { CopilotSessionHost } = loadTypeScriptModule('src/lib/copilotSession.ts', ['CopilotSessionHost'], {
+    ...copilotStateApi, ...copilotEndpoint,
+    createEmptyResumeWorkspace: () => ({}), interviewProfileFromWorkspace: (value) => value,
+    createSessionIdentity: () => ({ isTestSession: false }),
+    globalThis: timers.global, useAppStore: store,
+    emit: async (name, payload) => { events.push({ name, payload }) },
+    createRecoverySnapshot: (_identity, messages, question, startedAt) => messages.length ? { messages, question, startedAt } : null,
+    SESSION_RECOVERY_KEY: 'test-recovery',
+    saveSetting: async (_key, value) => { writes.push(JSON.parse(value)); lifecycle.push('write') },
+    deleteSetting: async () => { lifecycle.push('delete') },
+    invoke: async () => null, scoreCopilotSession: async () => null,
+    createCopilotInterviewRecord: () => ({}), saveInterview: async () => 1,
+  })
+  const host = new CopilotSessionHost()
+  host.snapshot = current
+  const originalMessages = current.messages
+  const fullEvents = () => events.filter((event) => event.name === 'copilot-session-snapshot')
+  for (let i = 0; i < 20; i++) host.transition({ type: 'amplitude', sessionId: 41, amplitude: i % 2 ? 0.2 : 0.6 })
+  check(fullEvents().length === 0 && events.length === 20 && current.messages === originalMessages && timers.pending(800).length === 0, 'audio publishes only a lightweight meter event without chat serialization or recovery writes')
+  const stream = (id, text, background = false) => host.transition({ type: 'stream-answer', sessionId: 41, suggestion: { id, text, category: 'AI' }, replyToId: 1, background })
+  stream(10, '')
+  stream(10, 'first')
+  for (let i = 1; i <= 20; i++) stream(10, 'first' + '.'.repeat(i))
+  host.transition({ type: 'amplitude', sessionId: 41, amplitude: 0.3 })
+  check(fullEvents().length === 2 && timers.pending(40).length === 1 && current.messages.at(-1).text === 'first', 'stream deltas share one publication timer and audio cannot leak buffered text')
+  await timers.runTimeout(40)
+  check(fullEvents().length === 3 && current.messages.at(-1).text === 'first' + '.'.repeat(20), 'stream publication flushes the latest accumulated text')
+  stream(10, 'penultimate')
+  host.transition({ type: 'complete-answer', sessionId: 41, answerId: 10, answer: 'complete final text', suggestions: [], replyToId: 1 })
+  check(current.messages.at(-1).text === 'complete final text' && timers.pending(40).length === 0, 'completion immediately flushes final text and cancels the stream timer')
+  await timers.runTimeout(800)
+  check(writes.length === 1 && writes[0].messages.at(-1).text === 'complete final text', 'content recovery coalesces deltas and saves the full completed answer')
+  stream(20, 'partial')
+  stream(20, 'pending partial')
+  host.transition({ type: 'cancel-answer', sessionId: 41, answerId: 20, replyToId: 1 })
+  check(!current.messages.some((message) => message.id === 20) && timers.pending(40).length === 0, 'cancelling a buffered answer removes it without a delayed resurrection')
+  stream(30, 'background', true)
+  stream(30, 'background pending', true)
+  host.transition({ type: 'complete-answer', sessionId: 41, answerId: 30, answer: 'background final', suggestions: [], replyToId: 1, background: true })
+  check(current.messages.at(-1).text === 'background final' && current.messages.some((message) => message.id === 10) && timers.pending(40).length === 0, 'background regeneration uses the same bounded publication and completion path')
+  const cloned = JSON.parse(JSON.stringify(current))
+  const reconciled = copilotStateApi.reconcileCopilotSnapshot(current, cloned)
+  check(reconciled.messages === current.messages && reconciled.generatingReplyToIds === current.generatingReplyToIds, 'floating snapshot reconciliation reuses unchanged chat and generation arrays')
+  cloned.messages.at(-1).text += ' changed'
+  const changed = copilotStateApi.reconcileCopilotSnapshot(current, cloned)
+  check(changed.messages[0] === current.messages[0] && changed.messages.at(-1) !== current.messages.at(-1), 'floating snapshot reconciliation changes only the updated row identity')
+  host.transition({ type: 'stop' })
+  await host.archiveSession(host.snapshot, 'test-session')
+  check(lifecycle.at(-1) === 'delete' && timers.pending(800).length === 0, 'archiving flushes pending recovery writes before deleting the backup')
+  const eventCount = fullEvents().length
+  stream(40, 'late after stop')
+  check(fullEvents().length === eventCount && !current.messages.some((message) => message.id === 40), 'late stream callbacks remain ignored after stop')
+}
+
+{
+  const listeners = new Map()
+  const outgoing = []
+  let current = { ...copilotStateApi.createInitialSnapshot(), sessionId: 61, revision: 100,
+    messages: [{ id: 1, text: 'kept', role: 'interviewer', source: 'system-stt', createdAt: 1 }] }
+  const { mountCopilotSessionClient } = loadTypeScriptModule('src/lib/copilotSession.ts', ['mountCopilotSessionClient'], {
+    ...copilotStateApi,
+    useAppStore: { getState: () => ({ copilot: current, setCopilotSnapshot: (next) => { current = next } }) },
+    listen: async (name, callback) => { listeners.set(name, callback); return () => listeners.delete(name) },
+    emit: async (name, payload) => { outgoing.push({ name, payload }) },
+  })
+  const dispose = await mountCopilotSessionClient()
+  const rows = current.messages
+  listeners.get('copilot-session-amplitude')({ payload: { sessionId: 61, amplitude: 0.7 } })
+  check(current.amplitude === 0.7 && current.revision === 100 && current.messages === rows, 'floating audio events preserve chat identity and do not advance the full-snapshot revision')
+  listeners.get('copilot-session-snapshot')({ payload: JSON.parse(JSON.stringify({ ...current, revision: 101, question: 'updated' })) })
+  check(current.revision === 101 && current.question === 'updated' && current.messages === rows, 'a full floating snapshot still arrives after intervening meter events')
+  listeners.get('copilot-session-amplitude')({ payload: { sessionId: 60, amplitude: 0.1 } })
+  listeners.get('copilot-session-snapshot')({ payload: { ...current, revision: 99, question: 'stale' } })
+  check(current.amplitude === 0.7 && current.question === 'updated', 'floating client ignores old-session audio and stale snapshots')
+  dispose()
+  check(listeners.size === 0 && outgoing.some((event) => event.payload.type === 'request-snapshot'), 'floating client requests initial state and removes both listeners on disposal')
 }
 
 const geminiHost = createCopilotSessionHost(7)

@@ -1,0 +1,36 @@
+{
+  "view": "main",
+  "scrollDown": false,
+  "totalMessages": 1006,
+  "mountedRows": 4,
+  "checks": {
+    "initialBottom": true,
+    "virtualRows": true,
+    "historyButton": true,
+    "appendKeepsAnchor": true,
+    "unreadQuestion": true,
+    "streamKeepsAnchor": true,
+    "unreadCountsMessages": true,
+    "hiddenUserNotUnread": true,
+    "lateAnswerKeepsAnchor": true,
+    "jumpReachesBottom": true,
+    "appendFollowsBottom": true,
+    "streamFollowsBottom": true,
+    "expandsFullAnswer": true,
+    "expansionSurvivesVirtualization": true,
+    "fontResizeFollowsBottom": true,
+    "oldestMessageAvailable": true
+  },
+  "measurements": {
+    "earlierQuestion": 977,
+    "earlierBottom": -144,
+    "lateAnchor": {
+      "before": {
+        "id": "980",
+        "top": -32.5
+      },
+      "after": -32.5
+    }
+  },
+  "pass": true
+}

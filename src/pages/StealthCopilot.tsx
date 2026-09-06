@@ -22,7 +22,8 @@ export default function StealthCopilot({
   onOpenSettings?: (tab: 'ai' | 'stt' | 'shortcuts_privacy') => void
 } = {}) {
   const t = useTranslation()
-  const copilot = useAppStore((state) => state.copilot)
+  const phase = useAppStore((state) => state.copilot.phase)
+  const hasRecording = useAppStore((state) => state.copilot.hasRecording)
   const [devices, setDevices] = useState<string[]>([])
   const [selectedDevice, setSelectedDevice] = useState("")
   const [useSystemAudio, setUseSystemAudio] = useState(true)
@@ -32,7 +33,7 @@ export default function StealthCopilot({
   const [audioSettingsOpen, setAudioSettingsOpen] = useState(false)
   const [audioReady, setAudioReady] = useState(false)
   const [capabilitiesError, setCapabilitiesError] = useState(false)
-  const running = copilot.phase === "starting" || copilot.phase === "listening" || copilot.phase === "stopping"
+  const running = phase === "starting" || phase === "listening" || phase === "stopping"
 
   useEffect(() => {
     if (!audioSettingsOpen) return
@@ -114,15 +115,6 @@ export default function StealthCopilot({
               <h1 className="truncate text-xl font-semibold tracking-tight text-[var(--text-main)]">
                 {t("copilot.title")}
               </h1>
-              <span
-                className={`rounded-md bg-[var(--bg-subtle)] px-2 py-0.5 text-[11px] font-medium ${
-                  running
-                    ? "text-[var(--success)]"
-                    : "text-[var(--text-muted)]"
-                }`}
-              >
-                {t(`copilot.phase.${copilot.phase}`)}
-              </span>
             </div>
             <p className="truncate text-xs text-[var(--text-muted)]">
               {t("copilot.subtitle")}
@@ -170,6 +162,7 @@ export default function StealthCopilot({
                   className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 shadow-[0_8px_24px_rgba(0,0,0,0.08)] md:w-96"
                   aria-label={t("copilot.device")}
                 >
+                {running && <p className="mb-3 rounded-md bg-[var(--bg-subtle)] p-2 text-xs text-[var(--text-muted)]">{t("copilot.audioConfigLocked")}</p>}
                 <div className="grid gap-3 md:grid-cols-2 md:items-center">
                   <label className="flex items-center gap-2 text-sm font-medium text-[var(--text-main)]">
                     <input
@@ -209,16 +202,18 @@ export default function StealthCopilot({
                 )}
 
                 {capabilities?.system_audio_available && (
-                  <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-                    AudioTee {capabilities.audiotee_commit.slice(0, 12)} · 16 kHz mono · macOS Default Output
-                  </p>
+                  <details className="mt-2 text-xs text-[var(--text-muted)]">
+                    <summary className="cursor-pointer py-1">{t("copilot.audioDiagnostics")}</summary>
+                    <p className="mt-1">AudioTee {capabilities.audiotee_commit.slice(0, 12)} · {capabilities.sample_rate / 1000} kHz</p>
+                  </details>
                 )}
 
                 <div className="mt-3 flex items-center gap-2 text-xs">
-                  <span className="shrink-0 font-medium text-[var(--text-muted)]">
+                  <label htmlFor="copilot-microphone" className="shrink-0 font-medium text-[var(--text-muted)]">
                     {t("copilot.device")}:
-                  </span>
+                  </label>
                   <select
+                    id="copilot-microphone"
                     value={selectedDevice}
                     onChange={(event) => {
                       setSelectedDevice(event.target.value)
@@ -292,9 +287,8 @@ export default function StealthCopilot({
         <div className="min-h-0 flex-1">
           <CopilotPanel
             windowStatus={windowStatus}
-            onDetach={() => void showCopilotWindow().then(setWindowStatus)}
             onExportRecording={handleExportRecording}
-            canExportRecording={copilot.hasRecording}
+            canExportRecording={hasRecording}
           />
         </div>
       </div>

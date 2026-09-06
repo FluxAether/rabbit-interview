@@ -104,6 +104,25 @@ function upsertMessage(messages: CopilotMessage[], message: CopilotMessage): Cop
   return [...messages, message]
 }
 
+/** Preserve unchanged row identities when a snapshot crosses the WebView boundary. */
+export function reconcileCopilotSnapshot(current: CopilotSnapshot, incoming: CopilotSnapshot): CopilotSnapshot {
+  const previous = new Map(current.messages.map((message) => [message.id, message]))
+  const messages = incoming.messages.map((message) => {
+    const old = previous.get(message.id)
+    return old && old.text === message.text && old.role === message.role
+      && old.source === message.source && old.createdAt === message.createdAt
+      && old.replyToId === message.replyToId ? old : message
+  })
+  return {
+    ...incoming,
+    messages: messages.length === current.messages.length && messages.every((message, index) => message === current.messages[index])
+      ? current.messages : messages,
+    generatingReplyToIds: incoming.generatingReplyToIds.length === current.generatingReplyToIds.length
+      && incoming.generatingReplyToIds.every((id, index) => id === current.generatingReplyToIds[index])
+      ? current.generatingReplyToIds : incoming.generatingReplyToIds,
+  }
+}
+
 function isFollowUp(message: CopilotMessage): boolean {
   return message.role === 'me' && message.source === 'follow-up'
 }
@@ -117,6 +136,11 @@ export function orderCopilotMessagesForDisplay(messages: CopilotMessage[]): Copi
   if (messages.length < 2) return messages
 
   const anchorOf = new Map<number, number>()
+  const anchors = new Map<number, CopilotMessage>()
+  for (const message of messages) {
+    if (isDisplayAnchor(message)) anchors.set(message.id, message)
+  }
+  const replies = new Map<number, CopilotMessage[]>()
   let lastAnchor: CopilotMessage | null = null
   for (const message of messages) {
     if (isDisplayAnchor(message)) {
@@ -125,10 +149,15 @@ export function orderCopilotMessagesForDisplay(messages: CopilotMessage[]): Copi
     }
     if (message.role !== 'assistant') continue
     const named = message.replyToId != null
-      ? messages.find((item) => item.id === message.replyToId && isDisplayAnchor(item))
+      ? anchors.get(message.replyToId)
       : null
     const anchor = named ?? lastAnchor
-    if (anchor) anchorOf.set(message.id, anchor.id)
+    if (anchor) {
+      anchorOf.set(message.id, anchor.id)
+      const block = replies.get(anchor.id)
+      if (block) block.push(message)
+      else replies.set(anchor.id, [message])
+    }
   }
 
   const ordered: CopilotMessage[] = []
@@ -142,9 +171,7 @@ export function orderCopilotMessagesForDisplay(messages: CopilotMessage[]): Copi
   let blockAnchorId: number | null = null
   const flushBlockReplies = () => {
     if (blockAnchorId == null) return
-    for (const message of messages) {
-      if (anchorOf.get(message.id) === blockAnchorId) push(message)
-    }
+    for (const message of replies.get(blockAnchorId) ?? []) push(message)
   }
 
   for (const message of messages) {

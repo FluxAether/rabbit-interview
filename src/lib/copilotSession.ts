@@ -16,6 +16,7 @@ import { deleteSetting, loadSetting, saveInterview, saveSetting } from './db'
 import {
   createInitialSnapshot,
   reduceCopilotSnapshot,
+  reconcileCopilotSnapshot,
   type CopilotSnapshot,
   type CopilotSnapshotAction,
 } from './copilotSessionState'
@@ -46,6 +47,8 @@ import {
 
 const COMMAND_EVENT = 'copilot-session-command'
 const SNAPSHOT_EVENT = 'copilot-session-snapshot'
+const AMPLITUDE_EVENT = 'copilot-session-amplitude'
+const STREAM_PUBLISH_MS = 40
 const MAX_AUTO_CONTINUATIONS = 2
 const ECHO_WINDOW_MS = 15_000
 const UTTERANCE_HARD_CAP_MS = 7_000
@@ -184,6 +187,8 @@ class CopilotSessionHost {
   private recentMicrophoneAt = 0
   private identity = createSessionIdentity('copilot', interviewProfileFromWorkspace(createEmptyResumeWorkspace()), false)
   private recoveryTimer: ReturnType<typeof globalThis.setTimeout> | null = null
+  private recoveryWrite: Promise<void> = Promise.resolve()
+  private streamPublishTimer: ReturnType<typeof globalThis.setTimeout> | null = null
 
   async mount(): Promise<void> {
     this.commandUnlisten = await listen<CopilotSessionCommand>(COMMAND_EVENT, (event) => {
@@ -212,6 +217,26 @@ class CopilotSessionHost {
     const next = reduceCopilotSnapshot(previous, action)
     if (next === previous) return
     this.snapshot = next
+    if (action.type === 'amplitude') {
+      const store = useAppStore.getState()
+      // Keep unpublished stream text buffered; audio only updates the meter.
+      store.setCopilotSnapshot({ ...store.copilot, amplitude: next.amplitude })
+      void emit(AMPLITUDE_EVENT, { sessionId: next.sessionId, amplitude: next.amplitude })
+      return
+    }
+    if (next.messages !== previous.messages || next.question !== previous.question) {
+      this.scheduleRecoverySave()
+    }
+    if (action.type === 'stream-answer' && previous.messages.some((message) => message.id === action.suggestion.id && message.text)) {
+      if (this.streamPublishTimer === null) {
+        this.streamPublishTimer = globalThis.setTimeout(() => {
+          this.streamPublishTimer = null
+          void this.publish()
+        }, STREAM_PUBLISH_MS)
+      }
+      return
+    }
+    // First text and completion/cancellation are immediate, including pending deltas.
     void this.publish()
   }
 
@@ -220,6 +245,12 @@ class CopilotSessionHost {
     persistenceSessionId: string | null,
   ): Promise<void> {
     if (!persistenceSessionId) return
+    if (this.recoveryTimer !== null) {
+      globalThis.clearTimeout(this.recoveryTimer)
+      this.recoveryTimer = null
+      this.writeRecoverySnapshot()
+    }
+    await this.recoveryWrite
 
     let recording: SavedRecording | null = null
     let recordingError: string | null = null
@@ -449,27 +480,37 @@ class CopilotSessionHost {
   }
 
   private async publish(force = false): Promise<void> {
+    if (this.streamPublishTimer !== null) {
+      globalThis.clearTimeout(this.streamPublishTimer)
+      this.streamPublishTimer = null
+    }
     const current = useAppStore.getState().copilot
     if (force || this.snapshot.revision >= current.revision) {
       useAppStore.getState().setCopilotSnapshot(this.snapshot)
     }
     await emit(SNAPSHOT_EVENT, this.snapshot)
-    this.scheduleRecoverySave()
+  }
+
+  private writeRecoverySnapshot(): void {
+    if (this.identity.isTestSession) return
+    const snapshot = createRecoverySnapshot(
+      this.identity,
+      this.snapshot.messages,
+      this.snapshot.question,
+      this.snapshot.startedAt ?? Date.now(),
+    )
+    if (!snapshot) return
+    // Serialize writes so an older backup cannot finish after archiving deletes it.
+    this.recoveryWrite = this.recoveryWrite
+      .then(() => saveSetting(SESSION_RECOVERY_KEY, JSON.stringify(snapshot)))
+      .catch((error) => console.warn('[Copilot] Unable to save session recovery', error))
   }
 
   private scheduleRecoverySave(): void {
-    if (this.identity.isTestSession) return
-    if (this.recoveryTimer != null) return
+    if (this.identity.isTestSession || this.recoveryTimer !== null) return
     this.recoveryTimer = globalThis.setTimeout(() => {
       this.recoveryTimer = null
-      const snapshot = createRecoverySnapshot(
-        this.identity,
-        this.snapshot.messages,
-        this.snapshot.question,
-        this.snapshot.startedAt ?? Date.now(),
-      )
-      if (!snapshot) return
-      void saveSetting(SESSION_RECOVERY_KEY, JSON.stringify(snapshot)).catch(() => {})
+      this.writeRecoverySnapshot()
     }, 800)
     ;(this.recoveryTimer as { unref?: () => void }).unref?.()
   }
@@ -1422,11 +1463,17 @@ export async function mountCopilotSessionClient(): Promise<() => void> {
   const unlisten = await listen<CopilotSnapshot>(SNAPSHOT_EVENT, (event) => {
     const current = useAppStore.getState().copilot
     if (event.payload.revision >= current.revision) {
-      useAppStore.getState().setCopilotSnapshot(event.payload)
+      useAppStore.getState().setCopilotSnapshot(reconcileCopilotSnapshot(current, event.payload))
+    }
+  })
+  const unlistenAmplitude = await listen<{ sessionId: number | null; amplitude: number }>(AMPLITUDE_EVENT, (event) => {
+    const store = useAppStore.getState()
+    if (event.payload.sessionId === store.copilot.sessionId) {
+      store.setCopilotSnapshot({ ...store.copilot, amplitude: event.payload.amplitude })
     }
   })
   await sendCopilotCommand({ type: 'request-snapshot' })
-  return unlisten
+  return () => { unlisten(); unlistenAmplitude() }
 }
 
 export async function sendCopilotCommand(command: CopilotSessionCommand): Promise<void> {

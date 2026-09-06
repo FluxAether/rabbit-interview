@@ -1,0 +1,100 @@
+{
+  "evidenceScope": "Node source functions only; excludes React reconciliation, DOM layout, paint, IPC and scrolling FPS.",
+  "node": "v24.11.1",
+  "timings": [
+    {
+      "count": 50,
+      "sourceScanVisits": 200,
+      "grouping": {
+        "medianMs": 0.01,
+        "p95Ms": 0.024
+      },
+      "allTakeaways": {
+        "medianMs": 0.005,
+        "p95Ms": 0.011
+      },
+      "snapshotJsonBytes": 27299,
+      "stringify": {
+        "medianMs": 0.012,
+        "p95Ms": 0.013
+      }
+    },
+    {
+      "count": 200,
+      "sourceScanVisits": 800,
+      "grouping": {
+        "medianMs": 0.023,
+        "p95Ms": 0.06
+      },
+      "allTakeaways": {
+        "medianMs": 0.019,
+        "p95Ms": 0.024
+      },
+      "snapshotJsonBytes": 108551,
+      "stringify": {
+        "medianMs": 0.041,
+        "p95Ms": 0.049
+      }
+    },
+    {
+      "count": 500,
+      "sourceScanVisits": 2000,
+      "grouping": {
+        "medianMs": 0.053,
+        "p95Ms": 0.075
+      },
+      "allTakeaways": {
+        "medianMs": 0.048,
+        "p95Ms": 0.061
+      },
+      "snapshotJsonBytes": 271451,
+      "stringify": {
+        "medianMs": 0.123,
+        "p95Ms": 0.14
+      }
+    },
+    {
+      "count": 1000,
+      "sourceScanVisits": 4000,
+      "grouping": {
+        "medianMs": 0.11,
+        "p95Ms": 0.143
+      },
+      "allTakeaways": {
+        "medianMs": 0.092,
+        "p95Ms": 0.127
+      },
+      "snapshotJsonBytes": 542952,
+      "stringify": {
+        "medianMs": 0.239,
+        "p95Ms": 0.361
+      }
+    },
+    {
+      "count": 2000,
+      "sourceScanVisits": 8000,
+      "grouping": {
+        "medianMs": 0.222,
+        "p95Ms": 0.303
+      },
+      "allTakeaways": {
+        "medianMs": 0.153,
+        "p95Ms": 0.176
+      },
+      "snapshotJsonBytes": 1088453,
+      "stringify": {
+        "medianMs": 0.468,
+        "p95Ms": 0.548
+      }
+    }
+  ],
+  "observations": {
+    "singleParagraphTakeawayDuplicatesFullAnswer": false,
+    "groupKeyBeforeAnswer": 1,
+    "groupKeyAfterAnswer": 1,
+    "amplitudeChangesSnapshot": true,
+    "amplitudePreservesMessageArrayInHost": true,
+    "serializationRoundTripPreservesMessageArray": false,
+    "streamPreservesUnchangedQuestionObject": true
+  }
+}
