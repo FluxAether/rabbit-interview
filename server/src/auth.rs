@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fs,
     path::Path,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{MySql, MySqlPool, Row, Transaction};
 use subtle::ConstantTimeEq;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use uuid::Uuid;
 
 use crate::{config::Config, error::AppError};
@@ -143,6 +143,7 @@ pub struct AuthService {
     data_keys: Arc<DataKeyRing>,
     http: reqwest::Client,
     rate_limits: Arc<Mutex<HashMap<String, VecDeque<Instant>>>>,
+    password_slots: Arc<Semaphore>,
 }
 
 impl AuthService {
@@ -160,11 +161,33 @@ impl AuthService {
             data_keys: Arc::new(data_keys),
             http,
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
+            password_slots: Arc::new(Semaphore::new(std::thread::available_parallelism()
+                .map_or(1, |cpus| cpus.get().saturating_sub(1).clamp(1, 2)))),
         })
     }
 
     pub fn pool(&self) -> &MySqlPool {
         &self.pool
+    }
+
+    pub async fn hash_password(&self, password: &str) -> Result<String, AppError> {
+        validate_password(password)?;
+        let password = password.to_owned();
+        password_job(self.password_slots.clone(), move || hash_password(&password)).await?
+    }
+
+    pub async fn verify_password(&self, password: &str, encoded: Option<&str>) -> Result<bool, AppError> {
+        let password = password.to_owned();
+        let encoded = encoded.map(ToOwned::to_owned);
+        password_job(self.password_slots.clone(), move || match encoded {
+            Some(encoded) => verify_password(&password, &encoded),
+            None => {
+                static DUMMY_HASH: OnceLock<String> = OnceLock::new();
+                let hash = DUMMY_HASH.get_or_init(|| hash_password("dummy password value").expect("valid dummy password"));
+                let _ = verify_password(&password, hash);
+                false
+            }
+        }).await
     }
 
     pub fn config(&self) -> &Config {
@@ -716,6 +739,20 @@ pub fn validate_password(password: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+async fn password_job<T: Send + 'static>(slots: Arc<Semaphore>, job: impl FnOnce() -> T + Send + 'static) -> Result<T, AppError> {
+    let permit = slots.try_acquire_owned().map_err(|_| {
+        tracing::warn!(phase = "password_work", "password CPU capacity exhausted");
+        AppError::RateLimited
+    })?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        job()
+    }).await.map_err(|error| {
+        tracing::error!(%error, "password worker failed");
+        AppError::Internal
+    })
+}
+
 pub fn hash_password(password: &str) -> Result<String, AppError> {
     validate_password(password)?;
     let params = ArgonParams::new(19_456, 2, 1, None).map_err(|_| AppError::Internal)?;
@@ -766,6 +803,39 @@ fn action_url(base: &str, path: &str, token: &str) -> Result<String, AppError> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn password_workers_keep_permits_after_waiter_cancellation() {
+        use std::{sync::Arc, time::Duration};
+        let slots = Arc::new(tokio::sync::Semaphore::new(2));
+        let mut waiters = Vec::new();
+        let mut releases = Vec::new();
+        for _ in 0..2 {
+            let (started, ready) = tokio::sync::oneshot::channel();
+            let (release, gate) = std::sync::mpsc::channel::<()>();
+            let slots = slots.clone();
+            releases.push(release);
+            waiters.push(tokio::spawn(super::password_job(slots, move || {
+                let _ = started.send(());
+                let _ = gate.recv_timeout(Duration::from_secs(5));
+            })));
+            tokio::time::timeout(Duration::from_secs(1), ready).await.unwrap().unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(1), tokio::time::sleep(Duration::from_millis(10))).await.unwrap();
+        assert!(matches!(super::password_job(slots.clone(), || panic!("over-capacity job ran")).await, Err(crate::error::AppError::RateLimited)));
+        for waiter in waiters {
+            waiter.abort();
+            assert!(waiter.await.unwrap_err().is_cancelled());
+        }
+        assert_eq!(slots.available_permits(), 0, "cancelling a waiter freed a running CPU slot");
+        for release in releases { release.send(()).unwrap(); }
+        let permits = tokio::time::timeout(Duration::from_secs(1), slots.acquire_many(2)).await.unwrap().unwrap();
+        drop(permits);
+        assert_eq!(slots.available_permits(), 2);
+        let password = "correct horse battery staple";
+        let encoded = super::password_job(slots.clone(), move || super::hash_password(password)).await.unwrap().unwrap();
+        assert!(super::password_job(slots, move || super::verify_password(password, &encoded)).await.unwrap());
+    }
+
     use super::{
         access_token_hash, action_url, hash_password, normalize_email, secret_hash, verify_password,
     };

@@ -131,9 +131,12 @@ impl Entitlement {
     }
 
     pub async fn reserve(&self, input: ReserveInput) -> Result<ReserveOutcome, AppError> {
+        let started = std::time::Instant::now();
         for attempt in 0..3 {
             match self.reserve_once(&input).await {
-                Err(AppError::Database(error)) if retryable_mysql(&error) && attempt < 2 => {
+                Err(AppError::Database(error)) if retryable_mysql(&error) => {
+                    log_mysql_retry(&error, "reserve", attempt, started);
+                    if attempt == 2 { return Err(AppError::Database(error)); }
                     sleep(Duration::from_millis(20 * (attempt + 1) as u64)).await;
                 }
                 result => return result,
@@ -238,12 +241,15 @@ impl Entitlement {
         idempotency_key: &str,
     ) -> Result<i64, AppError> {
         let request_hash = hash_bytes(format!("{reservation_id}:{units}").as_bytes());
+        let started = std::time::Instant::now();
         for attempt in 0..3 {
             match self
                 .top_up_once(reservation_id, units, idempotency_key, &request_hash)
                 .await
             {
-                Err(AppError::Database(error)) if retryable_mysql(&error) && attempt < 2 => {
+                Err(AppError::Database(error)) if retryable_mysql(&error) => {
+                    log_mysql_retry(&error, "top_up", attempt, started);
+                    if attempt == 2 { return Err(AppError::Database(error)); }
                     sleep(Duration::from_millis(20 * (attempt + 1) as u64)).await;
                 }
                 result => return result,
@@ -312,9 +318,12 @@ impl Entitlement {
     }
 
     pub async fn settle(&self, reservation_id: &str, usage: UsageInput) -> Result<i64, AppError> {
+        let started = std::time::Instant::now();
         for attempt in 0..3 {
             match self.settle_once(reservation_id, &usage).await {
-                Err(AppError::Database(error)) if retryable_mysql(&error) && attempt < 2 => {
+                Err(AppError::Database(error)) if retryable_mysql(&error) => {
+                    log_mysql_retry(&error, "settle", attempt, started);
+                    if attempt == 2 { return Err(AppError::Database(error)); }
                     sleep(Duration::from_millis(20 * (attempt + 1) as u64)).await;
                 }
                 result => return result,
@@ -443,11 +452,15 @@ impl Entitlement {
         reason: &str,
         expired: bool,
     ) -> Result<(), AppError> {
+        self.release_if_active(reservation_id, reason, expired).await.map(|_| ())
+    }
+
+    async fn release_if_active(&self, reservation_id: &str, reason: &str, expired: bool) -> Result<bool, AppError> {
         let account_id = reservation_account(&self.pool, reservation_id).await?;
         let mut tx = self.pool.begin().await?;
         lock_account(&mut tx, &account_id).await?;
         let row =
-            sqlx::query("SELECT session_id, state FROM quota_reservations WHERE id = ? FOR UPDATE")
+            sqlx::query("SELECT session_id, state, expires_at FROM quota_reservations WHERE id = ? FOR UPDATE")
                 .bind(reservation_id)
                 .fetch_optional(&mut *tx)
                 .await?
@@ -455,7 +468,14 @@ impl Entitlement {
         let state: String = row.try_get("state")?;
         if state != "ACTIVE" {
             tx.commit().await?;
-            return Ok(());
+            return Ok(false);
+        }
+        if expired {
+            let now: chrono::NaiveDateTime = sqlx::query_scalar("SELECT UTC_TIMESTAMP(6)").fetch_one(&mut *tx).await?;
+            if row.try_get::<chrono::NaiveDateTime, _>("expires_at")? > now {
+                tx.commit().await?;
+                return Ok(false);
+            }
         }
         let session_id: String = row.try_get("session_id")?;
         let allocations = sqlx::query(
@@ -493,7 +513,7 @@ impl Entitlement {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(())
+        Ok(true)
     }
 
     pub async fn mark_active(
@@ -501,32 +521,55 @@ impl Entitlement {
         session_id: &str,
         provider_request_id: Option<&str>,
     ) -> Result<(), AppError> {
+        let account_id: String = sqlx::query_scalar("SELECT account_id FROM ai_sessions WHERE id = ?")
+            .bind(session_id).fetch_optional(&self.pool).await?.ok_or(AppError::NotFound)?;
+        let mut tx = self.pool.begin().await?;
+        lock_active_account(&mut tx, &account_id).await?;
+        let reservations = sqlx::query("SELECT state, expires_at FROM quota_reservations WHERE session_id = ? ORDER BY id FOR UPDATE")
+            .bind(session_id).fetch_all(&mut *tx).await?;
+        let now: chrono::NaiveDateTime = sqlx::query_scalar("SELECT UTC_TIMESTAMP(6)").fetch_one(&mut *tx).await?;
+        if reservations.is_empty() { return Err(AppError::AlreadyExists); }
+        for row in reservations {
+            if row.try_get::<String, _>("state")? != "ACTIVE" || row.try_get::<chrono::NaiveDateTime, _>("expires_at")? <= now {
+                return Err(AppError::AlreadyExists);
+            }
+        }
+        let state: String = sqlx::query_scalar("SELECT state FROM ai_sessions WHERE id = ? FOR UPDATE")
+            .bind(session_id).fetch_one(&mut *tx).await?;
+        if !matches!(state.as_str(), "RESERVED" | "CONNECTING" | "ACTIVE") { return Err(AppError::AlreadyExists); }
         sqlx::query(
             "UPDATE ai_sessions SET state = 'ACTIVE', started_at = COALESCE(started_at, UTC_TIMESTAMP(6)), provider_request_id = COALESCE(?, provider_request_id) WHERE id = ?",
         )
         .bind(provider_request_id)
         .bind(session_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(())
     }
 
-    pub async fn touch_lease(&self, session_id: &str, ttl: Duration) -> Result<(), AppError> {
-        let expires = Utc::now().naive_utc()
-            + chrono::Duration::from_std(ttl).map_err(|_| AppError::Internal)?;
+    pub async fn touch_lease(&self, session_id: &str, ttl: Duration) -> Result<bool, AppError> {
+        let account_id: String = sqlx::query_scalar("SELECT account_id FROM ai_sessions WHERE id = ?")
+            .bind(session_id).fetch_optional(&self.pool).await?.ok_or(AppError::NotFound)?;
         let mut tx = self.pool.begin().await?;
-        sqlx::query("UPDATE ai_sessions SET lease_expires_at = ? WHERE id = ? AND state IN ('CONNECTING', 'ACTIVE', 'ENDING')")
-            .bind(expires)
-            .bind(session_id)
-            .execute(&mut *tx)
-            .await?;
+        if lock_account(&mut tx, &account_id).await? != "ACTIVE" { return Ok(false); }
+        let states: Vec<String> = sqlx::query_scalar("SELECT state FROM quota_reservations WHERE session_id = ? ORDER BY id FOR UPDATE")
+            .bind(session_id).fetch_all(&mut *tx).await?;
+        if states.is_empty() || states.iter().any(|state| state != "ACTIVE") { return Ok(false); }
+        let state: String = sqlx::query_scalar("SELECT state FROM ai_sessions WHERE id = ? FOR UPDATE")
+            .bind(session_id).fetch_one(&mut *tx).await?;
+        if !matches!(state.as_str(), "CONNECTING" | "ACTIVE" | "ENDING") { return Ok(false); }
+        let now: chrono::NaiveDateTime = sqlx::query_scalar("SELECT UTC_TIMESTAMP(6)").fetch_one(&mut *tx).await?;
+        let expires = now + chrono::Duration::from_std(ttl).map_err(|_| AppError::Internal)?;
         sqlx::query("UPDATE quota_reservations SET expires_at = ? WHERE session_id = ? AND state = 'ACTIVE'")
             .bind(expires)
             .bind(session_id)
             .execute(&mut *tx)
             .await?;
+        sqlx::query("UPDATE ai_sessions SET lease_expires_at = ? WHERE id = ?")
+            .bind(expires).bind(session_id).execute(&mut *tx).await?;
         tx.commit().await?;
-        Ok(())
+        Ok(true)
     }
 
     pub async fn reap_expired(&self) -> Result<u64, AppError> {
@@ -539,8 +582,10 @@ impl Entitlement {
         let mut released = 0;
         for row in rows {
             let id: String = row.try_get("id")?;
-            if self.release(&id, "lease_expired", true).await.is_ok() {
-                released += 1;
+            match self.release_if_active(&id, "lease_expired", true).await {
+                Ok(true) => released += 1,
+                Ok(false) => tracing::debug!(reservation_id = %id, "skipped stale reservation candidate"),
+                Err(error) => tracing::warn!(reservation_id = %id, error = ?error, "reservation release failed"),
             }
         }
         sqlx::query(
@@ -855,13 +900,34 @@ pub(crate) async fn insert_idempotency(
 fn retryable_mysql(error: &sqlx::Error) -> bool {
     error
         .as_database_error()
-        .and_then(|database| database.code())
-        .is_some_and(|code| code == "1213" || code == "1205")
+        .and_then(|database| database.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>())
+        .is_some_and(|database| matches!(database.number(), 1213 | 1205))
+}
+
+fn log_mysql_retry(error: &sqlx::Error, operation: &str, attempt: usize, started: std::time::Instant) {
+    if let Some(database) = error.as_database_error().and_then(|error| error.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>()) {
+        tracing::warn!(operation, attempt = attempt + 1, mysql_number = database.number(), sqlstate = database.code(), elapsed_ms = started.elapsed().as_millis() as u64, exhausted = attempt == 2, "quota transaction lock conflict");
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{plan_allocations, Bucket, PlannedAllocation};
+
+    #[tokio::test]
+    #[ignore = "requires TEST_DATABASE_URL pointing to MySQL 8.4"]
+    async fn mysql_retry_classification_uses_error_numbers() -> anyhow::Result<()> {
+        let pool = crate::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
+        for (number, state, retry) in [(1213, "40001", true), (1205, "HY000", true), (1062, "23000", false)] {
+            let error = sqlx::raw_sql(&format!("SIGNAL SQLSTATE '{state}' SET MYSQL_ERRNO = {number}, MESSAGE_TEXT = 'retry classification test'"))
+                .execute(&pool).await.unwrap_err();
+            assert_eq!(error.as_database_error().unwrap().try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>().unwrap().number(), number);
+            assert_eq!(super::retryable_mysql(&error), retry, "MySQL {number}, SQLSTATE {state}");
+        }
+        assert!(!super::retryable_mysql(&sqlx::Error::RowNotFound));
+        pool.close().await;
+        Ok(())
+    }
 
     #[test]
     fn allocation_uses_ordered_buckets_without_overdraft() {

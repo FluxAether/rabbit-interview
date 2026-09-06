@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future, time::Instant};
+use std::{collections::HashMap, future::Future, time::{Duration, Instant}};
 
 use axum::{
     extract::{
@@ -9,10 +9,11 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{future::BoxFuture, SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::time::{interval, sleep, timeout, MissedTickBehavior};
+use tracing::Instrument;
 use url::Url;
 use uuid::Uuid;
 
@@ -23,7 +24,7 @@ use crate::{
     providers::{
         deepgram::DeepgramClient,
         gemini_live::GeminiLiveClient,
-        stt::{SttAdapter, SttConnect, SttEvent, SttSink},
+        stt::{timed, SttAdapter, SttConnect, SttEvent, SttSink, STT_IO_TIMEOUT},
         volcengine::VolcengineClient,
     },
     routing::RouteKind,
@@ -121,7 +122,8 @@ pub async fn stream_session(
         .max_frame_size(max_frame)
         .max_message_size(max_frame)
         .on_upgrade(move |socket| async move {
-            let handle = tracker.spawn(run_session(state, socket, claim));
+            let span = tracing::info_span!("stt_session", session_id = %claim.session_id, provider = %claim.route.provider);
+            let handle = tracker.spawn(run_session(state, socket, claim).instrument(span));
             let _ = handle.await;
         })
         .into_response())
@@ -131,10 +133,7 @@ async fn run_session(state: AppState, socket: WebSocket, claim: crate::tickets::
     let _permit = match state.concurrency().clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
-            let _ = state
-                .entitlement()
-                .release(&claim.reservation_id, "gateway_concurrency_limit", false)
-                .await;
+            release_stt(&state, &claim, "gateway_concurrency_limit").await;
             return;
         }
     };
@@ -161,98 +160,150 @@ async fn proxy_stt(
     socket: WebSocket,
     claim: &crate::tickets::TicketClaim,
 ) -> Result<(), AppError> {
+    let deadline = sleep(state.config().max_stt_session);
+    tokio::pin!(deadline);
     let provider = match stt_adapter(state, &claim.route.provider) {
         Ok(provider) => provider,
         Err(error) => {
-            let _ = state
-                .entitlement()
-                .release(&claim.reservation_id, "provider_unconfigured", false)
-                .await;
+            release_stt(state, claim, "provider_unconfigured").await;
             return Err(error);
         }
     };
-    let connection = provider
-        .connect(SttConnect {
+    let connection = tokio::select! {
+        _ = state.shutdown().cancelled() => Err(AppError::ProviderUnavailable),
+        _ = &mut deadline => Err(AppError::ProviderUnavailable),
+        result = timed("provider_connect", Duration::from_secs(30), provider.connect(SttConnect {
             session_id: claim.session_id.clone(),
             language: claim.language.clone(),
             model: claim.route.model.clone(),
-        })
-        .await;
-    let connection = match connection {
-        Ok(value) => value,
+        })) => result,
+    };
+    let mut connection = match connection {
+        Ok(connection) => connection,
         Err(error) => {
-            let _ = state
-                .entitlement()
-                .release(&claim.reservation_id, "provider_connect_failed", false)
-                .await;
+            release_stt(state, claim, "provider_connect_failed").await;
             return Err(error);
         }
     };
-    if let Err(error) = state
-        .entitlement()
-        .mark_active(&claim.session_id, connection.provider_request_id.as_deref())
-        .await
-    {
-        let _ = state
-            .entitlement()
-            .release(&claim.reservation_id, "activation_failed", false)
-            .await;
+    let activation = tokio::select! {
+        _ = state.shutdown().cancelled() => Err(AppError::ProviderUnavailable),
+        _ = &mut deadline => Err(AppError::ProviderUnavailable),
+        result = timed("activation", STT_IO_TIMEOUT, state.entitlement().mark_active(
+            &claim.session_id, connection.provider_request_id.as_deref(),
+        )) => result,
+    };
+    if let Err(error) = activation {
+        connection.worker.abort();
+        let _ = timeout(Duration::from_secs(1), &mut connection.worker).await;
+        release_stt(state, claim, "activation_failed").await;
         return Err(error);
     }
-    let (mut client_tx, mut client_rx) = socket.split();
+
+    let (client_tx, mut client_rx) = socket.split();
+    let mut client_tx = Some(client_tx);
     let mut provider_tx = connection.sink;
     let mut provider_rx = connection.events;
+    let mut worker = connection.worker;
     let mut seq = 1_u64;
     let mut received_samples = 0_i64;
-    let mut forwarded_samples = 0_i64;
     let mut held_ms = state.config().initial_stt_hold_ms;
     let mut top_up_index = 0_u64;
     let mut terminate_reason = "client_disconnected";
     let mut usage_status = "FINAL";
     let mut lease = interval(state.config().reservation_ttl / 2);
     lease.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let deadline = sleep(state.config().max_stt_session);
-    tokio::pin!(deadline);
     let mut frame_window = Instant::now();
     let mut frame_count = 0_u32;
+    let mut audio: Option<BoxFuture<'static, Result<(i64, u64, i64), AppError>>> = None;
+    let mut heartbeat: Option<BoxFuture<'static, Result<bool, AppError>>> = None;
+    let mut writing = Some(write_client(client_tx.take().expect("initial client writer"), vec![json_message(json!({
+        "type":"stt.ready", "seq":seq, "session_id":claim.session_id,
+        "source":claim.source, "provider":claim.route.provider, "model":claim.route.model
+    }))]));
+    let mut quota_notice = None;
 
-    let proxy_result = async {
-        send_json(
-            &mut client_tx,
-            json!({
-                "type":"stt.ready",
-                "seq":seq,
-                "session_id":claim.session_id,
-                "source":claim.source,
-                "provider":claim.route.provider,
-                "model":claim.route.model
-            }),
-        )
-        .await?;
-        loop {
-            tokio::select! {
+    // Keep in-flight operations alive while polling both directions and lifecycle signals.
+    let proxy_result = loop {
+        tokio::select! {
             _ = state.shutdown().cancelled() => {
                 terminate_reason = "gateway_shutdown";
                 usage_status = "ESTIMATED";
-                break;
+                break Ok(());
             }
             _ = &mut deadline => {
                 terminate_reason = "session_limit";
-                break;
+                break Ok(());
             }
-            _ = lease.tick() => {
-                if !state.entitlement().account_is_active(&claim.account_id).await? {
-                    terminate_reason = "account_suspended";
-                    break;
+            result = async { writing.as_mut().expect("guarded write").await }, if writing.is_some() => {
+                writing = None;
+                match result {
+                    Ok(sink) => client_tx = Some(sink),
+                    Err(error) => break Err(error),
                 }
-                state.entitlement().touch_lease(&claim.session_id, state.config().reservation_ttl).await?;
             }
-            message = client_rx.next() => {
+            result = async { audio.as_mut().expect("guarded audio").await }, if audio.is_some() => {
+                audio = None;
+                match result {
+                    Ok((held, index, samples)) => {
+                        held_ms = held;
+                        top_up_index = index;
+                        received_samples += samples;
+                    }
+                    Err(AppError::QuotaInsufficient) => {
+                        seq += 1;
+                        let warning = json_message(json!({"type":"quota.warning","seq":seq,"remaining_ms":(held_ms - received_samples * 1000 / 16_000).max(0)}));
+                        seq += 1;
+                        quota_notice = Some(vec![warning, json_message(json!({"type":"session.ending","seq":seq,"reason":"quota_exhausted"}))]);
+                        terminate_reason = "quota_exhausted";
+                        break Ok(());
+                    }
+                    Err(error) => break Err(error),
+                }
+            }
+            result = async { heartbeat.as_mut().expect("guarded heartbeat").await }, if heartbeat.is_some() => {
+                heartbeat = None;
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => break Err(AppError::AlreadyExists),
+                    Err(AppError::AccountSuspended) => {
+                        terminate_reason = "account_suspended";
+                        break Ok(());
+                    }
+                    Err(error) => break Err(error),
+                }
+            }
+            _ = lease.tick(), if heartbeat.is_none() => {
+                let entitlement = state.entitlement().clone();
+                let session_id = claim.session_id.clone();
+                let account_id = claim.account_id.clone();
+                let ttl = state.config().reservation_ttl;
+                heartbeat = Some(Box::pin(timed("heartbeat", STT_IO_TIMEOUT, async move {
+                    if !entitlement.account_is_active(&account_id).await? {
+                        return Err(AppError::AccountSuspended);
+                    }
+                    entitlement.touch_lease(&session_id, ttl).await
+                })));
+            }
+            message = provider_rx.next(), if writing.is_none() => {
+                match message {
+                    Some(Ok(transcript)) => {
+                        seq += 1;
+                        writing = Some(write_client(client_tx.take().expect("idle client writer"), vec![transcript_message(seq, claim, transcript)]));
+                    }
+                    Some(Err(error)) => break Err(error),
+                    None => {
+                        terminate_reason = "provider_disconnected";
+                        usage_status = "ESTIMATED";
+                        break Ok(());
+                    }
+                }
+            }
+            message = client_rx.next(), if audio.is_none() && writing.is_none() => {
                 match message {
                     Some(Ok(Message::Binary(pcm))) => {
                         if pcm.len() > state.config().max_ws_frame_bytes || pcm.len() % 2 != 0 {
                             terminate_reason = "invalid_audio_format";
-                            break;
+                            break Ok(());
                         }
                         if frame_window.elapsed().as_secs_f32() >= 1.0 {
                             frame_window = Instant::now();
@@ -261,132 +312,123 @@ async fn proxy_stt(
                         frame_count += 1;
                         if frame_count > state.config().max_ws_frames_per_second {
                             terminate_reason = "frame_rate_limited";
-                            break;
+                            break Ok(());
                         }
                         let samples = (pcm.len() / 2) as i64;
                         let next_ms = (received_samples + samples) * 1000 / 16_000;
-                        if held_ms - next_ms < state.config().stt_top_up_threshold_ms {
-                            let key = format!("stt:{}:hold:{}", claim.session_id, top_up_index);
-                            match state.entitlement().top_up(&claim.reservation_id, state.config().stt_top_up_ms, &key).await {
-                                Ok(new_held) => {
-                                    held_ms = new_held;
-                                    top_up_index += 1;
-                                }
-                                Err(AppError::QuotaInsufficient) => {
-                                    seq += 1;
-                                    send_json(&mut client_tx, json!({"type":"quota.warning","seq":seq,"remaining_ms":(held_ms - received_samples * 1000 / 16_000).max(0)})).await?;
-                                    seq += 1;
-                                    send_json(&mut client_tx, json!({"type":"session.ending","seq":seq,"reason":"quota_exhausted"})).await?;
-                                    terminate_reason = "quota_exhausted";
-                                    break;
-                                }
-                                Err(error) => return Err(error),
-                            }
-                        }
-                        provider_tx.send_pcm(pcm).await?;
-                        received_samples += samples;
-                        forwarded_samples += samples;
+                        let needs_top_up = held_ms - next_ms < state.config().stt_top_up_threshold_ms;
+                        let entitlement = state.entitlement().clone();
+                        let reservation_id = claim.reservation_id.clone();
+                        let key = format!("stt:{}:hold:{}", claim.session_id, top_up_index);
+                        let units = state.config().stt_top_up_ms;
+                        let send = provider_tx.send_pcm(pcm);
+                        audio = Some(Box::pin(timed("audio_accept", STT_IO_TIMEOUT, async move {
+                            let held = if needs_top_up {
+                                entitlement.top_up(&reservation_id, units, &key).await?
+                            } else { held_ms };
+                            send.await?;
+                            Ok((held, top_up_index + u64::from(needs_top_up), samples))
+                        })));
                     }
                     Some(Ok(Message::Text(text))) => {
                         let stop = serde_json::from_str::<HashMap<String, String>>(text.as_str())
-                            .ok()
-                            .and_then(|value| value.get("type").cloned())
+                            .ok().and_then(|value| value.get("type").cloned())
                             .is_some_and(|kind| kind == "stt.stop");
                         if stop {
                             terminate_reason = "user_stop";
-                            break;
+                            break Ok(());
                         }
                     }
                     Some(Ok(Message::Ping(payload))) => {
-                        client_tx.send(Message::Pong(payload)).await.map_err(|_| AppError::ProviderUnavailable)?;
+                        writing = Some(write_client(client_tx.take().expect("idle client writer"), vec![Message::Pong(payload)]));
                     }
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Close(_))) | None => break Ok(()),
                     Some(Err(_)) => {
                         usage_status = "ESTIMATED";
-                        break;
+                        break Ok(());
                     }
                     _ => {}
                 }
             }
-            message = provider_rx.next() => {
-                match message {
-                    Some(Ok(transcript)) => {
-                        seq += 1;
-                        send_transcript(&mut client_tx, seq, claim, transcript).await?;
-                    }
-                    Some(Err(error)) => return Err(error),
-                    None => {
-                        terminate_reason = "provider_disconnected";
-                        usage_status = "ESTIMATED";
-                        break;
-                    }
-                }
-            }
-            }
         }
-        Ok::<(), AppError>(())
-    }
-    .await;
+    };
+    drop(audio);
+    drop(heartbeat);
     if proxy_result.is_err() {
         terminate_reason = "gateway_error";
         usage_status = "ESTIMATED";
     }
 
     let drain = async {
+        if let Some(write) = writing.take() {
+            client_tx = Some(write.await?);
+        }
+        if let Some(messages) = quota_notice {
+            if let Some(sink) = client_tx.take() {
+                client_tx = Some(write_client(sink, messages).await?);
+            }
+        }
         while let Some(event) = provider_rx.next().await {
             let transcript = event?;
             let terminal = transcript.terminal;
             seq += 1;
-            send_transcript(&mut client_tx, seq, claim, transcript).await?;
-            if terminal {
-                break;
+            if let Some(sink) = client_tx.take() {
+                client_tx = Some(write_client(sink, vec![transcript_message(seq, claim, transcript)]).await?);
             }
+            if terminal { break; }
         }
         Ok::<(), AppError>(())
     };
-    let _ = timeout(
-        std::time::Duration::from_secs(2),
-        finish_while_draining(provider_tx.as_mut(), drain),
-    )
-    .await;
+    if !matches!(timeout(Duration::from_secs(2), finish_while_draining(provider_tx.as_mut(), drain)).await, Ok(Ok(()))) {
+        usage_status = "ESTIMATED";
+    }
     drop(provider_rx);
-    let _ = timeout(std::time::Duration::from_secs(1), provider_tx.close()).await;
+    let closed = timeout(Duration::from_millis(500), async {
+        let _ = provider_tx.close().await;
+        (&mut worker).await
+    }).await;
+    if closed.is_err() {
+        tracing::warn!(phase = "provider_cleanup", elapsed_ms = 500, "aborting STT provider after graceful cleanup budget");
+        worker.abort();
+        let _ = timeout(Duration::from_millis(500), &mut worker).await;
+    } else if let Ok(Err(error)) = closed {
+        tracing::warn!(phase = "provider_cleanup", error = ?error, "STT provider task failed");
+    }
     drop(provider_tx);
+    drop(client_rx);
     let accepted_ms = received_samples * 1000 / 16_000;
-    let forwarded_ms = forwarded_samples * 1000 / 16_000;
-    let settle_result = state
-        .entitlement()
-        .settle(
-            &claim.reservation_id,
-            UsageInput {
-                event_key: "final".to_owned(),
-                usage_status,
-                received_audio_ms: accepted_ms,
-                forwarded_audio_ms: forwarded_ms,
-                provider_audio_ms: Some(forwarded_ms),
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_hit_tokens: 0,
-                reasoning_tokens: 0,
-                charged_metric: STT_METRIC,
-                actual_units: accepted_ms,
-                pricing_policy_version: state.config().pricing_policy_version.clone(),
-                terminate_reason: terminate_reason.to_owned(),
-            },
-        )
-        .await;
+    let settle_result = timed("settlement", STT_IO_TIMEOUT, state.entitlement().settle(
+        &claim.reservation_id,
+        UsageInput {
+            event_key: "final".to_owned(), usage_status,
+            received_audio_ms: accepted_ms, forwarded_audio_ms: accepted_ms,
+            provider_audio_ms: Some(accepted_ms), input_tokens: 0, output_tokens: 0,
+            cache_hit_tokens: 0, reasoning_tokens: 0, charged_metric: STT_METRIC,
+            actual_units: accepted_ms, pricing_policy_version: state.config().pricing_policy_version.clone(),
+            terminate_reason: terminate_reason.to_owned(),
+        },
+    )).await;
+    tracing::info!(session_id = %claim.session_id, provider = %claim.route.provider, terminate_reason,
+        accepted_audio_ms = accepted_ms, usage_status, settle_outcome = if settle_result.is_ok() { "settled" } else { "failed_or_unknown" },
+        "STT session finished");
     seq += 1;
-    let _ = send_json(
-        &mut client_tx,
-        json!({
-            "type":"session.ended","seq":seq,"reason":terminate_reason,
-            "accepted_audio_ms":accepted_ms,"usage_status":usage_status.to_ascii_lowercase()
-        }),
-    )
-    .await;
-    let _ = client_tx.close().await;
+    if let Some(mut sink) = client_tx {
+        let _ = timeout(Duration::from_secs(1), async {
+            sink.send(json_message(json!({
+                "type":"session.ended","seq":seq,"reason":terminate_reason,
+                "accepted_audio_ms":accepted_ms,"usage_status":usage_status.to_ascii_lowercase()
+            }))).await?;
+            sink.close().await
+        }).await;
+    }
     settle_result?;
     proxy_result
+}
+
+async fn release_stt(state: &AppState, claim: &crate::tickets::TicketClaim, reason: &'static str) {
+    if let Err(error) = timed("release", STT_IO_TIMEOUT, state.entitlement().release(&claim.reservation_id, reason, false)).await {
+        tracing::warn!(session_id = %claim.session_id, reservation_id = %claim.reservation_id, error = ?error, "STT reservation release failed");
+    }
 }
 
 async fn finish_while_draining<F>(provider: &mut dyn SttSink, drain: F) -> Result<(), AppError>
@@ -417,34 +459,26 @@ fn stt_adapter(state: &AppState, provider: &str) -> Result<Box<dyn SttAdapter>, 
     }
 }
 
-async fn send_transcript(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    seq: u64,
-    claim: &crate::tickets::TicketClaim,
-    transcript: SttEvent,
-) -> Result<(), AppError> {
-    send_json(
-        sink,
-        json!({
-            "type":"transcript",
-            "seq":seq,
-            "session_id":claim.session_id,
-            "source":claim.source,
-            "boundary":transcript.boundary,
-            "text":transcript.text,
-            "provider_offset_ms":transcript.provider_offset_ms
-        }),
-    )
-    .await
+type ClientSink = futures_util::stream::SplitSink<WebSocket, Message>;
+
+fn write_client(mut sink: ClientSink, messages: Vec<Message>) -> BoxFuture<'static, Result<ClientSink, AppError>> {
+    Box::pin(timed("client_write", STT_IO_TIMEOUT, async move {
+        for message in messages {
+            sink.send(message).await.map_err(|_| AppError::ProviderUnavailable)?;
+        }
+        Ok(sink)
+    }))
 }
 
-async fn send_json(
-    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    value: serde_json::Value,
-) -> Result<(), AppError> {
-    sink.send(Message::Text(value.to_string().into()))
-        .await
-        .map_err(|_| AppError::ProviderUnavailable)
+fn transcript_message(seq: u64, claim: &crate::tickets::TicketClaim, transcript: SttEvent) -> Message {
+    json_message(json!({
+        "type":"transcript", "seq":seq, "session_id":claim.session_id, "source":claim.source,
+        "boundary":transcript.boundary, "text":transcript.text, "provider_offset_ms":transcript.provider_offset_ms
+    }))
+}
+
+fn json_message(value: serde_json::Value) -> Message {
+    Message::Text(value.to_string().into())
 }
 
 fn validate_request(request: &CreateSttSession) -> Result<(), AppError> {

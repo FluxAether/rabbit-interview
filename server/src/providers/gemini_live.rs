@@ -4,7 +4,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use futures_util::{
     future::BoxFuture,
     stream::{SplitSink, SplitStream},
-    SinkExt, StreamExt,
+    StreamExt,
 };
 use serde_json::{json, Value};
 use tokio::time::{sleep, timeout, Instant, Sleep};
@@ -19,7 +19,7 @@ use crate::{
     error::AppError,
     providers::stt::{
         command_channel, event_channel, map_websocket_error, SttAdapter, SttCommand, SttConnect,
-        SttConnection, SttEvent, SttEventSender,
+        SttConnection, SttEvent, SttSocketExt, SttEventSender,
     },
 };
 
@@ -74,7 +74,7 @@ impl GeminiLiveClient {
             .and_then(|value| value.to_str().ok())
             .map(ToOwned::to_owned);
         socket
-            .send(Message::Text(
+            .send_stt(Message::Text(
                 setup(request, resume_handle).to_string().into(),
             ))
             .await
@@ -103,7 +103,7 @@ impl GeminiLiveClient {
                     }
                     Some(Ok(Message::Ping(payload))) => {
                         socket
-                            .send(Message::Pong(payload))
+                            .send_stt(Message::Pong(payload))
                             .await
                             .map_err(|_| AppError::ProviderUnavailable)?
                     }
@@ -130,7 +130,7 @@ impl SttAdapter for GeminiLiveClient {
             let mut retiring: Option<SocketParts> = None;
             let (sink, mut commands) = command_channel();
             let (event_tx, events) = event_channel();
-            tokio::spawn(async move {
+            Ok(SttConnection::spawn(provider_request_id, sink, events, async move {
                 let mut rotation = RotationState::default();
                 let mut transcript_gate = TranscriptGate::default();
                 let utterance_timer = sleep(Duration::from_secs(24 * 60 * 60));
@@ -144,7 +144,7 @@ impl SttAdapter for GeminiLiveClient {
                 let mut deferred_active_error = None;
                 let mut utterance_pending = false;
                 let mut pending_open = None::<
-                    tokio::task::JoinHandle<Result<(GeminiSocket, Option<String>), AppError>>,
+                    BoxFuture<'static, Result<(GeminiSocket, Option<String>), AppError>>,
                 >;
                 let mut pending_deadline = None;
                 loop {
@@ -160,26 +160,24 @@ impl SttAdapter for GeminiLiveClient {
                                         }
                                     }
                                 });
-                                if active.tx.send(Message::Text(payload.to_string().into())).await.is_err() {
+                                if active.tx.send_stt(Message::Text(payload.to_string().into())).await.is_err() {
                                     let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
                                     break;
                                 }
                             }
                             Some(SttCommand::Finish) => {
                                 let payload = json!({"realtimeInput":{"audioStreamEnd":true}});
-                                if active.tx.send(Message::Text(payload.to_string().into())).await.is_err() {
+                                if active.tx.send_stt(Message::Text(payload.to_string().into())).await.is_err() {
                                     let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
                                     break;
                                 }
                             }
                             Some(SttCommand::Close) | None => {
-                                let _ = active.tx.close().await;
+                                let _ = active.tx.close_stt().await;
                                 if let Some(mut old) = retiring.take() {
-                                    let _ = old.tx.close().await;
+                                    let _ = old.tx.close_stt().await;
                                 }
-                                if let Some(task) = pending_open.take() {
-                                    task.abort();
-                                }
+                                drop(pending_open.take());
                                 break;
                             }
                         },
@@ -204,7 +202,7 @@ impl SttAdapter for GeminiLiveClient {
                                 .await
                         }, if pending_open.is_some() => {
                             pending_open = None;
-                            match opened.unwrap_or(Err(AppError::ProviderUnavailable)) {
+                            match opened {
                                 Ok((replacement, _)) => {
                                     rotation.connected();
                                     transcript_gate.begin_rotation();
@@ -280,7 +278,7 @@ impl SttAdapter for GeminiLiveClient {
                                         .as_mut()
                                         .expect("retiring socket branch is guarded")
                                         .tx
-                                        .send(Message::Pong(payload))
+                                        .send_stt(Message::Pong(payload))
                                         .await
                                         .is_err()
                                     {
@@ -303,7 +301,7 @@ impl SttAdapter for GeminiLiveClient {
                                     .map_err(|_| AppError::ProviderProtocol)
                                     .and_then(parse_response),
                                 Some(Ok(Message::Ping(payload))) => {
-                                    if active.tx.send(Message::Pong(payload)).await.is_err() {
+                                    if active.tx.send_stt(Message::Pong(payload)).await.is_err() {
                                         let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
                                         break;
                                     }
@@ -387,19 +385,14 @@ impl SttAdapter for GeminiLiveClient {
                                 pending_deadline = rotation.deadline();
                                 let opener = provider.clone();
                                 let connect = request.clone();
-                                pending_open = Some(tokio::spawn(async move {
+                                pending_open = Some(Box::pin(async move {
                                     opener.open(&connect, Some(&handle)).await
                                 }));
                             }
                         }
                     }
                 }
-            });
-            Ok(SttConnection {
-                provider_request_id,
-                sink,
-                events,
-            })
+            }))
         })
     }
 }

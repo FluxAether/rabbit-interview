@@ -1,7 +1,6 @@
 use std::{
     collections::BTreeSet,
     net::{IpAddr, SocketAddr},
-    sync::OnceLock,
     time::Duration as StdDuration,
 };
 
@@ -23,7 +22,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::{
-        hash_password, normalize_email, random_secret, secret_hash, verify_password, AuthService,
+        normalize_email, random_secret, secret_hash, AuthService,
         Identity, AUTHORIZATION_TTL_SECONDS, BROWSER_SESSION_TTL_HOURS, INVITATION_TTL_HOURS,
         REFRESH_FAMILY_TTL_DAYS, REFRESH_TOKEN_TTL_DAYS, RESET_TTL_MINUTES,
     },
@@ -396,7 +395,9 @@ async fn login(
     let identity = match auth.identity_by_email(&form.email).await {
         Ok(Some(identity)) => identity,
         Ok(None) | Err(AppError::BadRequest(_)) => {
-            dummy_password_check(&form.password);
+            if let Err(error) = auth.verify_password(&form.password, None).await {
+                return password_work_error(error);
+            }
             return auth_error(StatusCode::UNAUTHORIZED, "BAD_CREDENTIALS", false);
         }
         Err(_) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", true),
@@ -404,12 +405,12 @@ async fn login(
     let locked = identity
         .locked_until
         .is_some_and(|until| until > Utc::now());
-    let valid = !locked
-        && identity.status == "ACTIVE"
-        && identity
-            .password_hash
-            .as_deref()
-            .is_some_and(|hash| verify_password(&form.password, hash));
+    let valid = if !locked && identity.status == "ACTIVE" {
+        match auth.verify_password(&form.password, identity.password_hash.as_deref()).await {
+            Ok(valid) => valid,
+            Err(error) => return password_work_error(error),
+        }
+    } else { false };
     if !valid {
         if !locked {
             let _ = record_login_failure(auth, &identity.id).await;
@@ -1155,12 +1156,12 @@ async fn complete_password_action(
     if form.password != form.confirm_password {
         return auth_error(StatusCode::BAD_REQUEST, "PASSWORD_MISMATCH", false);
     }
-    let password_hash = match hash_password(&form.password) {
+    let password_hash = match auth.hash_password(&form.password).await {
         Ok(value) => value,
         Err(AppError::BadRequest(_)) => {
             return auth_error(StatusCode::BAD_REQUEST, "INVALID_PASSWORD", false)
         }
-        Err(_) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", true),
+        Err(error) => return password_work_error(error),
     };
     let mut tx = match auth.pool().begin().await {
         Ok(value) => value,
@@ -1771,11 +1772,13 @@ async fn disable_totp(
         Ok(value) => value,
         Err(_) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", true),
     };
-    let password_valid = form
-        .password
-        .as_deref()
-        .zip(identity.password_hash.as_deref())
-        .is_some_and(|(password, hash)| verify_password(password, hash));
+    let password_valid = match form.password.as_deref().zip(identity.password_hash.as_deref()) {
+        Some((password, hash)) => match auth.verify_password(password, Some(hash)).await {
+            Ok(valid) => valid,
+            Err(error) => return password_work_error(error),
+        },
+        None => false,
+    };
     if !password_valid {
         return auth_error(StatusCode::UNAUTHORIZED, "DISABLE_MFA_FAILED", false);
     }
@@ -2189,12 +2192,11 @@ async fn reset_login_failures(auth: &AuthService, account_id: &str) -> Result<()
     Ok(())
 }
 
-fn dummy_password_check(password: &str) {
-    static HASH: OnceLock<String> = OnceLock::new();
-    let hash = HASH.get_or_init(|| {
-        hash_password("dummy password value").expect("valid constant dummy password")
-    });
-    let _ = verify_password(password, hash);
+fn password_work_error(error: AppError) -> Response {
+    match error {
+        AppError::RateLimited => auth_error(StatusCode::TOO_MANY_REQUESTS, "RATE_LIMITED", true),
+        _ => auth_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", true),
+    }
 }
 
 async fn verify_second_factor(

@@ -12,6 +12,165 @@ use sqlx::{mysql::MySqlPoolOptions, Row};
 use tokio::{sync::Barrier, task::JoinSet};
 use uuid::Uuid;
 
+async fn active_stt(entitlement: &Entitlement) -> anyhow::Result<ReserveInput> {
+    let account = Uuid::new_v4().to_string();
+    let email = format!("{account}@example.test");
+    sqlx::query("INSERT INTO accounts (id, email, normalized_email, status) VALUES (?, ?, ?, 'ACTIVE')")
+        .bind(&account).bind(&email).bind(&email).execute(entitlement.pool()).await?;
+    entitlement.grant_adjustment(&account, STT_METRIC, 120_000, "lease regression", None, "integration-test").await?;
+    let input = ReserveInput {
+        account_id: account, session_id: Uuid::new_v4().to_string(), reservation_id: Uuid::new_v4().to_string(),
+        client_request_id: Uuid::new_v4().to_string(), interview_id: None, kind: "STT", audio_source: Some("SYSTEM".into()),
+        provider: "DEEPGRAM".into(), model: "integration-test".into(), metric: STT_METRIC, units: 60_000,
+        idempotency_key: Uuid::new_v4().to_string(), request_hash: hash_json(&json!({"test":true}))?,
+        response_json: json!({"test":true}), pricing_policy_version: "integration-v1".into(), lease_ttl: Duration::from_secs(120),
+    };
+    entitlement.reserve(input.clone()).await?;
+    entitlement.mark_active(&input.session_id, None).await?;
+    Ok(input)
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to MySQL 8.4"]
+async fn renewed_leases_survive_stale_candidates_and_terminal_sessions_stay_terminal() -> anyhow::Result<()> {
+    let pool = rabbit_gateway::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
+    let entitlement = Entitlement::new(pool.clone());
+    let input = active_stt(&entitlement).await?;
+    sqlx::query("UPDATE quota_reservations SET expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?")
+        .bind(&input.reservation_id).execute(&pool).await?;
+    let candidate: String = sqlx::query_scalar("SELECT id FROM quota_reservations WHERE id = ? AND expires_at <= UTC_TIMESTAMP(6)")
+        .bind(&input.reservation_id).fetch_one(&pool).await?;
+    assert!(entitlement.touch_lease(&input.session_id, Duration::from_secs(120)).await?);
+    entitlement.release(&candidate, "lease_expired", true).await?;
+    assert_eq!(entitlement.balances(&input.account_id).await?[STT_METRIC], 60_000, "stale candidate refunded a renewed reservation");
+    assert_eq!(entitlement.reap_expired().await?, 0);
+    assert_eq!(sqlx::query_scalar::<_, String>("SELECT state FROM ai_sessions WHERE id = ?").bind(&input.session_id).fetch_one(&pool).await?, "ACTIVE");
+
+    sqlx::query("UPDATE quota_reservations SET expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?")
+        .bind(&input.reservation_id).execute(&pool).await?;
+    assert_eq!(entitlement.reap_expired().await?, 1);
+    assert_eq!(entitlement.reap_expired().await?, 0);
+    assert!(!entitlement.touch_lease(&input.session_id, Duration::from_secs(120)).await?);
+    assert!(entitlement.mark_active(&input.session_id, None).await.is_err());
+    entitlement.release(&candidate, "repeat", false).await?;
+    assert_eq!(entitlement.balances(&input.account_id).await?[STT_METRIC], 120_000);
+    assert_eq!(sqlx::query_scalar::<_, String>("SELECT state FROM ai_sessions WHERE id = ?").bind(&input.session_id).fetch_one(&pool).await?, "ABANDONED");
+
+    let manual = active_stt(&entitlement).await?;
+    entitlement.release(&manual.reservation_id, "connect_failed", false).await?;
+    entitlement.release(&manual.reservation_id, "repeat", false).await?;
+    assert_eq!(entitlement.balances(&manual.account_id).await?[STT_METRIC], 120_000);
+    pool.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL pointing to MySQL 8.4 and performance_schema lock visibility"]
+async fn lock_timeout_retries_the_transaction_without_duplicate_top_up() -> anyhow::Result<()> {
+    let url = std::env::var("TEST_DATABASE_URL")?;
+    let pool = rabbit_gateway::storage::connect(&url).await?;
+    let entitlement = Entitlement::new(pool.clone());
+    let input = active_stt(&entitlement).await?;
+    let worker_pool = MySqlPoolOptions::new().max_connections(1).after_connect(|connection, _| Box::pin(async move {
+        sqlx::query("SET SESSION innodb_lock_wait_timeout = 1").execute(connection).await?;
+        Ok(())
+    })).connect(&url).await?;
+    let connection_id: u64 = sqlx::query_scalar("SELECT CONNECTION_ID()").fetch_one(&worker_pool).await?;
+    let mut guard = pool.begin().await?;
+    sqlx::query("SELECT id FROM accounts WHERE id = ? FOR UPDATE").bind(&input.account_id).fetch_one(&mut *guard).await?;
+    let worker = Entitlement::new(worker_pool.clone());
+    let reservation_id = input.reservation_id.clone();
+    let task = tokio::spawn(async move { worker.top_up(&reservation_id, 60_000, "retry-top-up").await });
+    let mut attempts = std::collections::HashSet::new();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while attempts.len() < 2 {
+            let events: Vec<u64> = sqlx::query_scalar("SELECT REQUESTING_EVENT_ID FROM performance_schema.data_lock_waits WHERE REQUESTING_THREAD_ID = (SELECT THREAD_ID FROM performance_schema.threads WHERE PROCESSLIST_ID = ?)")
+                .bind(connection_id).fetch_all(&pool).await?;
+            attempts.extend(events);
+            assert!(!task.is_finished(), "top_up stopped after the first lock timeout instead of retrying");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        Ok::<_, anyhow::Error>(())
+    }).await??;
+    guard.rollback().await?;
+    assert_eq!(tokio::time::timeout(Duration::from_secs(3), task).await??? , 120_000);
+    assert_eq!(entitlement.top_up(&input.reservation_id, 60_000, "retry-top-up").await?, 120_000);
+    assert_eq!(entitlement.balances(&input.account_id).await?[STT_METRIC], 0);
+    let blocked = active_stt(&entitlement).await?;
+    let mut guard = pool.begin().await?;
+    sqlx::query("SELECT id FROM accounts WHERE id = ? FOR UPDATE").bind(&blocked.account_id).fetch_one(&mut *guard).await?;
+    let worker = Entitlement::new(worker_pool.clone());
+    let id = blocked.reservation_id.clone();
+    let task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+        worker.top_up(&id, 60_000, "retry-exhaustion").await
+    }));
+    let mut attempts = std::collections::HashSet::new();
+    tokio::time::timeout(Duration::from_secs(6), async {
+        while !task.is_finished() {
+            let events: Vec<u64> = sqlx::query_scalar("SELECT REQUESTING_EVENT_ID FROM performance_schema.data_lock_waits WHERE REQUESTING_THREAD_ID = (SELECT THREAD_ID FROM performance_schema.threads WHERE PROCESSLIST_ID = ?)")
+                .bind(connection_id).fetch_all(&pool).await?;
+            attempts.extend(events);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        Ok::<_, anyhow::Error>(())
+    }).await??;
+    assert_eq!(attempts.len(), 3, "retry count must remain bounded");
+    assert!(matches!(task.await?, Err(AppError::Database(_))));
+    guard.rollback().await?;
+    assert_eq!(entitlement.balances(&blocked.account_id).await?[STT_METRIC], 60_000);
+    worker_pool.close().await;
+    pool.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires isolated TEST_DATABASE_URL"]
+async fn concurrent_settle_release_and_reap_have_only_one_financial_effect() -> anyhow::Result<()> {
+    let pool = rabbit_gateway::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
+    let entitlement = Entitlement::new(pool.clone());
+    for _ in 0..10 {
+        let input = active_stt(&entitlement).await?;
+        sqlx::query("UPDATE quota_reservations SET expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?")
+            .bind(&input.reservation_id).execute(&pool).await?;
+        let gate = Arc::new(Barrier::new(3));
+        let mut tasks = JoinSet::new();
+        for operation in 0..3 {
+            let (entitlement, input, gate) = (entitlement.clone(), input.clone(), gate.clone());
+            tasks.spawn(async move {
+                gate.wait().await;
+                match operation {
+                    0 => { entitlement.settle(&input.reservation_id, UsageInput {
+                        event_key: "final".into(), usage_status: "FINAL", received_audio_ms: 20_000,
+                        forwarded_audio_ms: 20_000, provider_audio_ms: Some(20_000), input_tokens: 0,
+                        output_tokens: 0, cache_hit_tokens: 0, reasoning_tokens: 0, charged_metric: STT_METRIC,
+                        actual_units: 20_000, pricing_policy_version: "integration-v1".into(), terminate_reason: "user_stop".into(),
+                    }).await?; }
+                    1 => entitlement.release(&input.reservation_id, "lease_expired", true).await?,
+                    _ => { entitlement.reap_expired().await?; }
+                }
+                Ok::<_, AppError>(())
+            });
+        }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(result) = tasks.join_next().await { result??; }
+            Ok::<_, anyhow::Error>(())
+        }).await??;
+        entitlement.release(&input.reservation_id, "repeat", false).await?;
+        let (count, charged): (i64, i64) = sqlx::query_as("SELECT COUNT(*), CAST(COALESCE(SUM(charged_units), 0) AS SIGNED) FROM usage_events WHERE session_id = ?")
+            .bind(&input.session_id).fetch_one(&pool).await?;
+        assert!(count <= 1);
+        assert!(charged == 0 || charged == 20_000);
+        assert_eq!(entitlement.balances(&input.account_id).await?[STT_METRIC], 120_000 - charged);
+        assert!(!entitlement.touch_lease(&input.session_id, Duration::from_secs(120)).await?);
+        assert!(entitlement.mark_active(&input.session_id, None).await.is_err());
+        let (reservation, session): (String, String) = sqlx::query_as("SELECT r.state, s.state FROM quota_reservations r JOIN ai_sessions s ON s.id = r.session_id WHERE r.id = ?")
+            .bind(&input.reservation_id).fetch_one(&pool).await?;
+        assert_eq!((reservation.as_str(), session.as_str()), if count == 1 { ("SETTLED", "ENDED") } else { ("EXPIRED", "ABANDONED") });
+    }
+    pool.close().await;
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL pointing to MySQL 8.4"]
 async fn additional_holds_top_up_stt_and_settle_llm_without_double_charging() -> anyhow::Result<()>

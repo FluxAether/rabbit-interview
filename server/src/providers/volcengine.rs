@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
-use futures_util::{future::BoxFuture, SinkExt, StreamExt};
+use futures_util::{future::BoxFuture, StreamExt};
 use serde_json::{json, Value};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
@@ -15,7 +15,7 @@ use crate::{
     error::AppError,
     providers::stt::{
         command_channel, event_channel, map_websocket_error, SttAdapter, SttCommand, SttConnect,
-        SttConnection, SttEvent,
+        SttConnection, SttEvent, SttSocketExt,
     },
 };
 
@@ -69,7 +69,7 @@ impl VolcengineClient {
             .and_then(|value| value.to_str().ok())
             .map(ToOwned::to_owned);
         socket
-            .send(Message::Binary(
+            .send_stt(Message::Binary(
                 initial_request(&request.session_id, &request.language, &request.model)?.into(),
             ))
             .await
@@ -86,7 +86,7 @@ impl SttAdapter for VolcengineClient {
             let (mut provider_tx, mut provider_rx) = socket.split();
             let (sink, mut commands) = command_channel();
             let (event_tx, events) = event_channel();
-            tokio::spawn(async move {
+            Ok(SttConnection::spawn(provider_request_id, sink, events, async move {
                 loop {
                     tokio::select! {
                         command = commands.recv() => match command {
@@ -98,7 +98,7 @@ impl SttAdapter for VolcengineClient {
                                         break;
                                     }
                                 };
-                                if provider_tx.send(Message::Binary(frame.into())).await.is_err() {
+                                if provider_tx.send_stt(Message::Binary(frame.into())).await.is_err() {
                                     let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
                                     break;
                                 }
@@ -111,13 +111,13 @@ impl SttAdapter for VolcengineClient {
                                         break;
                                     }
                                 };
-                                if provider_tx.send(Message::Binary(frame.into())).await.is_err() {
+                                if provider_tx.send_stt(Message::Binary(frame.into())).await.is_err() {
                                     let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
                                     break;
                                 }
                             }
                             Some(SttCommand::Close) | None => {
-                                let _ = provider_tx.close().await;
+                                let _ = provider_tx.close_stt().await;
                                 break;
                             }
                         },
@@ -135,7 +135,7 @@ impl SttAdapter for VolcengineClient {
                                 }
                             },
                             Some(Ok(Message::Ping(payload))) => {
-                                if provider_tx.send(Message::Pong(payload)).await.is_err() {
+                                if provider_tx.send_stt(Message::Pong(payload)).await.is_err() {
                                     let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
                                     break;
                                 }
@@ -149,12 +149,7 @@ impl SttAdapter for VolcengineClient {
                         },
                     }
                 }
-            });
-            Ok(SttConnection {
-                provider_request_id,
-                sink,
-                events,
-            })
+            }))
         })
     }
 }

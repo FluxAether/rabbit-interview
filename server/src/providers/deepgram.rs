@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use futures_util::{future::BoxFuture, SinkExt, StreamExt};
+use futures_util::{future::BoxFuture, StreamExt};
 use serde_json::{json, Value};
 use tokio::time::{interval, MissedTickBehavior};
 use tokio_tungstenite::{
@@ -14,7 +14,7 @@ use crate::{
     error::AppError,
     providers::stt::{
         command_channel, event_channel, map_websocket_error, SttAdapter, SttCommand, SttConnect,
-        SttConnection, SttEvent,
+        SttConnection, SttEvent, SttSocketExt,
     },
 };
 
@@ -68,7 +68,7 @@ impl SttAdapter for DeepgramClient {
             let (mut provider_tx, mut provider_rx) = socket.split();
             let (sink, mut commands) = command_channel();
             let (event_tx, events) = event_channel();
-            tokio::spawn(async move {
+            Ok(SttConnection::spawn(provider_request_id, sink, events, async move {
                 let mut keepalive = interval(Duration::from_secs(8));
                 keepalive.set_missed_tick_behavior(MissedTickBehavior::Skip);
                 keepalive.tick().await;
@@ -76,25 +76,25 @@ impl SttAdapter for DeepgramClient {
                     tokio::select! {
                         command = commands.recv() => match command {
                             Some(SttCommand::Audio(pcm)) => {
-                                if provider_tx.send(Message::Binary(pcm)).await.is_err() {
+                                if provider_tx.send_stt(Message::Binary(pcm)).await.is_err() {
                                     let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
                                     break;
                                 }
                             }
                             Some(SttCommand::Finish) => {
-                                if provider_tx.send(Message::Text(json!({"type":"Finalize"}).to_string().into())).await.is_err() {
+                                if provider_tx.send_stt(Message::Text(json!({"type":"Finalize"}).to_string().into())).await.is_err() {
                                     let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
                                     break;
                                 }
                             }
                             Some(SttCommand::Close) | None => {
-                                let _ = provider_tx.send(Message::Text(json!({"type":"CloseStream"}).to_string().into())).await;
-                                let _ = provider_tx.close().await;
+                                let _ = provider_tx.send_stt(Message::Text(json!({"type":"CloseStream"}).to_string().into())).await;
+                                let _ = provider_tx.close_stt().await;
                                 break;
                             }
                         },
                         _ = keepalive.tick() => {
-                            if provider_tx.send(Message::Text(json!({"type":"KeepAlive"}).to_string().into())).await.is_err() {
+                            if provider_tx.send_stt(Message::Text(json!({"type":"KeepAlive"}).to_string().into())).await.is_err() {
                                 let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
                                 break;
                             }
@@ -108,8 +108,8 @@ impl SttAdapter for DeepgramClient {
                                         }
                                     }
                                     if finalized {
-                                        let _ = provider_tx.send(Message::Text(json!({"type":"CloseStream"}).to_string().into())).await;
-                                        let _ = provider_tx.close().await;
+                                        let _ = provider_tx.send_stt(Message::Text(json!({"type":"CloseStream"}).to_string().into())).await;
+                                        let _ = provider_tx.close_stt().await;
                                         break;
                                     }
                                 }
@@ -119,7 +119,7 @@ impl SttAdapter for DeepgramClient {
                                 }
                             },
                             Some(Ok(Message::Ping(payload))) => {
-                                if provider_tx.send(Message::Pong(payload)).await.is_err() {
+                                if provider_tx.send_stt(Message::Pong(payload)).await.is_err() {
                                     let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
                                     break;
                                 }
@@ -133,12 +133,7 @@ impl SttAdapter for DeepgramClient {
                         },
                     }
                 }
-            });
-            Ok(SttConnection {
-                provider_request_id,
-                sink,
-                events,
-            })
+            }))
         })
     }
 }

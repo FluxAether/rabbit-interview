@@ -206,7 +206,12 @@ async fn run_answer(
             return;
         }
     };
-    let _ = state.entitlement().mark_active(&session_id, None).await;
+    if let Err(error) = state.entitlement().mark_active(&session_id, None).await {
+        tracing::warn!(%session_id, error = ?error, "LLM activation failed");
+        drop(stream);
+        finish_failed(&state, &sender, &request_id, &reservation_id, "activation_failed", ProviderError::Unavailable, &route).await;
+        return;
+    }
     let mut usage: Option<Usage> = None;
     let mut output_ascii_chars = 0_i64;
     let mut output_non_ascii_chars = 0_i64;
@@ -242,7 +247,12 @@ async fn run_answer(
                 let Some(event) = event else { break };
                 match event {
                     Ok(LlmEvent::Created(provider_id)) => {
-                        let _ = state.entitlement().mark_active(&session_id, Some(&provider_id)).await;
+                        if let Err(error) = state.entitlement().mark_active(&session_id, Some(&provider_id)).await {
+                            tracing::warn!(%session_id, error = ?error, "LLM activation failed");
+                            finish_reason = "activation_failed".to_owned();
+                            stream_error = Some(ProviderError::Unavailable);
+                            break;
+                        }
                     }
                     Ok(LlmEvent::Delta(delta)) => {
                         for character in delta.chars() {
@@ -276,6 +286,7 @@ async fn run_answer(
             }
         }
     }
+    drop(stream);
     let usage_status = provider_usage_status(completed, usage.as_ref());
     let final_usage = settled_usage(
         usage,

@@ -1,4 +1,6 @@
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+mod common;
+
+use std::net::SocketAddr;
 
 use axum::{
     body::Body,
@@ -7,12 +9,7 @@ use axum::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use http_body_util::BodyExt;
-use rabbit_gateway::{auth::hash_password, config::Config, router, AppState};
-use rsa::{
-    pkcs8::{EncodePrivateKey, LineEnding},
-    rand_core::OsRng,
-    RsaPrivateKey,
-};
+use rabbit_gateway::{auth::hash_password, router};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
@@ -21,41 +18,8 @@ use uuid::Uuid;
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires TEST_DATABASE_URL pointing to MySQL 8.4"]
 async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()> {
-    let database_url = std::env::var("TEST_DATABASE_URL")?;
-    let secret_dir = std::env::temp_dir().join(format!("rabbit-oidc-test-{}", Uuid::new_v4()));
-    std::fs::create_dir_all(&secret_dir)?;
-    let private_key_file = secret_dir.join("signing.pem");
-    let signing_keyset_file = secret_dir.join("signing.json");
-    let data_keyring_file = secret_dir.join("data.json");
-    let private_key = RsaPrivateKey::new(&mut OsRng, 2048)?;
-    std::fs::write(
-        &private_key_file,
-        private_key.to_pkcs8_pem(LineEnding::LF)?.as_bytes(),
-    )?;
-    std::fs::write(
-        &signing_keyset_file,
-        serde_json::to_vec(&serde_json::json!({
-            "active_kid": "integration",
-            "keys": [{
-                "kid": "integration",
-                "private_key_file": private_key_file,
-            }],
-        }))?,
-    )?;
-    std::fs::write(
-        &data_keyring_file,
-        serde_json::to_vec(&serde_json::json!({
-            "active_kid": "integration",
-            "keys": { "integration": URL_SAFE_NO_PAD.encode([7_u8; 32]) },
-        }))?,
-    )?;
-
-    let state = AppState::new(test_config(
-        database_url,
-        signing_keyset_file,
-        data_keyring_file,
-    ))
-    .await?;
+    let fixture = common::TestConfig::new()?;
+    let state = fixture.state().await?;
     let account_id = Uuid::new_v4().to_string();
     let email = format!("{account_id}@example.test");
     sqlx::query(
@@ -76,7 +40,7 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     .bind(&account_id)
     .execute(state.auth().pool())
     .await?;
-    let app = router(state);
+    let app = router(state.clone());
 
     let discovery = send(&app, Method::GET, "/.well-known/openid-configuration", None).await?;
     assert_eq!(discovery.0, StatusCode::OK);
@@ -129,6 +93,19 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     let interaction: Value = serde_json::from_slice(&interaction.1)?;
     assert_eq!(interaction["step"], "login");
     let csrf = interaction["csrf"].as_str().expect("login csrf");
+    let mut credential_error = None;
+    for address in [&email, "unknown@example.test", "unknown@example.test"] {
+        let failed = send(&app, Method::POST, "/oauth2/login", Some(form(&[
+            ("request", &request_secret), ("csrf", csrf), ("email", address),
+            ("password", "an incorrect test password"),
+        ]))).await?;
+        assert_eq!(failed.0, StatusCode::UNAUTHORIZED);
+        let mut body: Value = serde_json::from_slice(&failed.1)?;
+        body.as_object_mut().unwrap().remove("request_id");
+        if let Some(previous) = &credential_error { assert_eq!(&body, previous); }
+        credential_error = Some(body);
+    }
+    assert_eq!(state.auth().identity_by_id(&account_id).await?.failed_login_count, 1);
     let login_form = form(&[
         ("request", &request_secret),
         ("csrf", &csrf),
@@ -210,6 +187,28 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     assert_eq!(subscription["status"], "ACTIVE");
     assert_eq!(subscription["balances"]["STT_AUDIO_MS"], 0);
     assert_eq!(subscription["payments_enabled"], false);
+
+    let security = send_cookie(&app, Method::GET, "/account/security/context", &cookie, None).await?;
+    let security: Value = serde_json::from_slice(&security.1)?;
+    let csrf = security["csrf"].as_str().unwrap();
+    let started = send_cookie(&app, Method::POST, "/account/security/totp/start", &cookie,
+        Some(form(&[("csrf", csrf)]))).await?;
+    assert_eq!(started.0, StatusCode::OK);
+    let started: Value = serde_json::from_slice(&started.1)?;
+    let totp = totp_rs::TOTP::new(totp_rs::Algorithm::SHA1, 6, 1, 30,
+        totp_rs::Secret::Encoded(started["secret"].as_str().unwrap().into()).to_bytes()?,
+        Some("OnCue".into()), email.clone())?;
+    let confirmed = send_cookie(&app, Method::POST, "/account/security/totp/confirm", &cookie,
+        Some(form(&[("csrf", csrf), ("code", &totp.generate_current()?)]))).await?;
+    assert_eq!(confirmed.0, StatusCode::OK);
+    let confirmed: Value = serde_json::from_slice(&confirmed.1)?;
+    let recovery = confirmed["recovery_codes"][0].as_str().unwrap();
+    for password in ["wrong test password", "correct horse battery staple"] {
+        let disabled = send_cookie(&app, Method::POST, "/account/security/totp/disable", &cookie,
+            Some(form(&[("csrf", csrf), ("password", password), ("code", recovery)]))).await?;
+        assert_eq!(disabled.0, if password.starts_with("wrong") { StatusCode::UNAUTHORIZED } else { StatusCode::OK });
+        assert_eq!(state.auth().identity_by_id(&account_id).await?.totp_enabled_at.is_some(), password.starts_with("wrong"));
+    }
 
     let missing_admin = send_json(
         &app,
@@ -315,74 +314,7 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
         Some("rabbitinterview://auth/logout?state=logout-state")
     );
 
-    std::fs::remove_dir_all(secret_dir)?;
     Ok(())
-}
-
-fn test_config(
-    database_url: String,
-    oidc_signing_keyset_file: PathBuf,
-    oidc_data_keyring_file: PathBuf,
-) -> Config {
-    Config {
-        listen_addr: "127.0.0.1:8787".parse().unwrap(),
-        database_url,
-        gateway_public_url: "http://127.0.0.1:8787".to_owned(),
-        landing_public_url: "http://localhost:4174".to_owned(),
-        allowed_origins: vec!["http://localhost:1420".to_owned()],
-        oidc_client_id: "rabbit-desktop".to_owned(),
-        oidc_redirect_uri: "rabbitinterview://auth/callback".to_owned(),
-        oidc_post_logout_redirect_uri: "rabbitinterview://auth/logout".to_owned(),
-        oidc_signing_keyset_file,
-        oidc_data_keyring_file,
-        resend_api_key: "re_test_gateway".to_owned(),
-        resend_from: "OnCue <no-reply@example.test>".to_owned(),
-        resend_api_url: "https://api.resend.com".to_owned(),
-        trusted_proxy_cidrs: Vec::new(),
-        hosted_stt_enabled: false,
-        hosted_llm_enabled: false,
-        payments_enabled: false,
-        alipay_app_id: None,
-        alipay_seller_id: None,
-        alipay_private_key: None,
-        alipay_public_key: None,
-        alipay_gateway_url: "https://openapi.alipay.com/gateway.do".to_owned(),
-        admin_token: Some("integration-admin".to_owned()),
-        volcengine_api_key: None,
-        volcengine_resource_id: "volc.bigasr.sauc.duration".to_owned(),
-        volcengine_url: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel".to_owned(),
-        volcengine_stt_models: vec!["bigmodel".to_owned()],
-        deepgram_api_key: None,
-        deepgram_stt_url: "wss://api.deepgram.com/v1/listen".to_owned(),
-        deepgram_stt_models: Vec::new(),
-        gemini_api_key: None,
-        gemini_model: "gemini-3.7-flash".to_owned(),
-        gemini_live_url: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent".to_owned(),
-        gemini_stt_models: Vec::new(),
-        gemini_llm_url: "https://generativelanguage.googleapis.com/v1beta/interactions"
-            .to_owned(),
-        gemini_llm_models: vec!["gemini-3.7-flash".to_owned()],
-        openai_api_key: None,
-        openai_llm_url: "https://api.openai.com/v1/responses".to_owned(),
-        openai_llm_models: Vec::new(),
-        anthropic_api_key: None,
-        anthropic_llm_url: "https://api.anthropic.com/v1/messages".to_owned(),
-        anthropic_llm_models: Vec::new(),
-        groq_api_key: None,
-        groq_llm_url: "https://api.groq.com/openai/v1/chat/completions".to_owned(),
-        groq_llm_models: Vec::new(),
-        initial_stt_hold_ms: 60_000,
-        stt_top_up_ms: 60_000,
-        stt_top_up_threshold_ms: 15_000,
-        reservation_ttl: Duration::from_secs(120),
-        ticket_ttl: Duration::from_secs(30),
-        max_json_bytes: 131_072,
-        max_ws_frame_bytes: 65_536,
-        max_ws_frames_per_second: 100,
-        max_stt_session: Duration::from_secs(3_600),
-        global_concurrency_limit: 100,
-        pricing_policy_version: "integration-v1".to_owned(),
-    }
 }
 
 async fn send(
@@ -474,4 +406,47 @@ fn form(values: &[(&str, &str)]) -> String {
     url::form_urlencoded::Serializer::new(String::new())
         .extend_pairs(values.iter().copied())
         .finish()
+}
+
+#[tokio::test]
+#[ignore = "requires isolated TEST_DATABASE_URL"]
+async fn password_actions_validate_before_consumption_and_preserve_hashes() -> anyhow::Result<()> {
+    let fixture = common::TestConfig::new()?;
+    let state = fixture.state().await?;
+    let app = router(state.clone());
+    for (kind, path, initial_status) in [
+        ("INVITE", "/account/setup", "PENDING"),
+        ("RESET", "/account/reset-password", "ACTIVE"),
+    ] {
+        let account = Uuid::new_v4().to_string();
+        let email = format!("{account}@example.test");
+        sqlx::query("INSERT INTO accounts (id, email, normalized_email, status) VALUES (?, ?, ?, ?)")
+            .bind(&account).bind(&email).bind(&email).bind(initial_status).execute(state.auth().pool()).await?;
+        let token = rabbit_gateway::auth::random_secret();
+        sqlx::query("INSERT INTO oidc_action_tokens (id, account_id, kind, token_hash, expires_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6) + INTERVAL 1 HOUR)")
+            .bind(Uuid::new_v4().to_string()).bind(&account).bind(kind).bind(rabbit_gateway::auth::secret_hash(&token))
+            .execute(state.auth().pool()).await?;
+        let csrf = state.auth().csrf_token(&token, kind);
+        for password in ["short", "a valid replacement password"] {
+            let response = send(&app, Method::POST, path, Some(form(&[
+                ("token", &token), ("csrf", &csrf), ("password", password), ("confirm_password", password),
+            ]))).await?;
+            assert_eq!(response.0, if password == "short" { StatusCode::BAD_REQUEST } else { StatusCode::OK });
+            let used: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM oidc_action_tokens WHERE account_id = ? AND used_at IS NOT NULL")
+                .bind(&account).fetch_one(state.auth().pool()).await?;
+            assert_eq!(used, i64::from(password != "short"));
+        }
+        let identity = state.auth().identity_by_id(&account).await?;
+        assert_eq!(identity.status, "ACTIVE");
+        assert!(state.auth().verify_password("a valid replacement password", identity.password_hash.as_deref()).await?);
+        assert!(!state.auth().verify_password("wrong password", identity.password_hash.as_deref()).await?);
+        let replay = send(&app, Method::POST, path, Some(form(&[
+            ("token", &token), ("csrf", &csrf), ("password", "another valid password"),
+            ("confirm_password", "another valid password"),
+        ]))).await?;
+        assert_eq!(replay.0, StatusCode::BAD_REQUEST);
+        assert_eq!(state.auth().identity_by_id(&account).await?.password_hash, identity.password_hash);
+    }
+    state.auth().pool().close().await;
+    Ok(())
 }

@@ -15,7 +15,7 @@ docker run --rm --name rabbit-gateway \
   rabbit-gateway:local
 ```
 
-For a container, set `GATEWAY_LISTEN_ADDR=0.0.0.0:8787`. Terminate with `SIGTERM`; the process stops accepting work, cancels streams, waits up to 15 seconds for tracked tasks, and leaves expired holds for the lease reaper.
+For a container, set `GATEWAY_LISTEN_ADDR=0.0.0.0:8787`. Terminate with `SIGTERM`. The listener then stops accepting new work and cancels in-flight streams. After `axum::serve` returns, the process waits up to 15 seconds for tracked HTTP and LLM tasks. An STT session that is already draining still uses its own 2-second transcript drain, 500 ms provider close, and a further 500 ms abort budget. Those session budgets are independent of the 15-second tracker wait, so a SIGTERM does not guarantee that every STT adapter has fully exited in 15 seconds. Unused holds stay in the database for the 30-second lease reaper.
 
 Do not run multiple replicas in this version. Login throttles, one-time WebSocket tickets, and active LLM cancellation handles are process-local. Put them in a shared store before horizontal scaling.
 
@@ -203,3 +203,14 @@ curl -fsS https://your-gateway.example/metrics
 3. Rotate leaked OIDC, Resend, provider, or admin credentials in the secret manager and restart. Revoking the affected accounts' sessions invalidates refresh-token families immediately; access tokens expire within five minutes.
 4. Back up MySQL and both OIDC key files together. Test restoration into an isolated environment before production rollout.
 5. Inspect active reservations, provider request IDs, and usage metadata. Let leases expire or issue audited adjustments; do not edit usage rows to hide discrepancies.
+
+Password hashing and verification run on blocking threads with at most `max(1, min(2, CPUs - 1))` concurrent Argon2 jobs. Extra login or password-action requests return `429 / RATE_LIMITED` and do not increment failed-login counts or consume action tokens. Database lock conflicts `1213` and `1205` retry the whole quota transaction up to three times; other SQL errors fail immediately.
+
+Regression commands from the repository root, using an isolated `TEST_DATABASE_URL` for ignored MySQL tests:
+
+```bash
+rtk cargo test --manifest-path server/Cargo.toml --locked
+node scripts/verify-gateway-mysql.mjs test --manifest-path server/Cargo.toml --locked -- --include-ignored --test-threads=1
+```
+
+The second command creates and later drops a dedicated schema. Do not point it at the business database. Optional mixed-load durations use `GATEWAY_LOAD_SECONDS`, `GATEWAY_LOAD_CONNECTIONS`, and `GATEWAY_LOAD_SOAK_SECONDS`; default values are a short local smoke, not a production capacity claim.
