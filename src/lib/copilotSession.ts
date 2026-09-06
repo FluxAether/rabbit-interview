@@ -390,13 +390,18 @@ class CopilotSessionHost {
   private async flushPendingInterviewerAnswer(sessionId: number): Promise<void> {
     if (!this.isCurrent(sessionId) || !this.pendingInterviewerQuestions.length || this.activeAnswer || this.answering) return
     this.answering = true
-    const question = this.pendingInterviewerQuestions.shift() ?? ''
-    if (!question) {
-      this.answering = false
-      return
+    try {
+      const question = this.pendingInterviewerQuestions.shift() ?? ''
+      if (!question) return
+      this.transition({ type: 'question', sessionId, question })
+      await this.answer(sessionId, question, 'interviewer-question')
+    } finally {
+      // ponytail: answer() can return before owning activeAnswer; don't leave the queue locked
+      if (this.answering && !this.activeAnswer) {
+        this.answering = false
+        this.resumePendingInterviewerAnswer(sessionId)
+      }
     }
-    this.transition({ type: 'question', sessionId, question })
-    await this.answer(sessionId, question, 'interviewer-question')
   }
 
   private resumePendingInterviewerAnswer(sessionId: number): void {
@@ -417,9 +422,11 @@ class CopilotSessionHost {
     const active = this.activeAnswer
     if (!active) return
     this.activeAnswer = null
+    this.answering = false
     active.controller.abort()
     if (sessionId !== null && this.isCurrent(sessionId)) {
       this.transition({ type: 'cancel-answer', sessionId, answerId: active.answerId })
+      this.resumePendingInterviewerAnswer(sessionId)
     }
   }
 
@@ -535,6 +542,7 @@ class CopilotSessionHost {
         this.clearPendingInterviewerQuestion()
         this.cancelActiveAnswer(sessionId)
         this.cancelBackgroundAnswers(sessionId)
+        this.answering = false
         this.transition({ type: 'clear' })
         break
       }
@@ -592,6 +600,7 @@ class CopilotSessionHost {
     this.clearPendingInterviewerQuestion()
     this.cancelActiveAnswer(this.snapshot.sessionId)
     this.cancelBackgroundAnswers(this.snapshot.sessionId)
+    this.answering = false
     const sessionId = ++this.sessionSequence
     this.persistenceSessionId = globalThis.crypto.randomUUID()
     this.transition({ type: 'start', sessionId })
@@ -710,6 +719,7 @@ class CopilotSessionHost {
     this.clearPendingInterviewerQuestion()
     this.cancelActiveAnswer(sessionId)
     this.cancelBackgroundAnswers(sessionId)
+    this.answering = false
     const archiveSnapshot = this.snapshot
     const persistenceSessionId = this.persistenceSessionId
     this.transition({ type: 'stop' })

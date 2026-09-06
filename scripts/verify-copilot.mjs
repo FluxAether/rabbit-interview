@@ -2440,6 +2440,94 @@ function createKeyStoreHarness({
     'retry with invalid or non-interviewer messageId is safely ignored',
   )
 }
+
+{
+  const timers = createFakeTimers()
+  const requests = []
+  let snapshot = {
+    ...copilotStateApi.createInitialSnapshot(),
+    phase: 'listening',
+    sessionId: 77,
+    startedAt: 1,
+  }
+  const store = {
+    getState: () => ({
+      copilot: snapshot,
+      settings: { aiAccessMode: 'byok', aiModel: 'groq-llama-3.1' },
+      setCopilotSnapshot: (next) => { snapshot = next },
+      resumeOriginal: '',
+      resumeOptimized: '',
+      jobDescription: '',
+      resumeSuggestions: [],
+      resumeSourceFileName: '',
+      resumeRequirements: [],
+      resumeTargetKeywords: [],
+      resumeMatchedKeywords: [],
+      resumeMissingKeywords: [],
+      resumeAnalysisOriginalFingerprint: '',
+      resumeAnalysisJobDescriptionFingerprint: '',
+      resumeAnalysisSource: '',
+      resumeTargetRole: '',
+      resumeTargetCompany: '',
+      resumeProfileUpdatedAt: '',
+    }),
+  }
+  const { CopilotSessionHost } = loadTypeScriptModule('src/lib/copilotSession.ts', ['CopilotSessionHost'], {
+    ...copilotStateApi,
+    ...copilotEndpoint,
+    ...copilotTurnDetector,
+    shouldQueueSeparateInterviewerQuestion,
+    createEmptyResumeWorkspace: () => ({}),
+    interviewProfileFromWorkspace: (value) => value,
+    createSessionIdentity: () => ({ isTestSession: true }),
+    buildInterviewContext: () => '',
+    buildRecentTurnsContext: () => '',
+    collectCopilotTurns: () => [],
+    mergeContinuationText,
+    textSimilarity,
+    globalThis: timers.global,
+    useAppStore: store,
+    emit: async () => {},
+    createRecoverySnapshot: () => null,
+    SESSION_RECOVERY_KEY: 'test',
+    saveSetting: async () => {},
+    deleteSetting: async () => {},
+    generateSuggestionsStream: (_question, _context, _handlers, signal) => new Promise((resolve, reject) => {
+      requests.push({ question: _question, signal })
+      const fail = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+      if (signal?.aborted) {
+        fail()
+        return
+      }
+      signal?.addEventListener('abort', fail, { once: true })
+    }),
+  })
+  const host = new CopilotSessionHost()
+  host.snapshot = snapshot
+  host.transition = (action) => {
+    snapshot = copilotStateApi.reduceCopilotSnapshot(snapshot, action)
+    host.snapshot = snapshot
+  }
+  host.enqueueInterviewerQuestion('你负责什么，以及')
+  void host.flushPendingInterviewerAnswer(77)
+  await flushTasks()
+  check(
+    requests.length === 1
+      && host.answering === true
+      && snapshot.answerStatus === 'generating',
+    'an incomplete interviewer prompt starts a foreground answer',
+  )
+  host.scheduleInterviewerAnswer(77, '这个方案的风险？', 'utterance-end')
+  await timers.runTimeout(0)
+  await flushTasks()
+  check(
+    requests.length === 2
+      && host.answering === true
+      && String(host.activeAnswer?.question || '').includes('这个方案的风险')
+      && snapshot.answerStatus === 'generating',
+    'cancelling a continuation does not freeze the interviewer answer queue',
+  )
+}
 check(panel.includes('copilot.clearConfirm'), 'Clear requires confirmation when the session has content')
 check(historyPage.includes('parseHistoryFeedback'), 'History renders saved scoring details')
 check(settingsStore.includes('useMicWithSystem: false'), 'real Copilot defaults to system audio without microphone')
