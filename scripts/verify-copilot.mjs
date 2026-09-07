@@ -151,9 +151,10 @@ check(
   settingsPage.includes('Google AI Studio')
     && settingsPage.includes('GEMINI_LIVE_TRANSCRIBE_MODEL')
     && settingsPage.includes('GEMINI_LIVE_TRANSLATE_MODEL')
-    && settingsPage.includes("updateSttConfig('gemini'")
+    && settingsPage.includes("updateSttConfig('gemini', GEMINI_LIVE_TRANSCRIBE_MODEL)")
+    && settingsPage.includes("sttProvider === 'gemini' ? sttModel : GEMINI_LIVE_TRANSCRIBE_MODEL")
     && /testGeminiLiveConnection\(\s*targetKey,\s*sttLanguage,\s*language\s*\)/.test(settingsPage),
-  'STT settings expose Google AI Studio and test its Live API handshake',
+  'STT settings default Google AI Studio to Transcribe Live and test its Live API handshake',
 )
 check(
   settingsPage.includes('APPLE_STT_MODEL')
@@ -459,9 +460,13 @@ const { DEFAULT_SETTINGS, loadAppSettings, saveAppSettings } = loadTypeScriptMod
 const normalizedGeminiSettings = await loadAppSettings()
 check(
   normalizedGeminiSettings.sttProvider === 'gemini'
-    && normalizedGeminiSettings.sttModel === 'gemini-3.5-live-translate-preview',
-  'unknown Gemini STT models normalize to Live Translate',
+    && normalizedGeminiSettings.sttModel === 'gemini-3.5-transcribe-live',
+  'unknown Gemini STT models normalize to Transcribe Live',
 )
+storedSettings = JSON.stringify({ sttProvider: 'gemini' })
+check((await loadAppSettings()).sttModel === 'gemini-3.5-transcribe-live', 'missing Gemini STT models default to Transcribe Live')
+storedSettings = JSON.stringify({ sttProvider: 'gemini', sttModel: 'gemini-3.5-live-translate-preview' })
+check((await loadAppSettings()).sttModel === 'gemini-3.5-live-translate-preview', 'explicit Gemini Live Translate selection is preserved')
 storedSettings = JSON.stringify({ sttProvider: 'gemini', sttModel: 'gemini-3.5-transcribe-live' })
 const normalizedGeminiTranscribeSettings = await loadAppSettings()
 check(
@@ -1612,10 +1617,9 @@ const liveTestSetup = JSON.parse(liveTestSocket.sent[0])
 check(
   JSON.stringify(liveTestSetup) === JSON.stringify({
     setup: {
-      model: 'models/gemini-3.5-live-translate-preview',
+      model: 'models/gemini-3.5-transcribe-live',
       generationConfig: {
-        responseModalities: ['AUDIO'],
-        translationConfig: { targetLanguageCode: 'en', echoTargetLanguage: true },
+        responseModalities: ['TEXT'],
       },
       inputAudioTranscription: {},
       realtimeInputConfig: {
@@ -1628,7 +1632,7 @@ check(
       },
     },
   }) && !liveTestReady,
-  'Gemini Live sends the exact source-transcription setup and waits for setupComplete',
+  'Gemini Live defaults to the Transcribe Live text setup and waits for setupComplete',
 )
 liveTestSocket.receive({ setupComplete: {} })
 await liveTestOpening
@@ -2016,6 +2020,7 @@ const reconnectChanges = []
 const reconnectEvents = []
 const reconnectGemini = createGeminiSttHarness({
   sttProvider: 'gemini',
+  sttModel: 'gemini-3.5-live-translate-preview',
   sttLanguage: 'multi',
   language: 'zh-TW',
 })

@@ -667,7 +667,7 @@ function attachGeminiHandlers(ws: DeepgramStream) {
   ws.onopen = () => {
     try {
       ws.send(JSON.stringify(geminiSetup(
-        ws.__geminiModel || GEMINI_LIVE_TRANSLATE_MODEL,
+        ws.__geminiModel || GEMINI_LIVE_TRANSCRIBE_MODEL,
         ws.__geminiInputLanguage || 'multi',
         ws.__geminiAppLanguage || 'en-US',
       )));
@@ -849,9 +849,9 @@ async function openGeminiLiveSocket(
   ws.__deepgramOptions = { ...options };
   ws.__deepgramOnTranscript = onTranscript;
   ws.__deepgramOnError = onError;
-  ws.__geminiModel = configuredModel === GEMINI_LIVE_TRANSCRIBE_MODEL
-    ? GEMINI_LIVE_TRANSCRIBE_MODEL
-    : GEMINI_LIVE_TRANSLATE_MODEL;
+  ws.__geminiModel = configuredModel === GEMINI_LIVE_TRANSLATE_MODEL
+    ? GEMINI_LIVE_TRANSLATE_MODEL
+    : GEMINI_LIVE_TRANSCRIBE_MODEL;
   ws.__geminiInputLanguage = inputLanguage || options.language || (settings?.sttLanguage as string) || 'multi';
   ws.__geminiAppLanguage = appLanguage || (settings?.language as string) || 'en-US';
   ws.__geminiSetupComplete = false;

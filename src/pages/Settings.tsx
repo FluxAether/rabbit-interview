@@ -1444,7 +1444,7 @@ export default function Settings({
                       ) : (
                         <button
                           type="button"
-                          onClick={() => updateSttConfig('gemini', GEMINI_LIVE_TRANSLATE_MODEL)}
+                          onClick={() => updateSttConfig('gemini', GEMINI_LIVE_TRANSCRIBE_MODEL)}
                           disabled={aiAccessMode === 'hosted'}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
@@ -1457,7 +1457,7 @@ export default function Settings({
                       <div className="flex items-center gap-2">
                         <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
                         <select
-                          value={sttProvider === 'gemini' ? sttModel : GEMINI_LIVE_TRANSLATE_MODEL}
+                          value={sttProvider === 'gemini' ? sttModel : GEMINI_LIVE_TRANSCRIBE_MODEL}
                           onChange={(e) => updateSttConfig('gemini', e.target.value)}
                           disabled={aiAccessMode === 'hosted'}
                           className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm disabled:opacity-50"

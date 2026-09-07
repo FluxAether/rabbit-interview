@@ -94,9 +94,9 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
   const sttModel = sttProvider === 'hosted'
     ? HOSTED_STT_MODEL
     : sttProvider === 'gemini'
-    ? saved?.sttModel === GEMINI_LIVE_TRANSCRIBE_MODEL
-      ? GEMINI_LIVE_TRANSCRIBE_MODEL
-      : GEMINI_LIVE_TRANSLATE_MODEL
+    ? saved?.sttModel === GEMINI_LIVE_TRANSLATE_MODEL
+      ? GEMINI_LIVE_TRANSLATE_MODEL
+      : GEMINI_LIVE_TRANSCRIBE_MODEL
     : sttProvider === 'apple'
       ? APPLE_STT_MODEL
       : savedSttProvider !== undefined && savedSttProvider !== 'deepgram'
