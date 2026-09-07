@@ -284,7 +284,7 @@ async fn gateway_upgrade_audio_stop_validation_and_admission_cleanup() -> anyhow
     let gateway = Gateway::start(common::TestConfig::new()?, &upstream_url, Duration::from_secs(30)).await?;
     let (account, token) = gateway.account(600_000).await?;
     assert!(gateway.create("invalid-access-token").await.is_err());
-    for (frames, size, reason, charged) in [(2, 640, "user_stop", 40), (1, 1, "invalid_audio_format", 0), (101, 2, "frame_rate_limited", 6)] {
+    for (frames, size, reason, charged) in [(2, 640, "user_stop", 40), (1, 1, "invalid_audio_format", 0), (101, 2, "user_stop", 6)] {
         let session = gateway.create(&token).await?;
         let mut client = connect(&session).await?;
         assert_eq!(next_json(&mut client).await?["type"], "stt.ready");

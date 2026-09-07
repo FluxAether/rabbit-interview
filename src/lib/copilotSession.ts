@@ -1074,8 +1074,10 @@ class CopilotSessionHost {
     this.deepgrams[source] = await startDeepgramStream(
       (event) => this.handleTranscriptEvent(sessionId, source, event),
       (error) => {
-        // Reconnect handles transient socket failures; only surface non-socket parse issues.
         console.warn('[Copilot] Deepgram stream warning', error)
+        if (!this.isCurrent(sessionId)) return
+        const message = error instanceof Error ? error.message : String(error)
+        if (message) this.transition({ type: 'recoverable-error', sessionId, error: message })
       },
       sampleRate,
       (socket) => {

@@ -344,8 +344,7 @@ async fn proxy_stt(
                         }
                         frame_count += 1;
                         if frame_count > state.config().max_ws_frames_per_second {
-                            terminate_reason = "frame_rate_limited";
-                            break Ok(());
+                            continue;
                         }
                         let samples = (pcm.len() / 2) as i64;
                         let next_ms = (received_samples + samples) * 1000 / 16_000;

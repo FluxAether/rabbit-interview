@@ -230,8 +230,10 @@ check(
     && llm.includes('ws.__hostedProvider = payload.provider')
     && llm.includes("payload.type === 'transcript'")
     && llm.includes("if (result.status === 'max-tokens') throw new Error('llm-output-truncated')")
-    && llm.includes("ws.__deepgramManaged = provider !== 'hosted'"),
-  'hosted LLM/STT preserve the hosted facade while capturing upstream route metadata',
+    && llm.includes("ws.__deepgramManaged = true")
+    && llm.includes("scheduleHostedReconnect")
+    && llm.includes("HOSTED_STT_NO_RECONNECT"),
+  'hosted LLM/STT preserve the hosted facade, capture upstream route metadata, and reconnect after unexpected session end',
 )
 check(
   cargo.includes('tauri-plugin-deep-link')

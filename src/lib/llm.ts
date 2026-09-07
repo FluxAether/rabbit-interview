@@ -1042,6 +1042,57 @@ export async function testAppleSttConnection(language = 'zh-CN'): Promise<void> 
 let hostedInterviewId: string | null = null;
 let activeHostedStreams = 0;
 
+const HOSTED_STT_NO_RECONNECT = new Set(['user_stop', 'client_stop', 'sign_out', 'quota_exhausted', 'account_suspended']);
+
+function scheduleHostedReconnect(ws: DeepgramStream) {
+  if (ws.__deepgramClosedByClient || !ws.__deepgramManaged) return;
+  if (ws.__deepgramReconnectTimer != null) return;
+
+  const attempt = (ws.__deepgramReconnectAttempt ?? 0) + 1;
+  ws.__deepgramReconnectAttempt = attempt;
+  const delay = Math.min(
+    DEEPGRAM_RECONNECT_MAX_MS,
+    DEEPGRAM_RECONNECT_BASE_MS * (2 ** Math.min(attempt - 1, 4)),
+  );
+  console.warn(`[Hosted STT] Reconnecting in ${delay}ms (attempt ${attempt})`);
+
+  const timer = globalThis.setTimeout(() => {
+    ws.__deepgramReconnectTimer = null;
+    void reconnectHostedStream(ws).catch((error) => {
+      console.error('[Hosted STT] Reconnect failed', error);
+      ws.__deepgramOnError?.(error instanceof Error ? error : new Error(String(error)));
+      scheduleHostedReconnect(ws);
+    });
+  }, delay);
+  (timer as { unref?: () => void }).unref?.();
+  ws.__deepgramReconnectTimer = timer;
+}
+
+async function reconnectHostedStream(ws: DeepgramStream): Promise<void> {
+  if (ws.__deepgramClosedByClient || !ws.__deepgramManaged) return;
+  const next = await openHostedSttSocket(
+    ws.__deepgramSampleRate || 16_000,
+    ws.__deepgramOnTranscript || (() => {}),
+    ws.__deepgramOnError,
+    ws.__deepgramOptions || {},
+  ) as DeepgramStream;
+  if (ws.__deepgramClosedByClient || !ws.__deepgramManaged) {
+    closeDeepgramStream(next);
+    return;
+  }
+  next.__deepgramManaged = true;
+  next.__deepgramClosedByClient = false;
+  next.__deepgramReconnectAttempt = 0;
+  next.__deepgramReplaceSocket = ws.__deepgramReplaceSocket;
+  next.__deepgramOnTranscript = ws.__deepgramOnTranscript;
+  next.__deepgramOnError = ws.__deepgramOnError;
+  next.__deepgramOptions = ws.__deepgramOptions;
+  next.__deepgramSampleRate = ws.__deepgramSampleRate;
+  ws.__deepgramManaged = false;
+  ws.__deepgramReplaceSocket?.(next);
+  console.log('[Hosted STT] Reconnected');
+}
+
 async function openHostedSttSocket(
   sampleRate: number,
   onTranscript: (event: DeepgramTranscriptEvent) => void,
@@ -1079,6 +1130,9 @@ async function openHostedSttSocket(
   const ws = new WebSocket(url) as DeepgramStream;
   ws.binaryType = 'arraybuffer';
   ws.__sttProvider = 'hosted';
+  ws.__deepgramManaged = true;
+  ws.__deepgramClosedByClient = false;
+  ws.__deepgramSampleRate = 16_000;
   ws.__deepgramOptions = { ...options };
   ws.__deepgramOnTranscript = onTranscript;
   ws.__deepgramOnError = onError;
@@ -1094,6 +1148,8 @@ async function openHostedSttSocket(
     if (activeHostedStreams === 0) hostedInterviewId = null;
   };
   ws.__hostedUnregister = registerHostedConnection(() => {
+    ws.__deepgramClosedByClient = true;
+    ws.__deepgramManaged = false;
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stt.stop', reason: 'sign_out' }));
     ws.close();
   });
@@ -1129,7 +1185,14 @@ async function openHostedSttSocket(
         } else if (payload.type === 'quota.warning') {
           onError?.(new Error(`Hosted STT quota is low (${Number(payload.remaining_ms) || 0} ms remaining).`));
         } else if (payload.type === 'session.ended') {
+          const reason = String(payload.reason || 'ended');
           ws.__hostedSessionEnded = true;
+          if (HOSTED_STT_NO_RECONNECT.has(reason)) {
+            ws.__deepgramClosedByClient = true;
+            ws.__deepgramManaged = false;
+          } else {
+            onError?.(new Error(`Hosted STT ended (${reason}), reconnecting.`));
+          }
           ws.close();
         }
       } catch (error) {
@@ -1147,7 +1210,12 @@ async function openHostedSttSocket(
     ws.onclose = () => {
       globalThis.clearTimeout(timer);
       cleanup();
-      if (!ready) reject(new Error('Hosted STT closed before it was ready'));
+      if (!ready) {
+        reject(new Error('Hosted STT closed before it was ready'));
+        return;
+      }
+      if (!ws.__deepgramManaged || ws.__deepgramClosedByClient) return;
+      scheduleHostedReconnect(ws);
     };
   });
 }
@@ -1180,7 +1248,7 @@ export async function startDeepgramStream(
       : provider === 'apple'
         ? openAppleSttSocket(onTranscript, onError, options)
         : openDeepgramSocket(sampleRate, onTranscript, onError, false, undefined, options)) as DeepgramStream;
-  ws.__deepgramManaged = provider !== 'hosted';
+  ws.__deepgramManaged = true;
   ws.__deepgramClosedByClient = false;
   ws.__deepgramReconnectAttempt = 0;
   ws.__deepgramReplaceSocket = (next) => {
