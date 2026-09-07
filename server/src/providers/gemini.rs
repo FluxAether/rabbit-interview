@@ -46,6 +46,10 @@ impl LlmAdapter for GeminiClient {
 }
 
 fn request_body(model: &str, input: LlmInput) -> Value {
+    let mut generation_config = json!({"max_output_tokens": input.max_output_tokens});
+    if input.json_response {
+        generation_config["thinking_level"] = json!("low");
+    }
     let mut body = json!({
         "model": model,
         "input": format!(
@@ -54,7 +58,7 @@ fn request_body(model: &str, input: LlmInput) -> Value {
         ),
         "stream": true,
         "store": false,
-        "generation_config": {"max_output_tokens": input.max_output_tokens}
+        "generation_config": generation_config
     });
     if input.json_response {
         body["response_format"] = json!({"type": "text", "mime_type": "application/json"});
@@ -172,5 +176,16 @@ mod tests {
             body.pointer("/response_format/mime_type").unwrap(),
             "application/json"
         );
+        assert_eq!(body.pointer("/generation_config/thinking_level").unwrap(), "low");
+        let answer = request_body(
+            "gemini-test",
+            LlmInput {
+                system: "system".into(),
+                prompt: "prompt".into(),
+                json_response: false,
+                max_output_tokens: 128,
+            },
+        );
+        assert_eq!(answer.pointer("/generation_config/thinking_level"), None);
     }
 }

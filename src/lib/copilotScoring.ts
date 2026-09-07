@@ -177,12 +177,13 @@ export async function scoreCopilotSession(
     [
       'Score the candidate answers on clarity, relevance, structure, specificity, and impact (0-100 each).',
       'overallScore must be the rounded average of those five dimensions.',
+      'Keep strengths and improvements to at most 3 short items each. Summary must be 1-2 sentences.',
       'Schema: {"overallScore":0,"strengths":["..."],"improvements":["..."],"summary":"..."}',
       '',
       evidence,
     ].join('\n'),
     signal,
-    { maxOutputTokens: 900 },
+    { maxOutputTokens: 2_400, thinkingLevel: 'low' },
   )
 
   return {

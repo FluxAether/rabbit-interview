@@ -6,8 +6,8 @@ import path from 'node:path'
 const directory = path.resolve(process.argv[2] || 'dist-release')
 const expectedRepo = process.env.GITHUB_REPOSITORY || 'FluxAether/rabbit-interview'
 const requiredFiles = [
-  'RabbitInterview-macOS-universal.dmg',
-  'RabbitInterview-Windows-x64.exe',
+  'OnCue-macOS-universal.dmg',
+  'OnCue-Windows-x64.exe',
   'latest.json',
   'SHA256SUMS.txt',
 ]

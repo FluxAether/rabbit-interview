@@ -1342,7 +1342,7 @@ export async function generateStructuredJson<T>(
       responseMimeType: 'application/json',
     };
     if (model.startsWith('gemini-3')) {
-      generationConfig.thinkingConfig = { thinkingLevel: options.thinkingLevel ?? 'medium' };
+      generationConfig.thinkingConfig = { thinkingLevel: options.thinkingLevel ?? 'low' };
     } else {
       generationConfig.temperature = 0.3;
     }
@@ -1367,19 +1367,25 @@ export async function generateStructuredJson<T>(
     : provider === 'gemini'
       ? data?.candidates?.[0]?.finishReason
       : data?.choices?.[0]?.finish_reason;
-  if (['length', 'max_tokens', 'max-tokens'].includes(String(finishReason || '').toLowerCase())) {
-    throw new Error('llm-output-truncated');
-  }
   const text = provider === 'anthropic'
     ? (data?.content || []).filter((block: any) => block?.type === 'text').map((block: any) => block.text).join('\n')
     : provider === 'gemini'
-      ? data?.candidates?.[0]?.content?.parts?.map((part: any) => part.text || '').join('')
+      ? data?.candidates?.[0]?.content?.parts?.filter((part: any) => !part.thought).map((part: any) => part.text || '').join('')
       : data?.choices?.[0]?.message?.content;
-  if (!text) throw new Error('The LLM returned an empty response.');
+  const truncated = ['length', 'max_tokens', 'max-tokens'].includes(String(finishReason || '').toLowerCase());
+  if (!text) {
+    if (truncated) {
+      throw new Error('llm-output-truncated');
+    }
+    throw new Error('The LLM returned an empty response.');
+  }
   const cleaned = String(text).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try {
     return JSON.parse(cleaned) as T;
   } catch {
+    if (truncated) {
+      throw new Error('llm-output-truncated');
+    }
     throw new Error('The LLM returned invalid JSON. Please retry.');
   }
 }
@@ -1427,13 +1433,17 @@ async function generateHostedStructuredJson<T>(
       'hosted',
       'gemini-3.7-flash',
     );
-    if (result.status === 'max-tokens') throw new Error('llm-output-truncated');
-    if (result.status !== 'complete') throw new Error('The hosted LLM response was incomplete. Please retry.');
-    if (!result.text) throw new Error('The hosted LLM returned an empty response.');
+    if (!result.text) {
+      if (result.status === 'max-tokens') throw new Error('llm-output-truncated');
+      if (result.status !== 'complete') throw new Error('The hosted LLM response was incomplete. Please retry.');
+      throw new Error('The hosted LLM returned an empty response.');
+    }
     const cleaned = result.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
     try {
       return JSON.parse(cleaned) as T;
     } catch {
+      if (result.status === 'max-tokens') throw new Error('llm-output-truncated');
+      if (result.status !== 'complete') throw new Error('The hosted LLM response was incomplete. Please retry.');
       throw new Error('The hosted LLM returned invalid JSON. Please retry.');
     }
   } finally {

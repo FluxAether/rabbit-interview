@@ -303,6 +303,12 @@ check(
 )
 check(archive.includes('createCopilotInterviewRecord'), 'automatic archives use one transcript record builder')
 check(source('src/lib/copilotScoring.ts').includes('buildCopilotQaPairs') && session.includes('scoreCopilotSession'), 'ending a session scores interviewer questions against microphone answers')
+check(
+  source('src/lib/copilotScoring.ts').includes("thinkingLevel: 'low'")
+    && source('src/lib/copilotScoring.ts').includes('maxOutputTokens: 2_400')
+    && llm.includes("thinkingLevel: options.thinkingLevel ?? 'low'"),
+  'copilot scoring keeps Gemini thinking low and uses the hosted output token ceiling',
+)
 check(session.includes('buildRecentTurnsContext') && session.includes('collectCopilotTurns(messages)') && session.includes('openMessageId'), 'Copilot answers rebuild recent turns from sealed snapshot messages')
 check(!session.includes('previousTurn'), 'Copilot no longer caches a single previous AI turn')
 check(llm.includes('recent interview turns') && llm.includes('Prefer Candidate said over Suggested answer') && llm.includes('Suggested but not used'), 'LLM prompts prefer spoken candidate turns over AI suggestions')

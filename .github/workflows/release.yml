@@ -103,7 +103,7 @@ jobs:
             done < <(find "$BUNDLE" -type f \( -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \))
             INSTALLER="$(find "$BUNDLE" -type f -name '*.dmg' -print -quit)"
             test -n "$INSTALLER"
-            cp "$INSTALLER" release-assets/RabbitInterview-macOS-universal.dmg
+            cp "$INSTALLER" release-assets/OnCue-macOS-universal.dmg
             test -f src-tauri/target/audiotee-checksums.txt
             cp src-tauri/target/audiotee-checksums.txt release-assets/
           else
@@ -112,9 +112,9 @@ jobs:
             done < <(find "$BUNDLE" -type f \( -name '*.msi' -o -name '*.msi.sig' \))
             INSTALLER="$(find "$BUNDLE" -type f -path '*/nsis/*-setup.exe' -print -quit)"
             test -n "$INSTALLER"
-            cp "$INSTALLER" release-assets/RabbitInterview-Windows-x64.exe
+            cp "$INSTALLER" release-assets/OnCue-Windows-x64.exe
             if [ -f "${INSTALLER}.sig" ]; then
-              cp "${INSTALLER}.sig" release-assets/RabbitInterview-Windows-x64.exe.sig
+              cp "${INSTALLER}.sig" release-assets/OnCue-Windows-x64.exe.sig
             fi
           fi
           cp "updater-fragment-${{ matrix.platform_os }}.json" release-assets/
@@ -158,8 +158,8 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          test -f dist-release/RabbitInterview-macOS-universal.dmg
-          test -f dist-release/RabbitInterview-Windows-x64.exe
+          test -f dist-release/OnCue-macOS-universal.dmg
+          test -f dist-release/OnCue-Windows-x64.exe
           PARTS="$(find dist-release -maxdepth 1 -name 'updater-fragment-*.json' -print | sort | paste -sd, -)"
           test -n "$PARTS"
           node scripts/build-updater-manifest.mjs merge \
@@ -185,8 +185,8 @@ jobs:
           TABLE=$(printf "%s\n%s\n%s\n%s\n%s" \
             "| 操作系统 / Platform | 推荐安装包 / Recommended Package | 说明 / Description |" \
             "| :--- | :--- | :--- |" \
-            "| **macOS** (Universal) | [RabbitInterview-macOS-universal.dmg](https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/RabbitInterview-macOS-universal.dmg) | 支持 Apple Silicon (M系列) 与 Intel 架构，拖入 Applications 即可 |" \
-            "| **Windows** (64-bit) | [RabbitInterview-Windows-x64.exe](https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/RabbitInterview-Windows-x64.exe) | 标准安装向导程序 |" \
+            "| **macOS** (Universal) | [OnCue-macOS-universal.dmg](https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/OnCue-macOS-universal.dmg) | 支持 Apple Silicon (M系列) 与 Intel 架构，拖入 Applications 即可 |" \
+            "| **Windows** (64-bit) | [OnCue-Windows-x64.exe](https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/OnCue-Windows-x64.exe) | 标准安装向导程序 |" \
             "| **Windows MSI** (64-bit) | \`*.msi\` | 企业静默分发 / GPO 部署专用 |")
           NOTES=$(printf "%s\n\n%s\n\n%s\n\n%s\n\n%s" \
             "### 🚀 快速下载 / Quick Downloads" \
@@ -209,6 +209,6 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --notes "$NOTES"
           ASSETS="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')"
-          for required in RabbitInterview-macOS-universal.dmg RabbitInterview-Windows-x64.exe latest.json SHA256SUMS.txt; do
+          for required in OnCue-macOS-universal.dmg OnCue-Windows-x64.exe latest.json SHA256SUMS.txt; do
             grep -Fxq "$required" <<<"$ASSETS" || { echo "Missing source release asset: $required" >&2; exit 1; }
           done

@@ -1,8 +1,8 @@
 export type Lang = 'zh' | 'en'
 
 export const DOWNLOAD = {
-  mac: 'https://github.com/thomas92118/rabbit-interview/releases/latest/download/RabbitInterview-macOS-universal.dmg',
-  win: 'https://github.com/thomas92118/rabbit-interview/releases/latest/download/RabbitInterview-Windows-x64.exe',
+  mac: 'https://github.com/thomas92118/rabbit-interview/releases/latest/download/OnCue-macOS-universal.dmg',
+  win: 'https://github.com/thomas92118/rabbit-interview/releases/latest/download/OnCue-Windows-x64.exe',
   sums: 'https://github.com/thomas92118/rabbit-interview/releases/latest/download/SHA256SUMS.txt',
   repo: 'https://github.com/thomas92118/rabbit-interview',
   releases: 'https://github.com/thomas92118/rabbit-interview/releases/latest',
@@ -116,7 +116,7 @@ export const copy = {
     },
     downloadBand: {
       title: '为 macOS 与 Windows 打造',
-      subtitle: '轻量原生体验 (Rust + Tauri)。当前版本 v0.16.0。安装包文件名可能仍为 RabbitInterview。',
+      subtitle: '轻量原生体验 (Rust + Tauri)。当前版本 v0.16.0。',
       macMeta: 'macOS 13+',
       winMeta: 'Windows 10/11 64 位',
       checksum: '安装与校验说明',
@@ -237,7 +237,7 @@ export const copy = {
     },
     downloadBand: {
       title: 'Built for macOS and Windows',
-      subtitle: 'Native Rust + Tauri. Current version v0.16.0. Installer filenames may still say RabbitInterview.',
+      subtitle: 'Native Rust + Tauri. Current version v0.16.0.',
       macMeta: 'macOS 13+',
       winMeta: 'Windows 10/11 64-bit',
       checksum: 'Install and checksum notes',
