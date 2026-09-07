@@ -91,6 +91,19 @@ pub async fn create_answer(
         return Err(AppError::AlreadyExists);
     }
 
+    tracing::info!(
+        account_id = %account.id,
+        request_id = %request.request_id,
+        request_type = %request.request_type,
+        provider = %route.provider,
+        model = %route.model,
+        json_response,
+        max_output_tokens,
+        system = %crate::access::truncate(&system),
+        prompt = %crate::access::truncate(&prompt),
+        "llm request"
+    );
+
     let cancellation = CancellationToken::new();
     state
         .insert_cancellation(
@@ -160,6 +173,13 @@ async fn run_answer(
                 json!({"request_id":request_id,"seq":0,"code":"RATE_LIMITED","provider":route.provider,"model":route.model}),
             )
             .await;
+            tracing::warn!(
+                request_id = %request_id,
+                provider = %route.provider,
+                model = %route.model,
+                finish_reason = "gateway_concurrency_limit",
+                "llm response"
+            );
             state.remove_cancellation(&request_id).await;
             return;
         }
@@ -213,6 +233,7 @@ async fn run_answer(
         return;
     }
     let mut usage: Option<Usage> = None;
+    let mut output = String::new();
     let mut output_ascii_chars = 0_i64;
     let mut output_non_ascii_chars = 0_i64;
     let mut completed = false;
@@ -255,6 +276,7 @@ async fn run_answer(
                         }
                     }
                     Ok(LlmEvent::Delta(delta)) => {
+                        output.push_str(&delta);
                         for character in delta.chars() {
                             if character.is_ascii() {
                                 output_ascii_chars += 1;
@@ -359,6 +381,18 @@ async fn run_answer(
         )
         .await;
     }
+    tracing::info!(
+        request_id = %request_id,
+        session_id = %session_id,
+        provider = %route.provider,
+        model = %route.model,
+        finish_reason = %finish_reason,
+        usage_status,
+        input_tokens = final_usage.input_tokens,
+        output_tokens = final_usage.output_tokens,
+        output = %crate::access::truncate(&output),
+        "llm response"
+    );
     state.remove_cancellation(&request_id).await;
     state.metrics().llm_active.fetch_sub(1, Ordering::Relaxed);
 }
@@ -382,6 +416,14 @@ async fn finish_failed(
         json!({"request_id":request_id,"seq":0,"code":provider_error_code(error),"provider":route.provider,"model":route.model}),
     )
     .await;
+    tracing::warn!(
+        request_id,
+        provider = %route.provider,
+        model = %route.model,
+        finish_reason = reason,
+        error = ?error,
+        "llm response"
+    );
     state.remove_cancellation(request_id).await;
     state.metrics().llm_active.fetch_sub(1, Ordering::Relaxed);
 }
@@ -452,6 +494,7 @@ pub async fn cancel_answer(
         if entry.account_id != account.id {
             return Err(AppError::NotFound);
         }
+        tracing::info!(account_id = %account.id, request_id = %request_id, "llm cancel request");
         entry.token.cancel();
         return Ok(Json(
             json!({"request_id":request_id,"state":"cancel_requested"}),

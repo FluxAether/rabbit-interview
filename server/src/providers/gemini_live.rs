@@ -9,7 +9,6 @@ use futures_util::{
 use serde_json::{json, Value};
 use tokio::time::{sleep, timeout, Instant, Sleep};
 use tokio_tungstenite::{
-    connect_async,
     tungstenite::{client::IntoClientRequest, Message},
     MaybeTlsStream, WebSocketStream,
 };
@@ -18,8 +17,8 @@ use url::Url;
 use crate::{
     error::AppError,
     providers::stt::{
-        command_channel, event_channel, map_websocket_error, SttAdapter, SttCommand, SttConnect,
-        SttConnection, SttEvent, SttSocketExt, SttEventSender,
+        command_channel, connect_provider, event_channel, map_websocket_error, SttAdapter, SttCommand,
+        SttConnect, SttConnection, SttEvent, SttSocketExt, SttEventSender,
     },
 };
 
@@ -64,19 +63,22 @@ impl GeminiLiveClient {
             .as_str()
             .into_client_request()
             .map_err(|_| AppError::ProviderUnavailable)?;
-        let (mut socket, response) = timeout(Duration::from_secs(10), connect_async(ws_request))
+        let (mut socket, response) = timeout(Duration::from_secs(10), connect_provider(ws_request))
             .await
-            .map_err(|_| AppError::ProviderUnavailable)?
-            .map_err(map_websocket_error)?;
+            .map_err(|_| AppError::ProviderUnavailable)??;
         let provider_request_id = response
             .headers()
             .get("x-request-id")
             .and_then(|value| value.to_str().ok())
             .map(ToOwned::to_owned);
+        let setup_payload = setup(request, resume_handle);
+        tracing::info!(
+            session_id = %request.session_id,
+            body = %setup_payload,
+            "stt provider start"
+        );
         socket
-            .send_stt(Message::Text(
-                setup(request, resume_handle).to_string().into(),
-            ))
+            .send_stt(Message::Text(setup_payload.to_string().into()))
             .await
             .map_err(|_| AppError::ProviderUnavailable)?;
 

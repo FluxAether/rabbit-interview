@@ -50,6 +50,15 @@ pub async fn create_session(
     let idempotency_key = idempotency_key(&headers)?;
     let request_hash = hash_json(&request)?;
     let route = state.routing().current(RouteKind::Stt).await?;
+    tracing::info!(
+        account_id = %account.id,
+        client_request_id = %request.client_request_id,
+        source = %request.source,
+        language = %request.language,
+        provider = %route.provider,
+        model = %route.model,
+        "stt request"
+    );
     let session_id = Uuid::new_v4().to_string();
     let reservation_id = Uuid::new_v4().to_string();
     let (ticket, ticket_expires_at) = state
@@ -76,7 +85,7 @@ pub async fn create_session(
     let reserve = state
         .entitlement()
         .reserve(ReserveInput {
-            account_id: account.id,
+            account_id: account.id.clone(),
             session_id,
             reservation_id,
             client_request_id: request.client_request_id.clone(),
@@ -84,7 +93,7 @@ pub async fn create_session(
             kind: "STT",
             audio_source: Some(source),
             provider: route.provider.to_ascii_uppercase(),
-            model: route.model,
+            model: route.model.clone(),
             metric: STT_METRIC,
             units: state.config().initial_stt_hold_ms,
             idempotency_key,
@@ -95,9 +104,24 @@ pub async fn create_session(
         })
         .await;
     match reserve {
-        Ok(ReserveOutcome::Created) => Ok(Json(response)),
+        Ok(ReserveOutcome::Created) => {
+            tracing::info!(
+                account_id = %account.id,
+                session_id = %response.session_id,
+                reserved_ms = response.reserved_ms,
+                provider = %route.provider,
+                model = %route.model,
+                "stt response"
+            );
+            Ok(Json(response))
+        }
         Ok(ReserveOutcome::Existing(existing)) => {
             state.tickets().revoke(&ticket).await;
+            tracing::info!(
+                account_id = %account.id,
+                client_request_id = %request.client_request_id,
+                "stt response replayed"
+            );
             serde_json::from_value(existing)
                 .map(Json)
                 .map_err(|_| AppError::Internal)
@@ -116,6 +140,15 @@ pub async fn stream_session(
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, AppError> {
     let claim = state.tickets().consume(&query.ticket, &session_id).await?;
+    tracing::info!(
+        session_id = %claim.session_id,
+        account_id = %claim.account_id,
+        source = %claim.source,
+        language = %claim.language,
+        provider = %claim.route.provider,
+        model = %claim.route.model,
+        "stt stream request"
+    );
     let tracker = state.tracker().clone();
     let max_frame = state.config().max_ws_frame_bytes;
     Ok(upgrade
@@ -471,6 +504,15 @@ fn write_client(mut sink: ClientSink, messages: Vec<Message>) -> BoxFuture<'stat
 }
 
 fn transcript_message(seq: u64, claim: &crate::tickets::TicketClaim, transcript: SttEvent) -> Message {
+    tracing::info!(
+        session_id = %claim.session_id,
+        provider = %claim.route.provider,
+        seq,
+        boundary = transcript.boundary,
+        terminal = transcript.terminal,
+        text = %crate::access::truncate(&transcript.text),
+        "stt response"
+    );
     json_message(json!({
         "type":"transcript", "seq":seq, "session_id":claim.session_id, "source":claim.source,
         "boundary":transcript.boundary, "text":transcript.text, "provider_offset_ms":transcript.provider_offset_ms

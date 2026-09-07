@@ -252,7 +252,14 @@ fn logged_path(uri: &axum::http::Uri) -> String {
     }
 }
 
-fn preview_body(bytes: &[u8], content_type: Option<&str>) -> String {
+pub(crate) fn redact_uri(uri: &str) -> String {
+    match uri.split_once('?') {
+        Some((base, query)) => format!("{base}?{}", redact_form(query)),
+        None => uri.to_owned(),
+    }
+}
+
+pub(crate) fn preview_body(bytes: &[u8], content_type: Option<&str>) -> String {
     if bytes.is_empty() {
         return String::new();
     }
@@ -317,6 +324,8 @@ fn is_sensitive(key: &str) -> bool {
             | "access_token"
             | "refresh_token"
             | "id_token"
+            | "key"
+            | "api_key"
             | "code"
             | "code_verifier"
             | "ticket"
@@ -332,7 +341,7 @@ fn is_sensitive(key: &str) -> bool {
     )
 }
 
-fn truncate(value: &str) -> String {
+pub(crate) fn truncate(value: &str) -> String {
     match value.char_indices().nth(LOG_BODY_CHARS) {
         Some((idx, _)) => format!("{}…[truncated]", &value[..idx]),
         None => value.to_owned(),
@@ -352,7 +361,7 @@ impl std::fmt::Display for DisplayPeer {
 
 #[cfg(test)]
 mod tests {
-    use super::{preview_body, redact_form};
+    use super::{preview_body, redact_form, redact_uri};
 
     #[test]
     fn json_preview_redacts_secrets_and_keeps_other_fields() {
@@ -370,5 +379,13 @@ mod tests {
             redact_form("email=user%40example.test&password=hunter2&request=abc"),
             "email=user%40example.test&password=%5Bredacted%5D&request=%5Bredacted%5D"
         );
+    }
+
+    #[test]
+    fn uri_preview_redacts_provider_keys() {
+        let redacted = redact_uri("wss://example.test/v1/listen?key=secret&model=nova");
+        assert!(redacted.contains("key=%5Bredacted%5D"));
+        assert!(redacted.contains("model=nova"));
+        assert!(!redacted.contains("secret"));
     }
 }

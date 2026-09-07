@@ -49,16 +49,48 @@ pub trait LlmAdapter: Send + Sync {
 pub(crate) async fn checked_response(
     request: reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, ProviderError> {
-    let response = request
-        .send()
-        .await
-        .map_err(|_| ProviderError::Unavailable)?;
-    match response.status().as_u16() {
-        200..=299 => Ok(response),
-        429 => Err(ProviderError::RateLimited),
-        500..=599 => Err(ProviderError::Unavailable),
-        _ => Err(ProviderError::Rejected),
+    let started = std::time::Instant::now();
+    if let Some(cloned) = request.try_clone() {
+        if let Ok(built) = cloned.build() {
+            tracing::info!(
+                method = %built.method(),
+                url = %crate::access::redact_uri(built.url().as_str()),
+                body = %crate::access::preview_body(
+                    built.body().and_then(|body| body.as_bytes()).unwrap_or(&[]),
+                    Some("application/json"),
+                ),
+                "llm provider request"
+            );
+        }
     }
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(_) => {
+            tracing::warn!(
+                duration_ms = started.elapsed().as_millis() as u64,
+                "llm provider request failed"
+            );
+            return Err(ProviderError::Unavailable);
+        }
+    };
+    let status = response.status().as_u16();
+    let duration_ms = started.elapsed().as_millis() as u64;
+    if (200..=299).contains(&status) {
+        tracing::info!(status, duration_ms, "llm provider response");
+        return Ok(response);
+    }
+    let body = response.text().await.unwrap_or_default();
+    tracing::warn!(
+        status,
+        duration_ms,
+        body = %crate::access::truncate(&body),
+        "llm provider response"
+    );
+    Err(match status {
+        429 => ProviderError::RateLimited,
+        500..=599 => ProviderError::Unavailable,
+        _ => ProviderError::Rejected,
+    })
 }
 
 pub(crate) fn sse_stream<P>(response: reqwest::Response, parser: P) -> LlmEventStream

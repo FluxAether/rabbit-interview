@@ -4,7 +4,11 @@ use bytes::Bytes;
 use futures_util::{future::BoxFuture, stream::BoxStream, Sink, SinkExt};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{client::IntoClientRequest, Error as WebSocketError, Message},
+    MaybeTlsStream, WebSocketStream,
+};
 use tokio_util::task::AbortOnDropHandle;
 
 use crate::error::AppError;
@@ -19,6 +23,42 @@ pub(crate) async fn timed<T>(phase: &'static str, duration: Duration, work: impl
         tracing::warn!(phase, elapsed_ms = duration.as_millis() as u64, "STT operation timed out");
         AppError::ProviderUnavailable
     })?
+}
+
+pub(crate) async fn connect_provider(
+    request: impl IntoClientRequest + Unpin,
+) -> Result<
+    (
+        WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+        tokio_tungstenite::tungstenite::handshake::client::Response,
+    ),
+    AppError,
+> {
+    let request = request
+        .into_client_request()
+        .map_err(map_websocket_error)?;
+    let url = crate::access::redact_uri(&request.uri().to_string());
+    tracing::info!(url = %url, "stt provider request");
+    let started = std::time::Instant::now();
+    match connect_async(request).await {
+        Ok((socket, response)) => {
+            tracing::info!(
+                url = %url,
+                status = response.status().as_u16(),
+                duration_ms = started.elapsed().as_millis() as u64,
+                "stt provider response"
+            );
+            Ok((socket, response))
+        }
+        Err(error) => {
+            tracing::warn!(
+                url = %url,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "stt provider request failed"
+            );
+            Err(map_websocket_error(error))
+        }
+    }
 }
 
 impl SttEventSender {

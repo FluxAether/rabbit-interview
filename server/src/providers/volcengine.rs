@@ -5,7 +5,6 @@ use futures_util::{future::BoxFuture, StreamExt};
 use serde_json::{json, Value};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
-    connect_async,
     tungstenite::{client::IntoClientRequest, http::HeaderValue, Message},
     MaybeTlsStream, WebSocketStream,
 };
@@ -14,8 +13,8 @@ use uuid::Uuid;
 use crate::{
     error::AppError,
     providers::stt::{
-        command_channel, event_channel, map_websocket_error, SttAdapter, SttCommand, SttConnect,
-        SttConnection, SttEvent, SttSocketExt,
+        command_channel, connect_provider, event_channel, map_websocket_error, SttAdapter, SttCommand,
+        SttConnect, SttConnection, SttEvent, SttSocketExt,
     },
 };
 
@@ -60,14 +59,18 @@ impl VolcengineClient {
             "X-Api-Connect-Id",
             HeaderValue::from_str(&connect_id).map_err(|_| AppError::ProviderUnavailable)?,
         );
-        let (mut socket, response) = connect_async(ws_request)
-            .await
-            .map_err(map_websocket_error)?;
+        let (mut socket, response) = connect_provider(ws_request).await?;
         let provider_request_id = response
             .headers()
             .get("X-Tt-Logid")
             .and_then(|value| value.to_str().ok())
             .map(ToOwned::to_owned);
+        tracing::info!(
+            session_id = %request.session_id,
+            language = %request.language,
+            model = %request.model,
+            "stt provider start"
+        );
         socket
             .send_stt(Message::Binary(
                 initial_request(&request.session_id, &request.language, &request.model)?.into(),

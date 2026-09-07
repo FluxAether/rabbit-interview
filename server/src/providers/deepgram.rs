@@ -4,7 +4,6 @@ use futures_util::{future::BoxFuture, StreamExt};
 use serde_json::{json, Value};
 use tokio::time::{interval, MissedTickBehavior};
 use tokio_tungstenite::{
-    connect_async,
     tungstenite::{client::IntoClientRequest, http::HeaderValue, Message},
     MaybeTlsStream, WebSocketStream,
 };
@@ -13,8 +12,8 @@ use url::Url;
 use crate::{
     error::AppError,
     providers::stt::{
-        command_channel, event_channel, map_websocket_error, SttAdapter, SttCommand, SttConnect,
-        SttConnection, SttEvent, SttSocketExt,
+        command_channel, connect_provider, event_channel, map_websocket_error, SttAdapter, SttCommand,
+        SttConnect, SttConnection, SttEvent, SttSocketExt,
     },
 };
 
@@ -48,9 +47,7 @@ impl DeepgramClient {
             HeaderValue::from_str(&format!("Token {}", self.api_key))
                 .map_err(|_| AppError::ProviderUnavailable)?,
         );
-        let (socket, response) = connect_async(ws_request)
-            .await
-            .map_err(map_websocket_error)?;
+        let (socket, response) = connect_provider(ws_request).await?;
         let provider_request_id = response
             .headers()
             .get("dg-request-id")
