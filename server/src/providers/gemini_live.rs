@@ -135,6 +135,8 @@ impl SttAdapter for GeminiLiveClient {
             Ok(SttConnection::spawn(provider_request_id, sink, events, async move {
                 let mut rotation = RotationState::default();
                 let mut transcript_gate = TranscriptGate::default();
+                rotation.connected(Instant::now());
+                let mut active_live = true;
                 let utterance_timer = sleep(Duration::from_secs(24 * 60 * 60));
                 tokio::pin!(utterance_timer);
                 let reconnect_timer = sleep(Duration::from_secs(24 * 60 * 60));
@@ -154,20 +156,29 @@ impl SttAdapter for GeminiLiveClient {
                     tokio::select! {
                         command = commands.recv(), if deferred_active_error.is_none() => match command {
                             Some(SttCommand::Audio(pcm)) => {
-                                let payload = json!({
-                                    "realtimeInput": {
-                                        "audio": {
-                                            "data": BASE64.encode(pcm),
-                                            "mimeType": "audio/pcm;rate=16000"
+                                // ponytail: drop PCM during provider reconnect; buffer if gaps show up in transcripts
+                                if active_live {
+                                    let payload = json!({
+                                        "realtimeInput": {
+                                            "audio": {
+                                                "data": BASE64.encode(pcm),
+                                                "mimeType": "audio/pcm;rate=16000"
+                                            }
                                         }
+                                    });
+                                    if active.tx.send_stt(Message::Text(payload.to_string().into())).await.is_err() {
+                                        if !rotation.note_close(Instant::now()) {
+                                            let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
+                                            break;
+                                        }
+                                        active_live = false;
                                     }
-                                });
-                                if active.tx.send_stt(Message::Text(payload.to_string().into())).await.is_err() {
-                                    let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
-                                    break;
                                 }
                             }
                             Some(SttCommand::Finish) => {
+                                if !active_live {
+                                    break;
+                                }
                                 let payload = json!({"realtimeInput":{"audioStreamEnd":true}});
                                 if active.tx.send_stt(Message::Text(payload.to_string().into())).await.is_err() {
                                     let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
@@ -206,12 +217,13 @@ impl SttAdapter for GeminiLiveClient {
                             pending_open = None;
                             match opened {
                                 Ok((replacement, _)) => {
-                                    rotation.connected();
+                                    rotation.connected(Instant::now());
                                     transcript_gate.begin_rotation();
                                     let old = std::mem::replace(
                                         &mut active,
                                         SocketParts::new(replacement),
                                     );
+                                    active_live = true;
                                     retiring = Some(old);
                                     retiring_timer.as_mut().reset(retirement_deadline(
                                         pending_deadline.take(),
@@ -222,13 +234,16 @@ impl SttAdapter for GeminiLiveClient {
                                 Err(_) => {
                                     tracing::warn!(
                                         session_id = %request.session_id,
-                                        "Gemini Live session resumption failed; keeping the announced connection until it closes"
+                                        "Gemini Live reconnect failed"
                                     );
                                     if let Some(retry_at) = rotation
                                         .retry_after(Instant::now(), Duration::from_millis(250))
                                     {
                                         reconnect_timer.as_mut().reset(retry_at);
                                         reconnect_scheduled = true;
+                                    } else if !active_live {
+                                        let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
+                                        break;
                                     }
                                 }
                             }
@@ -296,7 +311,7 @@ impl SttAdapter for GeminiLiveClient {
                                 retirement_finished = true;
                             }
                         }
-                        message = active.rx.next(), if transcript_gate.can_read_active() && deferred_active_error.is_none() => {
+                        message = active.rx.next(), if transcript_gate.can_read_active() && deferred_active_error.is_none() && active_live => {
                             let parsed = match message {
                                 Some(Ok(Message::Text(payload))) => parse_response(payload.as_str()),
                                 Some(Ok(Message::Binary(payload))) => std::str::from_utf8(&payload)
@@ -315,7 +330,12 @@ impl SttAdapter for GeminiLiveClient {
                                         deferred_active_error = Some(error);
                                         continue;
                                     }
-                                    break;
+                                    if !rotation.note_close(Instant::now()) {
+                                        let _ = event_tx.send(Err(error)).await;
+                                        break;
+                                    }
+                                    active_live = false;
+                                    Ok(GeminiResponse::Ignore)
                                 }
                                 Some(Err(error)) => {
                                     let error = map_websocket_error(error);
@@ -323,7 +343,14 @@ impl SttAdapter for GeminiLiveClient {
                                         deferred_active_error = Some(error);
                                         continue;
                                     }
-                                    Err(error)
+                                    if matches!(&error, AppError::ProviderUnavailable)
+                                        && rotation.note_close(Instant::now())
+                                    {
+                                        active_live = false;
+                                        Ok(GeminiResponse::Ignore)
+                                    } else {
+                                        Err(error)
+                                    }
                                 }
                                 _ => continue,
                             };
@@ -383,13 +410,16 @@ impl SttAdapter for GeminiLiveClient {
                     if retiring.is_none() && !reconnect_scheduled && deferred_active_error.is_none()
                     {
                         if pending_open.is_none() {
-                            if let Some(handle) = rotation.take_reconnect_handle(Instant::now()) {
+                            if let Some(handle) = rotation.take_reconnect(Instant::now()) {
                                 pending_deadline = rotation.deadline();
                                 let opener = provider.clone();
                                 let connect = request.clone();
                                 pending_open = Some(Box::pin(async move {
-                                    opener.open(&connect, Some(&handle)).await
+                                    opener.open(&connect, handle.as_deref()).await
                                 }));
+                            } else if !active_live {
+                                let _ = event_tx.send(Err(AppError::ProviderUnavailable)).await;
+                                break;
                             }
                         }
                     }
@@ -482,6 +512,8 @@ struct RotationState {
     go_away: bool,
     deadline: Option<Instant>,
     retry_not_before: Option<Instant>,
+    last_connected: Option<Instant>,
+    failures: u8,
 }
 
 impl RotationState {
@@ -501,7 +533,26 @@ impl RotationState {
         self.retry_not_before = None;
     }
 
-    fn take_reconnect_handle(&mut self, now: Instant) -> Option<String> {
+    fn note_close(&mut self, now: Instant) -> bool {
+        let short = self.last_connected.is_some_and(|connected| {
+            now.saturating_duration_since(connected) < Duration::from_secs(2)
+        });
+        if short {
+            self.failures = self.failures.saturating_add(1);
+        } else {
+            self.failures = 0;
+        }
+        if self.failures >= 3 {
+            return false;
+        }
+        self.handle = None;
+        self.go_away = true;
+        self.deadline = Some(now + Duration::from_secs(10));
+        self.retry_not_before = None;
+        true
+    }
+
+    fn take_reconnect(&mut self, now: Instant) -> Option<Option<String>> {
         if !self.go_away {
             return None;
         }
@@ -515,13 +566,16 @@ impl RotationState {
         {
             return None;
         }
-        let handle = self.handle.clone()?;
         self.go_away = false;
         self.retry_not_before = None;
-        Some(handle)
+        Some(self.handle.clone())
     }
 
     fn retry_after(&mut self, now: Instant, delay: Duration) -> Option<Instant> {
+        self.failures = self.failures.saturating_add(1);
+        if self.failures >= 3 {
+            return None;
+        }
         let deadline = self.deadline?;
         if now >= deadline {
             return None;
@@ -532,9 +586,11 @@ impl RotationState {
         Some(retry_at)
     }
 
-    fn connected(&mut self) {
+    fn connected(&mut self, now: Instant) {
         self.deadline = None;
         self.retry_not_before = None;
+        self.go_away = false;
+        self.last_connected = Some(now);
     }
 
     fn deadline(&self) -> Option<Instant> {
@@ -753,10 +809,10 @@ mod tests {
         ));
         rotation.note_go_away(Some(std::time::Duration::from_secs(5)), now);
         assert_eq!(
-            rotation.take_reconnect_handle(now).as_deref(),
-            Some("resume-2")
+            rotation.take_reconnect(now),
+            Some(Some("resume-2".into()))
         );
-        assert!(rotation.take_reconnect_handle(now).is_none());
+        assert!(rotation.take_reconnect(now).is_none());
 
         let GeminiResponse::Events(old_events) =
             parse_response(r#"{"serverContent":{"inputTranscription":{"text":"old final"}}}"#)
@@ -776,21 +832,76 @@ mod tests {
         rotation.note_go_away(Some(std::time::Duration::from_secs(1)), now);
 
         assert_eq!(
-            rotation.take_reconnect_handle(now).as_deref(),
-            Some("resume")
+            rotation.take_reconnect(now),
+            Some(Some("resume".into()))
         );
         let retry_at = rotation
             .retry_after(now, std::time::Duration::from_millis(250))
             .unwrap();
         assert!(rotation
-            .take_reconnect_handle(now + std::time::Duration::from_millis(249))
+            .take_reconnect(now + std::time::Duration::from_millis(249))
             .is_none());
         assert_eq!(
-            rotation.take_reconnect_handle(retry_at).as_deref(),
-            Some("resume")
+            rotation.take_reconnect(retry_at),
+            Some(Some("resume".into()))
         );
-        rotation.connected();
-        assert!(rotation.take_reconnect_handle(retry_at).is_none());
+        rotation.connected(retry_at);
+        assert!(rotation.take_reconnect(retry_at).is_none());
+    }
+
+    #[test]
+    fn go_away_without_handle_opens_fresh_connection() {
+        let now = tokio::time::Instant::now();
+        let mut rotation = RotationState::default();
+        rotation.connected(now);
+        rotation.note_go_away(Some(std::time::Duration::from_secs(5)), now);
+        assert_eq!(rotation.take_reconnect(now), Some(None));
+        assert!(rotation.take_reconnect(now).is_none());
+    }
+
+    #[test]
+    fn unexpected_close_opens_fresh_connection() {
+        let now = tokio::time::Instant::now();
+        let mut rotation = RotationState::default();
+        rotation.connected(now);
+        assert!(rotation.note_close(now + std::time::Duration::from_secs(10)));
+        assert_eq!(
+            rotation.take_reconnect(now + std::time::Duration::from_secs(10)),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn rapid_close_after_connect_gives_up() {
+        let now = tokio::time::Instant::now();
+        let mut rotation = RotationState::default();
+        rotation.connected(now);
+        assert!(rotation.note_close(now + std::time::Duration::from_millis(100)));
+        assert_eq!(
+            rotation.take_reconnect(now + std::time::Duration::from_millis(100)),
+            Some(None)
+        );
+        rotation.connected(now + std::time::Duration::from_millis(200));
+        assert!(rotation.note_close(now + std::time::Duration::from_millis(300)));
+        rotation.connected(now + std::time::Duration::from_millis(400));
+        assert!(!rotation.note_close(now + std::time::Duration::from_millis(500)));
+    }
+
+    #[test]
+    fn failed_opens_give_up_after_three_retries() {
+        let now = tokio::time::Instant::now();
+        let mut rotation = RotationState::default();
+        rotation.note_go_away(Some(std::time::Duration::from_secs(5)), now);
+        assert_eq!(rotation.take_reconnect(now), Some(None));
+        assert!(rotation
+            .retry_after(now, std::time::Duration::from_millis(250))
+            .is_some());
+        assert!(rotation
+            .retry_after(now, std::time::Duration::from_millis(250))
+            .is_some());
+        assert!(rotation
+            .retry_after(now, std::time::Duration::from_millis(250))
+            .is_none());
     }
 
     #[test]

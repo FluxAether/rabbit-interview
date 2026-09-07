@@ -53,3 +53,5 @@ src-tauri/binaries/audiotee-universal-apple-darwin
 **/*.rs.bk
 # Note: Cargo.lock should be committed for binary applications (recommended)
 .mcp.json
+
+outputs/

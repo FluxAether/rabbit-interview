@@ -143,6 +143,7 @@ struct OrderRow {
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/account/products", get(public_products))
         .route("/account/payment-orders", post(create_order))
         .route(
             "/account/payment-orders/{merchant_order_no}",
@@ -153,6 +154,27 @@ pub fn router() -> Router<AppState> {
             post(refresh_order),
         )
         .route("/webhooks/alipay", post(alipay_webhook))
+}
+
+fn catalog_products() -> Vec<PaymentProduct> {
+    PRODUCTS
+        .iter()
+        .map(|product| PaymentProduct {
+            code: product.code,
+            price_minor: product.price_minor,
+            currency: CURRENCY,
+            duration_days: product.duration_days,
+            stt_ms: product.stt_ms,
+            llm_units: product.llm_units,
+        })
+        .collect()
+}
+
+async fn public_products(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "payments_enabled": state.config().payments_enabled,
+        "products": catalog_products(),
+    }))
 }
 
 impl PaymentService {
@@ -173,17 +195,7 @@ impl PaymentService {
     }
 
     pub fn products(&self) -> Vec<PaymentProduct> {
-        PRODUCTS
-            .iter()
-            .map(|product| PaymentProduct {
-                code: product.code,
-                price_minor: product.price_minor,
-                currency: CURRENCY,
-                duration_days: product.duration_days,
-                stt_ms: product.stt_ms,
-                llm_units: product.llm_units,
-            })
-            .collect()
+        catalog_products()
     }
 
     pub async fn subscription(

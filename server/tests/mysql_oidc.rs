@@ -165,6 +165,15 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     let rejected_id_token = bearer(&app, "/oauth2/userinfo", id_token).await?;
     assert_eq!(rejected_id_token.0, StatusCode::UNAUTHORIZED);
 
+    let catalog = send(&app, Method::GET, "/account/products", None).await?;
+    assert_eq!(catalog.0, StatusCode::OK);
+    let catalog: Value = serde_json::from_slice(&catalog.1)?;
+    assert_eq!(catalog["payments_enabled"], false);
+    assert_eq!(catalog["products"][0]["code"], "PRO_MONTH");
+    assert_eq!(catalog["products"][0]["price_minor"], 8900);
+    assert_eq!(catalog["products"][1]["code"], "PRO_QUARTER");
+    assert_eq!(catalog["products"][1]["price_minor"], 19900);
+
     let unauthenticated_subscription = send(
         &app,
         Method::GET,

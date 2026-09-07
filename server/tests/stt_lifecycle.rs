@@ -170,6 +170,56 @@ async fn gemini_cancel_during_resumption_closes_both_sockets() -> anyhow::Result
     Ok(())
 }
 
+#[tokio::test]
+async fn gemini_go_away_without_handle_opens_fresh_session() -> anyhow::Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("ws://{}", listener.local_addr()?);
+    let mock = AbortOnDropHandle::new(tokio::spawn(async move {
+        let mut first = accept_async(listener.accept().await?.0).await?;
+        setup(&mut first, "gemini_live").await?;
+        first.send(Message::text(r#"{"goAway":{"timeLeft":"2s"}}"#)).await?;
+        let mut second = accept_async(listener.accept().await?.0).await?;
+        let setup_msg = second.next().await.unwrap()?;
+        let setup: Value = serde_json::from_str(setup_msg.to_text()?)?;
+        assert!(setup["setup"]["sessionResumption"].get("handle").is_none(), "{setup}");
+        second.send(Message::text(r#"{"setupComplete":{}}"#)).await?;
+        let _ = first.send(Message::Close(None)).await;
+        second.send(transcript("gemini_live", "after-rotate", true)).await?;
+        Ok::<_, anyhow::Error>(())
+    }));
+    let mut connection = adapter("gemini_live", url).connect(SttConnect {
+        session_id: Uuid::new_v4().to_string(), language: "en-US".into(), model: "test".into(),
+    }).await?;
+    let event = timeout(Duration::from_secs(2), connection.events.next()).await?.unwrap()?;
+    assert_eq!(event.text, "after-rotate");
+    drop(connection);
+    timeout(Duration::from_secs(2), mock).await???;
+    Ok(())
+}
+
+#[tokio::test]
+async fn gemini_provider_close_reconnects_without_dropping_session() -> anyhow::Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("ws://{}", listener.local_addr()?);
+    let mock = AbortOnDropHandle::new(tokio::spawn(async move {
+        let mut first = accept_async(listener.accept().await?.0).await?;
+        setup(&mut first, "gemini_live").await?;
+        first.send(Message::Close(None)).await?;
+        let mut second = accept_async(listener.accept().await?.0).await?;
+        setup(&mut second, "gemini_live").await?;
+        second.send(transcript("gemini_live", "after-close", true)).await?;
+        Ok::<_, anyhow::Error>(())
+    }));
+    let mut connection = adapter("gemini_live", url).connect(SttConnect {
+        session_id: Uuid::new_v4().to_string(), language: "en-US".into(), model: "test".into(),
+    }).await?;
+    let event = timeout(Duration::from_secs(2), connection.events.next()).await?.unwrap()?;
+    assert_eq!(event.text, "after-close");
+    drop(connection);
+    timeout(Duration::from_secs(2), mock).await???;
+    Ok(())
+}
+
 struct Gateway {
     state: AppState,
     url: String,

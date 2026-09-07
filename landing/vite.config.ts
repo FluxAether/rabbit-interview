@@ -7,6 +7,7 @@ const landingRoot = fileURLToPath(new URL('.', import.meta.url))
 export default defineConfig({
   plugins: [react()],
   root: landingRoot,
+  envDir: fileURLToPath(new URL("..", import.meta.url)),
   css: {
     postcss: landingRoot,
   },

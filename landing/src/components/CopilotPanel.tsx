@@ -20,7 +20,7 @@ export default function CopilotPanel({
       {!compact && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-mute">{t.copilot.hudBadge}</span>
+            <span className="text-[11px] text-mute">{t.copilot.hudBadge} · {t.previewBadge}</span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -29,6 +29,7 @@ export default function CopilotPanel({
               <button
                 type="button"
                 onClick={() => setViewMode('normal')}
+                aria-pressed={viewMode === 'normal'}
                 className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-all ${
                   viewMode === 'normal'
                     ? 'bg-white/15 font-medium text-ink shadow-sm'
@@ -41,6 +42,7 @@ export default function CopilotPanel({
               <button
                 type="button"
                 onClick={() => setViewMode('hud')}
+                aria-pressed={viewMode === 'hud'}
                 className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-all ${
                   viewMode === 'hud'
                     ? 'bg-white/15 font-medium text-ink shadow-sm'
@@ -159,7 +161,7 @@ export default function CopilotPanel({
         </div>
 
         {/* Real-time DPR-aware Audio Waveform */}
-        <div className={`mt-4 ${compact ? 'h-10' : 'h-12'}`}>
+        <div className={`mt-4 min-w-0 ${compact ? 'h-10' : 'h-12'}`}>
           <AudioWaveform className="h-full w-full" />
         </div>
       </div>

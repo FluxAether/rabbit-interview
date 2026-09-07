@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Apple, ArrowUpRight } from 'lucide-react'
+import { Apple, ArrowUpRight, Menu, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import AuthPage from './components/AuthPage'
 import CopilotPanel from './components/CopilotPanel'
@@ -8,32 +8,48 @@ import GitHubIcon from './components/GitHubIcon'
 import PricingSection from './components/PricingSection'
 import WindowsIcon from './components/WindowsIcon'
 import { DOWNLOAD, copy, type Lang } from './locales/content'
+import { landingLangFromStore, writeLandingLang } from './locales/lang'
 
-const LANG_KEY = 'rabbit-landing-lang'
+function normalizePath(pathname: string): string {
+  if (pathname.length > 1 && pathname.endsWith('/')) return pathname.replace(/\/+$/, '')
+  return pathname
+}
 
-function readLang(): Lang {
-  try {
-    const stored = localStorage.getItem(LANG_KEY)
-    if (stored === 'en' || stored === 'zh') return stored
-  } catch {
-    // ignore
-  }
-  return 'zh'
+function isAuthPath(path: string): boolean {
+  return path.startsWith('/auth/') || path === '/subscribe' || path === '/admin'
 }
 
 export default function App() {
-  const path = window.location.pathname
-  return path.startsWith('/auth/') || path === '/subscribe' || path === '/admin'
-    ? <AuthPage />
-    : <LandingPage />
+  const raw = window.location.pathname
+  const path = normalizePath(raw)
+  if (raw !== path) {
+    window.history.replaceState(null, '', path + window.location.search + window.location.hash)
+  }
+  if (isAuthPath(path)) return <AuthPage path={path} />
+  if (path !== '/') return <NotFoundPage />
+  return <LandingPage />
+}
+
+function NotFoundPage() {
+  const lang = landingLangFromStore()
+  const t = copy[lang]
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center bg-canvas px-5 text-center text-ink">
+      <p className="text-sm text-mute">{t.notFound.body}</p>
+      <a href="/" className="mt-6 inline-flex h-11 items-center rounded-xl bg-ink px-5 text-sm font-medium text-canvas">
+        {t.notFound.home}
+      </a>
+    </div>
+  )
 }
 
 function LandingPage() {
-  const [lang, setLang] = useState<Lang>('zh')
+  const [lang, setLang] = useState<Lang>(landingLangFromStore)
+  const [menuOpen, setMenuOpen] = useState(false)
   const t = copy[lang]
 
   useEffect(() => {
-    setLang(readLang())
+    setLang(landingLangFromStore())
   }, [])
 
   useEffect(() => {
@@ -45,11 +61,7 @@ function LandingPage() {
 
   const switchLang = (next: Lang) => {
     setLang(next)
-    try {
-      localStorage.setItem(LANG_KEY, next)
-    } catch {
-      // ignore
-    }
+    writeLandingLang(next)
   }
 
   return (
@@ -61,10 +73,9 @@ function LandingPage() {
         {t.skip}
       </a>
 
-      {/* Modern Sticky Navigation */}
       <header className="sticky top-0 z-40 border-b border-white/5 bg-canvas/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3">
-          <a href="#top" className="flex items-center gap-2.5">
+          <a href="#top" className="flex items-center gap-2.5" aria-label={t.homeAria}>
             <img src="/logo.svg" alt="" className="h-8 w-8 rounded-lg" />
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold tracking-tight">OnCue</span>
@@ -82,22 +93,24 @@ function LandingPage() {
             </a>
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <a
+              href="#pricing"
+              className="inline-flex h-11 items-center rounded-lg border border-white/15 bg-white/[0.04] px-3 text-xs font-medium text-ink md:hidden"
+            >
+              {t.nav.pricing}
+            </a>
             <a
               href="#download"
-              className="inline-flex h-8 items-center rounded-lg border border-white/15 bg-white/[0.04] px-3 text-xs font-medium text-ink transition-colors hover:border-white/25 hover:bg-white/[0.08]"
+              className="inline-flex h-11 items-center rounded-lg border border-white/15 bg-white/[0.04] px-3 text-xs font-medium text-ink transition-colors hover:border-white/25 hover:bg-white/[0.08]"
             >
               {t.nav.download}
             </a>
-
-            {/* Segmented Language Switcher */}
-            <div className="flex items-center rounded-full border border-white/10 bg-white/[0.03] p-0.5 text-[11px] font-medium">
+            <div className="flex h-11 items-center rounded-full border border-white/10 bg-white/[0.03] p-0.5 text-[11px] font-medium">
               <button
                 type="button"
                 onClick={() => switchLang('zh')}
-                className={`rounded-full px-2 py-0.5 transition-all ${
-                  lang === 'zh' ? 'bg-white/15 text-ink font-semibold' : 'text-mute hover:text-ink'
-                }`}
+                className={`rounded-full px-3 py-2 transition-all ${lang === 'zh' ? 'bg-white/15 text-ink font-semibold' : 'text-mute hover:text-ink'}`}
                 aria-pressed={lang === 'zh'}
               >
                 {t.langZh}
@@ -105,20 +118,37 @@ function LandingPage() {
               <button
                 type="button"
                 onClick={() => switchLang('en')}
-                className={`rounded-full px-2 py-0.5 transition-all ${
-                  lang === 'en' ? 'bg-white/15 text-ink font-semibold' : 'text-mute hover:text-ink'
-                }`}
+                className={`rounded-full px-3 py-2 transition-all ${lang === 'en' ? 'bg-white/15 text-ink font-semibold' : 'text-mute hover:text-ink'}`}
                 aria-pressed={lang === 'en'}
               >
                 {t.langEn}
               </button>
             </div>
+            <button
+              type="button"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/15 text-ink md:hidden"
+              aria-expanded={menuOpen}
+              aria-label={t.nav.menu}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              {menuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+            </button>
           </div>
         </div>
+        {menuOpen ? (
+          <nav className="border-t border-white/5 px-5 py-3 md:hidden" aria-label="mobile">
+            <div className="flex flex-col gap-3 text-sm">
+              <a href="#features" onClick={() => setMenuOpen(false)}>{t.nav.features}</a>
+              <a href="#pricing" onClick={() => setMenuOpen(false)}>{t.nav.pricing}</a>
+              <a href="#privacy" onClick={() => setMenuOpen(false)}>{t.nav.privacy}</a>
+              <a href="/subscribe" onClick={() => setMenuOpen(false)}>{t.nav.subscribe}</a>
+              <a href="#download" onClick={() => setMenuOpen(false)}>{t.nav.download}</a>
+            </div>
+          </nav>
+        ) : null}
       </header>
 
       <main id="main">
-        {/* Hero Section */}
         <section id="top" className="relative overflow-hidden">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_72%_38%,rgba(244,244,247,0.08),transparent_40%)]" />
           <div className="mx-auto grid max-w-6xl items-center gap-10 px-5 py-16 lg:grid-cols-[1fr_1fr] lg:gap-12 lg:py-24">
@@ -132,9 +162,7 @@ function LandingPage() {
                 <span>{t.eyebrow}</span>
               </div>
 
-              <h1 className={`mt-5 text-[40px] font-semibold leading-[1.08] tracking-[-0.045em] sm:text-5xl lg:text-[58px] ${
-                lang === 'zh' ? 'max-w-[12ch]' : 'max-w-[15ch]'
-              }`}>
+              <h1 className={`mt-5 text-[40px] font-semibold leading-[1.08] tracking-[-0.045em] sm:text-5xl lg:text-[58px] ${lang === 'zh' ? 'max-w-[12ch]' : 'max-w-[15ch]'}`}>
                 {t.h1.map((line, index) => (
                   <span key={line}>
                     {index > 0 ? <br /> : null}
@@ -155,7 +183,7 @@ function LandingPage() {
                 </a>
                 <a
                   href={DOWNLOAD.win}
-                  className="inline-flex h-12 items-center gap-2 rounded-2xl bg-ink px-5 text-sm font-medium text-canvas transition-opacity hover:opacity-90"
+                  className="inline-flex h-12 items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.03] px-5 text-sm font-medium text-ink transition-colors hover:border-white/25 hover:bg-white/[0.06]"
                 >
                   <WindowsIcon className="h-4 w-4" />
                   {t.downloadWin}
@@ -183,13 +211,9 @@ function LandingPage() {
           </div>
         </section>
 
-        {/* Feature Pipeline Section */}
         <FeatureCards t={t} />
-
-        {/* Pricing & Dual-Core Section */}
         <PricingSection t={t} />
 
-        {/* Download & Trust Section */}
         <section id="download" className="border-t border-white/5 px-5 py-20 lg:py-28">
           <div className="mx-auto max-w-3xl text-center">
             <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl lg:text-4xl">
@@ -197,16 +221,10 @@ function LandingPage() {
             </h2>
             <p className="mt-3 text-sm text-mute sm:text-base">{t.downloadBand.subtitle}</p>
 
-            <div id="privacy" className="mt-6 flex flex-wrap items-center justify-center gap-2 text-xs text-mute">
-              <span className="rounded-full border border-white/10 bg-white/[0.02] px-3.5 py-1">
-                {t.privacy.local}
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/[0.02] px-3.5 py-1">
-                {t.privacy.byok}
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/[0.02] px-3.5 py-1">
-                {t.privacy.limited}
-              </span>
+            <div id="privacy" className="mt-6 space-y-4 text-left text-sm leading-6 text-mute">
+              <p>{t.privacy.local}</p>
+              <p>{t.privacy.byok}</p>
+              <p>{t.privacy.hosted}</p>
             </div>
 
             <div className="mt-10 grid gap-4 sm:grid-cols-2">
@@ -232,7 +250,8 @@ function LandingPage() {
               </a>
             </div>
 
-            <p className="mt-6 text-xs text-mute">
+            <p className="mt-6 text-xs leading-5 text-mute">{t.downloadBand.help}</p>
+            <p className="mt-3 text-xs text-mute">
               {t.footerNote}{' '}
               <a href={DOWNLOAD.sums} className="underline decoration-white/20 underline-offset-4 hover:text-ink">
                 {t.downloadBand.checksum}

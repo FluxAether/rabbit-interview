@@ -1,11 +1,25 @@
-export type AuthLang = 'en' | 'zh-CN' | 'zh-TW'
+import type { AuthLang as SharedAuthLang } from './lang'
+
+export type AuthLang = SharedAuthLang
 
 type AuthCopy = {
   htmlLang: string
   title: string
+  pageTitles: Record<string, string>
   backHome: string
+  homeAria: string
   loading: string
   retry: string
+  openApp: string
+  downloadApp: string
+  openAppHint: string
+  changeEmail: string
+  resend: string
+  checkSpam: string
+  copyCodes: string
+  copied: string
+  notFoundTitle: string
+  notFoundBody: string
   login: {
     title: string
     subtitle: string
@@ -23,6 +37,7 @@ type AuthCopy = {
     code: string
     consentTitle: string
     consentHelp: string
+    noAccount: string
     allow: string
     deny: string
   }
@@ -31,6 +46,7 @@ type AuthCopy = {
     title: string
     subtitle: string
     name: string
+    nameHelp: string
     email: string
     submit: string
     sentTitle: string
@@ -56,6 +72,11 @@ type AuthCopy = {
     submit: string
     savedTitle: string
     savedBody: string
+    expiredTitle: string
+    expiredSetup: string
+    expiredReset: string
+    requestSetup: string
+    requestReset: string
   }
   security: {
     title: string
@@ -75,8 +96,10 @@ type AuthCopy = {
     factor: string
     disable: string
     revoke: string
+    revokeConfirm: string
     disabledDone: string
     revokedDone: string
+    cancelSetup: string
   }
   signedOut: {
     title: string
@@ -84,7 +107,19 @@ type AuthCopy = {
   }
   subscribe: {
     title: string
+    guestTitle: string
+    signedInTitle: string
     subtitle: string
+    guestSubtitle: string
+    popular: string
+    openToBuy: string
+    currentAvailable: string
+    nextPeriod: string
+    confirming: string
+    checkPayment: string
+    orderNo: string
+    daily: string
+    sttHours: string
     hostedTitle: string
     hostedBody: string
     byokTitle: string
@@ -123,6 +158,9 @@ type AuthCopy = {
   admin: {
     title: string
     subtitle: string
+    identityTitle: string
+    quotaTitle: string
+    grantPreview: string
     token: string
     actor: string
     email: string
@@ -180,6 +218,7 @@ const sharedErrors = {
     INVALID_POST_LOGOUT: 'The sign-out callback is invalid.',
     RATE_LIMITED: 'Too many attempts. Try again later.',
     INTERNAL_ERROR: 'Unable to continue right now. Try again later.',
+    GATEWAY_UNREACHABLE: 'The account service is not connected. Try again.',
     NETWORK_ERROR: 'Unable to reach the account service. Check your connection and try again.',
     ACCOUNT_SUSPENDED: 'This account cannot receive hosted quota.',
     SESSION_NOT_FOUND: 'No account matches that email.',
@@ -213,6 +252,7 @@ const sharedErrors = {
     INVALID_POST_LOGOUT: '退出后的回调地址无效。',
     RATE_LIMITED: '尝试次数过多，请稍后再试。',
     INTERNAL_ERROR: '暂时无法继续，请稍后重试。',
+    GATEWAY_UNREACHABLE: '账号服务未连接，请稍后重试。',
     NETWORK_ERROR: '无法连接账号服务，请检查网络后重试。',
     ACCOUNT_SUSPENDED: '该账号当前不能发放云托管额度。',
     SESSION_NOT_FOUND: '没有匹配该邮箱的账号。',
@@ -246,6 +286,7 @@ const sharedErrors = {
     INVALID_POST_LOGOUT: '登出後的回呼網址無效。',
     RATE_LIMITED: '嘗試次數過多，請稍後再試。',
     INTERNAL_ERROR: '暫時無法繼續，請稍後再試。',
+    GATEWAY_UNREACHABLE: '帳號服務未連線，請稍後再試。',
     NETWORK_ERROR: '無法連線帳號服務，請檢查網路後再試。',
     ACCOUNT_SUSPENDED: '此帳號目前不能發放雲端代管額度。',
     SESSION_NOT_FOUND: '沒有符合此電子郵件的帳號。',
@@ -259,9 +300,32 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
   en: {
     htmlLang: 'en',
     title: 'OnCue account',
-    backHome: 'Back to OnCue',
+    pageTitles: {
+      login: 'Sign in',
+      register: 'Create account',
+      forgot: 'Reset password',
+      setup: 'Set password',
+      reset: 'Reset password',
+      security: 'Account security',
+      subscribe: 'Subscription',
+      admin: 'Administration',
+      signedOut: 'Signed out',
+      error: 'Account error',
+    },
+    backHome: 'Back to the site',
+    homeAria: 'Back to the OnCue home page',
     loading: 'Loading…',
     retry: 'Try again',
+    openApp: 'Open OnCue',
+    downloadApp: 'Download the app',
+    openAppHint: 'If nothing happens, open OnCue manually or download it first.',
+    changeEmail: 'Use a different email',
+    resend: 'Send again',
+    checkSpam: 'Check spam or promotions if the email is missing.',
+    copyCodes: 'Copy recovery codes',
+    copied: 'Copied',
+    notFoundTitle: 'Page not found',
+    notFoundBody: 'This account link is not valid.',
     login: {
       title: 'Sign in',
       subtitle: 'Continue securely to the OnCue desktop app.',
@@ -271,14 +335,15 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       forgot: 'Forgot password?',
       register: 'Create an account',
       desktopOnlyTitle: 'Open OnCue to sign in',
-      desktopOnlyBody: 'This page continues a desktop sign-in request. Register here, then sign in from the app.',
+      desktopOnlyBody: 'Sign-in can only start from the desktop app. Download it if it is not installed yet.',
       successTitle: 'Sign-in successful',
-      successBody: 'You can return to OnCue. This browser tab is no longer needed.',
+      successBody: 'Return to OnCue. If the app did not open, launch it from your applications list.',
       mfaTitle: 'Verify sign-in',
-      mfaHelp: 'Enter an authenticator or recovery code.',
-      code: 'Verification code',
+      mfaHelp: 'Enter the six-digit authenticator code, or a recovery code.',
+      code: 'Authenticator or recovery code',
       consentTitle: 'Authorize OnCue',
-      consentHelp: 'The desktop app is requesting permission to:',
+      consentHelp: 'The OnCue desktop app is asking for these permissions:',
+      noAccount: 'Need an account?',
       allow: 'Allow',
       deny: 'Deny',
     },
@@ -292,10 +357,11 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       title: 'Create your account',
       subtitle: 'We will email a one-time link to verify your address and set a password.',
       name: 'Display name',
+      nameHelp: 'Used in the verification email. You can change it later.',
       email: 'Email',
-      submit: 'Create account',
+      submit: 'Send verification email',
       sentTitle: 'Check your email',
-      sentBody: 'If the address can be registered, a setup link has been sent.',
+      sentBody: 'If this address can be registered, a setup link has been sent. Next: set a password, then sign in from the app.',
       existing: 'Already have an account?',
       signIn: 'Sign in',
     },
@@ -316,7 +382,12 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       confirm: 'Confirm password',
       submit: 'Save password',
       savedTitle: 'Password saved',
-      savedBody: 'Return to OnCue and sign in.',
+      savedBody: 'Open OnCue and sign in with the new password.',
+      expiredTitle: 'This link is invalid or has expired',
+      expiredSetup: 'Request a new setup email to continue.',
+      expiredReset: 'Request a new reset email to continue.',
+      requestSetup: 'Request a setup email',
+      requestReset: 'Request a reset email',
     },
     security: {
       title: 'Account security',
@@ -336,8 +407,10 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       factor: 'Authenticator or recovery code',
       disable: 'Disable MFA',
       revoke: 'Sign out other devices',
+      revokeConfirm: 'Other OnCue sessions will be signed out. This browser session stays signed in.',
       disabledDone: 'Authenticator MFA has been disabled.',
       revokedDone: 'Other devices have been signed out.',
+      cancelSetup: 'Cancel setup',
     },
     signedOut: {
       title: 'Signed out',
@@ -345,11 +418,23 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     },
     subscribe: {
       title: 'Hosted access',
-      subtitle: 'Buy fixed hosted-access periods with Alipay, or keep using your own provider keys.',
+      guestTitle: 'Choose a hosted plan',
+      signedInTitle: 'Your plan and quota',
+      subtitle: 'Buy a fixed hosted period with Alipay, or keep using your own provider keys.',
+      guestSubtitle: 'Sign in from the desktop app to buy. New accounts can register here first.',
+      popular: 'Most popular',
+      openToBuy: 'Open OnCue to buy',
+      currentAvailable: 'Currently available',
+      nextPeriod: 'The next period starts on {start} and runs through {end}.',
+      confirming: 'Confirming payment. Remaining quota updates after Alipay or a server query confirms it.',
+      checkPayment: 'Check payment status',
+      orderNo: 'Order',
+      daily: 'per day',
+      sttHours: '{hours} hours',
       hostedTitle: 'OnCue hosted',
-      hostedBody: 'Sign in from the desktop app to use gateway-managed STT and LLM providers. Remaining quota is shown below after a browser session exists.',
+      hostedBody: 'Hosted speech and answers go through the official gateway. Records stay on this device.',
       byokTitle: 'Bring your own keys',
-      byokBody: 'Your configured BYOK providers and Apple speech recognition stay direct from this device. Hosted quota is not required.',
+      byokBody: 'The app talks to your selected provider directly. Hosted quota is not required.',
       grantTitle: 'Fixed periods, no renewal',
       grantBody: 'Each successful payment adds a separate 30- or 90-day quota period. Renewing early schedules the next period after the current one.',
       paymentsNote: 'Alipay purchases are one-time payments. There is no automatic renewal.',
@@ -361,8 +446,8 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       monthPlan: 'Pro monthly',
       quarterPlan: 'Pro quarterly',
       days: 'days',
-      sttMinutes: 'STT minutes',
-      llmUnits: 'LLM units',
+      sttMinutes: 'minutes of speech recognition',
+      llmUnits: 'AI answer units',
       buy: 'Pay with Alipay',
       redirecting: 'Opening Alipay…',
       currentPlan: 'Plan',
@@ -384,6 +469,9 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     admin: {
       title: 'Hosted administration',
       subtitle: 'Manage global AI routing and account quota. Admin credentials stay in this tab.',
+      identityTitle: 'Operator credentials',
+      quotaTitle: 'Account quota',
+      grantPreview: 'Grant {minutes} STT minutes to {email}.',
       token: 'Admin token',
       actor: 'Operator',
       email: 'Account email',
@@ -421,9 +509,32 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
   'zh-CN': {
     htmlLang: 'zh-CN',
     title: 'OnCue 账号',
-    backHome: '返回 OnCue',
+    pageTitles: {
+      login: '登录',
+      register: '注册',
+      forgot: '找回密码',
+      setup: '设置密码',
+      reset: '重置密码',
+      security: '账号安全',
+      subscribe: '订阅',
+      admin: '管理',
+      signedOut: '已退出',
+      error: '账号错误',
+    },
+    backHome: '返回官网',
+    homeAria: '返回 OnCue 首页',
     loading: '加载中…',
     retry: '重试',
+    openApp: '打开 OnCue',
+    downloadApp: '下载应用',
+    openAppHint: '如果没有反应，请手动打开应用，或先下载安装。',
+    changeEmail: '更换邮箱',
+    resend: '重新发送',
+    checkSpam: '若未收到邮件，请查看垃圾箱或促销分类。',
+    copyCodes: '复制恢复码',
+    copied: '已复制',
+    notFoundTitle: '页面不存在',
+    notFoundBody: '这个账号链接无效。',
     login: {
       title: '登录',
       subtitle: '安全地继续前往 OnCue 桌面应用。',
@@ -432,15 +543,16 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       submit: '登录',
       forgot: '忘记密码？',
       register: '创建账号',
-      desktopOnlyTitle: '请从桌面应用登录',
-      desktopOnlyBody: '此页面只继续桌面应用发起的登录请求。可以先在此注册，再回到应用登录。',
+      desktopOnlyTitle: '打开 OnCue 登录',
+      desktopOnlyBody: '登录只能从桌面应用发起。未安装时请先下载。',
       successTitle: '登录成功',
-      successBody: '现在可以返回 OnCue，此浏览器页面无需继续停留。',
+      successBody: '请返回 OnCue。若应用未打开，请从应用列表手动启动。',
       mfaTitle: '验证登录',
-      mfaHelp: '请输入验证器或恢复码。',
-      code: '验证码',
+      mfaHelp: '请输入验证器六位码，或使用恢复码。',
+      code: '验证器或恢复码',
       consentTitle: '授权 OnCue',
-      consentHelp: '桌面应用请求以下权限：',
+      consentHelp: 'OnCue 桌面应用请求以下权限：',
+      noAccount: '没有账号？',
       allow: '允许',
       deny: '拒绝',
     },
@@ -454,10 +566,11 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       title: '创建账号',
       subtitle: '我们会发送一次性链接，用于验证邮箱并设置密码。',
       name: '显示名称',
+      nameHelp: '用于验证邮件称呼，可以以后再改。',
       email: '邮箱',
-      submit: '创建账号',
+      submit: '发送验证邮件',
       sentTitle: '请查收邮件',
-      sentBody: '如果该邮箱可以注册，设置链接已发送。',
+      sentBody: '如果该邮箱可以注册，设置链接已发送。接下来请设置密码，再回到桌面应用登录。',
       existing: '已有账号？',
       signIn: '去登录',
     },
@@ -478,7 +591,12 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       confirm: '确认密码',
       submit: '保存密码',
       savedTitle: '密码已保存',
-      savedBody: '请返回 OnCue 并登录。',
+      savedBody: '请打开 OnCue，使用新密码登录。',
+      expiredTitle: '链接无效或已过期',
+      expiredSetup: '请重新申请设置邮件。',
+      expiredReset: '请重新申请重置邮件。',
+      requestSetup: '重新申请设置邮件',
+      requestReset: '重新申请重置邮件',
     },
     security: {
       title: '账号安全',
@@ -498,8 +616,10 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       factor: '验证器或恢复码',
       disable: '关闭 MFA',
       revoke: '退出其他设备',
+      revokeConfirm: '其他已登录的 OnCue 会退出，当前浏览器会话保留。',
       disabledDone: '验证器 MFA 已关闭。',
       revokedDone: '其他设备已退出登录。',
+      cancelSetup: '取消设置',
     },
     signedOut: {
       title: '已退出',
@@ -507,11 +627,23 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     },
     subscribe: {
       title: '云托管额度',
+      guestTitle: '选择适合你的方案',
+      signedInTitle: '我的套餐与额度',
       subtitle: '可通过支付宝购买固定期限的云托管服务，也可以继续使用自备密钥。',
+      guestSubtitle: '购买需要先从桌面应用登录。新用户可以先在此注册。',
+      popular: '超值推荐',
+      openToBuy: '打开 OnCue 后购买',
+      currentAvailable: '当前可用',
+      nextPeriod: '下一周期将在 {start} 生效，至 {end}。',
+      confirming: '正在确认支付。额度会在支付宝或服务端查询确认后更新。',
+      checkPayment: '查询支付结果',
+      orderNo: '订单号',
+      daily: '/天',
+      sttHours: '{hours} 小时',
       hostedTitle: 'OnCue 云托管',
-      hostedBody: '从桌面应用登录后，可使用网关管理的 STT 和 LLM 渠道。浏览器里若已有登录会话，下方会显示剩余额度。',
+      hostedBody: '语音和回答经官方网关处理，记录仍保存在本机。',
       byokTitle: '自备密钥',
-      byokBody: '已配置的 BYOK 渠道和 Apple 语音识别仍由本机直连，不需要云托管额度。',
+      byokBody: '设备直连你选择的供应商，不需要云托管额度。',
       grantTitle: '固定期限，不自动续费',
       grantBody: '每笔成功支付会增加一个独立的 30 天或 90 天额度周期。提前续费时，新周期会接在当前周期之后。',
       paymentsNote: '支付宝购买为一次性支付，不会自动续费。',
@@ -523,8 +655,8 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       monthPlan: 'Pro 月度套餐',
       quarterPlan: 'Pro 季度套餐',
       days: '天',
-      sttMinutes: 'STT 分钟',
-      llmUnits: 'LLM 单位',
+      sttMinutes: '分钟语音识别',
+      llmUnits: 'AI 回答额度',
       buy: '使用支付宝支付',
       redirecting: '正在打开支付宝…',
       currentPlan: '套餐',
@@ -546,6 +678,9 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     admin: {
       title: '云托管管理',
       subtitle: '管理全局 AI 路由和账号额度。管理凭据只留在当前标签页。',
+      identityTitle: '管理身份',
+      quotaTitle: '用户额度',
+      grantPreview: '向 {email} 发放 {minutes} 分钟语音识别额度。',
       token: '管理令牌',
       actor: '操作者',
       email: '账号邮箱',
@@ -583,9 +718,32 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
   'zh-TW': {
     htmlLang: 'zh-TW',
     title: 'OnCue 帳號',
-    backHome: '返回 OnCue',
+    pageTitles: {
+      login: '登入',
+      register: '註冊',
+      forgot: '重設密碼',
+      setup: '設定密碼',
+      reset: '重設密碼',
+      security: '帳號安全',
+      subscribe: '訂閱',
+      admin: '管理',
+      signedOut: '已登出',
+      error: '帳號錯誤',
+    },
+    backHome: '返回官網',
+    homeAria: '返回 OnCue 首頁',
     loading: '載入中…',
     retry: '重試',
+    openApp: '打開 OnCue',
+    downloadApp: '下載應用程式',
+    openAppHint: '如果沒有反應，請手動打開應用程式，或先下載安裝。',
+    changeEmail: '更換電子郵件',
+    resend: '重新傳送',
+    checkSpam: '若未收到郵件，請查看垃圾郵件或促銷分類。',
+    copyCodes: '複製復原碼',
+    copied: '已複製',
+    notFoundTitle: '頁面不存在',
+    notFoundBody: '這個帳號連結無效。',
     login: {
       title: '登入',
       subtitle: '安全地繼續前往 OnCue 桌面應用程式。',
@@ -594,15 +752,16 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       submit: '登入',
       forgot: '忘記密碼？',
       register: '建立帳號',
-      desktopOnlyTitle: '請從桌面應用程式登入',
-      desktopOnlyBody: '此頁面只繼續桌面應用程式發起的登入請求。可以先在此註冊，再回到應用程式登入。',
+      desktopOnlyTitle: '打開 OnCue 登入',
+      desktopOnlyBody: '登入只能從桌面應用程式發起。尚未安裝時請先下載。',
       successTitle: '登入成功',
-      successBody: '現在可以返回 OnCue，此瀏覽器頁面無需繼續停留。',
+      successBody: '請返回 OnCue。若應用程式未打開，請從應用程式列表手動啟動。',
       mfaTitle: '驗證登入',
-      mfaHelp: '請輸入驗證器或復原碼。',
-      code: '驗證碼',
+      mfaHelp: '請輸入驗證器六位數，或使用復原碼。',
+      code: '驗證器或復原碼',
       consentTitle: '授權 OnCue',
-      consentHelp: '桌面應用程式要求以下權限：',
+      consentHelp: 'OnCue 桌面應用程式要求以下權限：',
+      noAccount: '沒有帳號？',
       allow: '允許',
       deny: '拒絕',
     },
@@ -616,10 +775,11 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       title: '建立帳號',
       subtitle: '我們會傳送一次性連結，用於驗證電子郵件並設定密碼。',
       name: '顯示名稱',
+      nameHelp: '用於驗證郵件稱呼，可以稍後再改。',
       email: '電子郵件',
-      submit: '建立帳號',
+      submit: '傳送驗證郵件',
       sentTitle: '請查看電子郵件',
-      sentBody: '如果此電子郵件可以註冊，設定連結已傳送。',
+      sentBody: '如果此電子郵件可以註冊，設定連結已傳送。接下來請設定密碼，再回到桌面應用程式登入。',
       existing: '已有帳號？',
       signIn: '去登入',
     },
@@ -640,7 +800,12 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       confirm: '確認密碼',
       submit: '儲存密碼',
       savedTitle: '密碼已儲存',
-      savedBody: '請返回 OnCue 並登入。',
+      savedBody: '請打開 OnCue，使用新密碼登入。',
+      expiredTitle: '連結無效或已過期',
+      expiredSetup: '請重新申請設定郵件。',
+      expiredReset: '請重新申請重設郵件。',
+      requestSetup: '重新申請設定郵件',
+      requestReset: '重新申請重設郵件',
     },
     security: {
       title: '帳號安全',
@@ -660,8 +825,10 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       factor: '驗證器或復原碼',
       disable: '停用 MFA',
       revoke: '登出其他裝置',
+      revokeConfirm: '其他已登入的 OnCue 會登出，目前瀏覽器工作階段會保留。',
       disabledDone: '驗證器 MFA 已停用。',
       revokedDone: '其他裝置已登出。',
+      cancelSetup: '取消設定',
     },
     signedOut: {
       title: '已登出',
@@ -669,11 +836,23 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     },
     subscribe: {
       title: '雲端代管額度',
+      guestTitle: '選擇適合你的方案',
+      signedInTitle: '我的方案與額度',
       subtitle: '可透過支付寶購買固定期限的雲端代管服務，也可以繼續使用自備金鑰。',
+      guestSubtitle: '購買需要先從桌面應用程式登入。新用戶可以先在此註冊。',
+      popular: '超值推薦',
+      openToBuy: '打開 OnCue 後購買',
+      currentAvailable: '目前可用',
+      nextPeriod: '下一週期將在 {start} 生效，至 {end}。',
+      confirming: '正在確認付款。額度會在支付寶或伺服器查詢確認後更新。',
+      checkPayment: '查詢付款結果',
+      orderNo: '訂單編號',
+      daily: '/天',
+      sttHours: '{hours} 小時',
       hostedTitle: 'OnCue 雲端代管',
-      hostedBody: '從桌面應用程式登入後，可使用閘道管理的 STT 與 LLM 渠道。瀏覽器若已有登入工作階段，下方會顯示剩餘額度。',
+      hostedBody: '語音與回答經官方閘道處理，紀錄仍保存在本機。',
       byokTitle: '自備金鑰',
-      byokBody: '已設定的 BYOK 渠道與 Apple 語音辨識仍由本機直連，不需要雲端代管額度。',
+      byokBody: '裝置直連你選擇的供應商，不需要雲端代管額度。',
       grantTitle: '固定期限，不自動續費',
       grantBody: '每筆成功付款會增加一個獨立的 30 天或 90 天額度週期。提前續費時，新週期會接在目前週期之後。',
       paymentsNote: '支付寶購買為一次性付款，不會自動續費。',
@@ -685,8 +864,8 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
       monthPlan: 'Pro 月度方案',
       quarterPlan: 'Pro 季度方案',
       days: '天',
-      sttMinutes: 'STT 分鐘',
-      llmUnits: 'LLM 單位',
+      sttMinutes: '分鐘語音辨識',
+      llmUnits: 'AI 回答額度',
       buy: '使用支付寶付款',
       redirecting: '正在開啟支付寶…',
       currentPlan: '方案',
@@ -708,6 +887,9 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     admin: {
       title: '雲端代管管理',
       subtitle: '管理全域 AI 路由和帳號額度。管理憑據只留在目前分頁。',
+      identityTitle: '管理身分',
+      quotaTitle: '使用者額度',
+      grantPreview: '向 {email} 發放 {minutes} 分鐘語音辨識額度。',
       token: '管理權杖',
       actor: '操作者',
       email: '帳號電子郵件',
