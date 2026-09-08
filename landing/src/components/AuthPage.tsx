@@ -77,7 +77,7 @@ const secondaryButton = 'inline-flex h-11 items-center justify-center rounded-xl
 const env = (import.meta as ImportMeta & {
   readonly env?: { readonly VITE_HOSTED_GATEWAY_URL?: string; readonly DEV?: boolean }
 }).env
-const gateway = (env?.VITE_HOSTED_GATEWAY_URL?.trim() || (env?.DEV ? 'http://127.0.0.1:8787' : window.location.origin)).replace(/\/$/, '')
+const gateway = (env?.DEV ? (typeof window === 'undefined' ? '' : window.location.origin) : (env?.VITE_HOSTED_GATEWAY_URL?.trim() || (typeof window === 'undefined' ? '' : window.location.origin))).replace(/\/$/, '')
 
 let cachedFragment: URLSearchParams | undefined
 
@@ -763,6 +763,17 @@ const DEFAULT_PRODUCTS: PaymentProduct[] = [
   },
 ]
 
+let inFlightSubscription: Promise<SubscriptionContext> | null = null
+
+function fetchSubscriptionContext(path: string): Promise<SubscriptionContext> {
+  if (!inFlightSubscription) {
+    inFlightSubscription = jsonApi<SubscriptionContext>(path).finally(() => {
+      inFlightSubscription = null
+    })
+  }
+  return inFlightSubscription
+}
+
 function SubscribePage({ t }: { t: T }) {
   const [context, setContext] = useState<SubscriptionContext | null>(null)
   const [order, setOrder] = useState<PaymentOrder | null>(null)
@@ -778,16 +789,16 @@ function SubscribePage({ t }: { t: T }) {
     const contextPath = ticket
       ? `/account/subscription/context?ticket=${encodeURIComponent(ticket)}`
       : '/account/subscription/context'
-    if (ticket || returnedOrder) {
-      const next = new URLSearchParams()
-      if (returnedOrder) next.set('out_trade_no', returnedOrder)
-      const query = next.toString()
-      window.history.replaceState(null, '', query ? `${window.location.pathname}?${query}` : window.location.pathname)
-    }
-    jsonApi<SubscriptionContext>(contextPath)
+    fetchSubscriptionContext(contextPath)
       .then(async (value) => {
         if (!active) return
         setContext(value)
+        if (ticket || (returnedOrder && !/^RI[a-f0-9]{32}$/i.test(returnedOrder))) {
+          const next = new URLSearchParams()
+          if (returnedOrder && !/^RI[a-f0-9]{32}$/i.test(returnedOrder)) next.set('out_trade_no', returnedOrder)
+          const query = next.toString()
+          window.history.replaceState(null, '', query ? `${window.location.pathname}?${query}` : window.location.pathname)
+        }
         if (!value.payments_enabled || !returnedOrder || !/^RI[a-f0-9]{32}$/i.test(returnedOrder)) return
         window.history.replaceState(null, '', window.location.pathname)
         let refreshed = await jsonApi<PaymentOrder>(`/account/payment-orders/${returnedOrder}/refresh`, {

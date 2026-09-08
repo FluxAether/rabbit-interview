@@ -31,6 +31,7 @@ export default defineConfig({
       '/v1': 'http://127.0.0.1:8787',
       '/internal': 'http://127.0.0.1:8787',
       '/.well-known': 'http://127.0.0.1:8787',
+      '/auth/portal': 'http://127.0.0.1:8787',
     },
   },
   preview: {
@@ -43,6 +44,7 @@ export default defineConfig({
       '/v1': 'http://127.0.0.1:8787',
       '/internal': 'http://127.0.0.1:8787',
       '/.well-known': 'http://127.0.0.1:8787',
+      '/auth/portal': 'http://127.0.0.1:8787',
     },
   },
 })

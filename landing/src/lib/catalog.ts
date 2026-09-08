@@ -30,7 +30,7 @@ const env = (import.meta as ImportMeta & {
   readonly env?: { readonly VITE_HOSTED_GATEWAY_URL?: string; readonly DEV?: boolean }
 }).env
 
-export const gateway = (env?.VITE_HOSTED_GATEWAY_URL?.trim() || (env?.DEV ? 'http://127.0.0.1:8787' : (typeof window === 'undefined' ? '' : window.location.origin))).replace(/\/$/, '')
+export const gateway = (env?.DEV ? (typeof window === 'undefined' ? '' : window.location.origin) : (env?.VITE_HOSTED_GATEWAY_URL?.trim() || (typeof window === 'undefined' ? '' : window.location.origin))).replace(/\/$/, '')
 
 export function sttMinutes(ms: number): number {
   return Math.round(Math.max(0, Number(ms) || 0) / 60_000)

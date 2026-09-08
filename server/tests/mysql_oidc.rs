@@ -305,6 +305,36 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
         StatusCode::BAD_REQUEST
     );
 
+    let portal_req = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/me/portal-session")
+        .header(header::AUTHORIZATION, format!("Bearer {}", rotated["access_token"].as_str().unwrap()))
+        .body(Body::empty())?;
+    let portal_res = app.clone().oneshot(portal_req).await?;
+    assert_eq!(portal_res.status(), StatusCode::OK);
+    let portal_bytes = portal_res.into_body().collect().await?.to_bytes().to_vec();
+    let portal_json: Value = serde_json::from_slice(&portal_bytes)?;
+    let portal_ticket = portal_json["ticket"].as_str().unwrap();
+
+    let portal_redir = send(&app, Method::GET, &format!("/auth/portal?ticket={portal_ticket}"), None).await?;
+    assert_eq!(portal_redir.0, StatusCode::SEE_OTHER);
+    let portal_cookie = portal_redir
+        .3
+        .as_deref()
+        .and_then(|header| header.split(';').next())
+        .expect("browser session cookie from portal redirect")
+        .to_owned();
+
+    let sub_ctx = send(&app, Method::GET, &format!("/account/subscription/context?ticket={portal_ticket}"), None).await?;
+    assert_eq!(sub_ctx.0, StatusCode::OK);
+    let sub_json: Value = serde_json::from_slice(&sub_ctx.1)?;
+    assert_eq!(sub_json["email"], email);
+
+    let sub_ctx_cookie = send_cookie(&app, Method::GET, "/account/subscription/context", &portal_cookie, None).await?;
+    assert_eq!(sub_ctx_cookie.0, StatusCode::OK);
+    let sub_cookie_json: Value = serde_json::from_slice(&sub_ctx_cookie.1)?;
+    assert_eq!(sub_cookie_json["email"], email);
+
     let logout_query = form(&[
         ("id_token_hint", rotated["id_token"].as_str().unwrap()),
         ("post_logout_redirect_uri", "rabbitinterview://auth/logout"),
