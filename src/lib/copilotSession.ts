@@ -1,12 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
-import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { emit, emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import {
-  closeDeepgramStream,
-  ensureAppleSttSources,
   generateSuggestionsStream,
-  sendAudioChunk,
-  startDeepgramStream,
   type SuggestionRequestType,
   type TranscriptBoundary,
 } from './llm'
@@ -14,11 +10,14 @@ import { loadAppSettings } from './settingsStore'
 import { openMicrophoneSettings, tryRequestMicrophone } from './permissions'
 import { deleteSetting, loadSetting, saveInterview, saveSetting } from './db'
 import {
+  applyCopilotSnapshotPatch,
+  createCopilotSnapshotPatch,
   createInitialSnapshot,
   reduceCopilotSnapshot,
   reconcileCopilotSnapshot,
   type CopilotSnapshot,
   type CopilotSnapshotAction,
+  type CopilotSnapshotPatch,
 } from './copilotSessionState'
 import { useAppStore, type Suggestion } from '../stores/useAppStore'
 import { createEmptyResumeWorkspace } from './resumeOptimizer'
@@ -29,6 +28,7 @@ import { createCopilotInterviewRecord, type SavedRecording } from './copilotArch
 import { buildRecentTurnsContext, collectCopilotTurns, scoreCopilotSession, type CopilotSessionScore } from './copilotScoring'
 import {
   getInterviewerCommitDelay,
+  getSpeechFinalGraceMs,
   isLikelyIncompleteInterviewPrompt,
   isNewInterviewQuestion,
   shouldHoldOpenUtterance,
@@ -37,16 +37,23 @@ import {
 } from './interviewerTurnDetector'
 import { MAX_RECORDING_SECONDS } from './recordingLimits'
 import {
+  markRealtimeEvent,
+  recordPatchEvent,
+  recordSnapshotEvent,
+  resetRealtimeTurnMetrics,
+} from './realtimeMetrics'
+import { startRealtimeStt, type RealtimeSttHandle } from './realtimeStt'
+import {
   applyVoiceTranscriptEvent,
   createVoiceEndpointState,
   isMinimumVoiceAnswer,
-  SPEECH_FINAL_GRACE_MS,
   transcriptFromEndpointState,
   type VoiceEndpointState,
 } from './mockInterviewVoiceEndpoint'
 
 const COMMAND_EVENT = 'copilot-session-command'
 const SNAPSHOT_EVENT = 'copilot-session-snapshot'
+const PATCH_EVENT = 'copilot-session-patch'
 const AMPLITUDE_EVENT = 'copilot-session-amplitude'
 const STREAM_PUBLISH_MS = 40
 const MAX_AUTO_CONTINUATIONS = 2
@@ -77,11 +84,6 @@ export interface CopilotStartConfig {
 }
 
 type CopilotAudioSource = 'system' | 'microphone'
-
-interface AudioSourceChunk {
-  source: CopilotAudioSource
-  samples: number[]
-}
 
 interface CopilotUtteranceState {
   endpoint: VoiceEndpointState
@@ -155,10 +157,13 @@ function splitSuggestions(text: string, category: string, idBase: number): Sugge
 
 class CopilotSessionHost {
   private snapshot: CopilotSnapshot = createInitialSnapshot()
+  private publishedSnapshot: CopilotSnapshot = this.snapshot
   private sessionSequence = 0
   private answerSequence = 0
   private messageSequence = 0
-  private deepgrams: Record<CopilotAudioSource, WebSocket | null> = {
+  private sttController: AbortController | null = null
+  private sttRestart: Promise<void> = Promise.resolve()
+  private stt: Record<CopilotAudioSource, RealtimeSttHandle | null> = {
     system: null,
     microphone: null,
   }
@@ -227,16 +232,30 @@ class CopilotSessionHost {
     if (next.messages !== previous.messages || next.question !== previous.question) {
       this.scheduleRecoverySave()
     }
-    if (action.type === 'stream-answer' && previous.messages.some((message) => message.id === action.suggestion.id && message.text)) {
-      if (this.streamPublishTimer === null) {
-        this.streamPublishTimer = globalThis.setTimeout(() => {
-          this.streamPublishTimer = null
-          void this.publish()
-        }, STREAM_PUBLISH_MS)
+
+    if (action.type === 'stream-answer') {
+      const previousText = previous.messages.find((message) => message.id === action.suggestion.id)?.text ?? ''
+      if (previousText && action.suggestion.text) {
+        if (this.streamPublishTimer === null) {
+          this.streamPublishTimer = globalThis.setTimeout(() => {
+            this.streamPublishTimer = null
+            void this.publishPatch()
+          }, STREAM_PUBLISH_MS)
+        }
+        return
       }
+      // Placeholder and first text are latency-sensitive: publish immediately.
+      void this.publishPatch()
       return
     }
-    // First text and completion/cancellation are immediate, including pending deltas.
+
+    if (action.type === 'message') {
+      // Interim transcript updates are one-row upserts and should not serialize history.
+      void this.publishPatch()
+      return
+    }
+
+    // Completion/cancellation and structural state changes are immediate full sync points.
     void this.publish()
   }
 
@@ -290,7 +309,7 @@ class CopilotSessionHost {
         targetRole: this.identity.targetRole,
         targetCompany: this.identity.targetCompany,
         isTestSession: this.identity.isTestSession,
-        archivePartial: Boolean(recordingError || scoreError),
+        archivePartial: Boolean(recordingError || scoreError || recording?.partial),
       },
     )
 
@@ -298,9 +317,10 @@ class CopilotSessionHost {
       const id = await saveInterview(record)
       useAppStore.getState().addHistory({ ...record, id })
       await deleteSetting(SESSION_RECOVERY_KEY).catch(() => {})
-      if (recordingError || scoreError) {
+      if (recordingError || scoreError || recording?.partial) {
         const parts = []
         if (recordingError) parts.push(`recording could not be saved: ${recordingError}`)
+        if (recording?.partial) parts.push('recording contains a dropped-audio gap')
         if (scoreError) parts.push(`score could not be generated: ${scoreError}`)
         this.transition({
           type: 'archive-error',
@@ -491,11 +511,34 @@ class CopilotSessionHost {
       globalThis.clearTimeout(this.streamPublishTimer)
       this.streamPublishTimer = null
     }
+    const target = this.snapshot
     const current = useAppStore.getState().copilot
-    if (force || this.snapshot.revision >= current.revision) {
-      useAppStore.getState().setCopilotSnapshot(this.snapshot)
+    if (force || target.revision >= current.revision) {
+      useAppStore.getState().setCopilotSnapshot(target)
     }
-    await emit(SNAPSHOT_EVENT, this.snapshot)
+    this.publishedSnapshot = target
+    recordSnapshotEvent()
+    await (typeof emitTo === 'function' ? emitTo('copilot', SNAPSHOT_EVENT, target).catch(() => emit(SNAPSHOT_EVENT, target)) : emit(SNAPSHOT_EVENT, target))
+  }
+
+  private async publishPatch(): Promise<void> {
+    if (this.streamPublishTimer !== null) {
+      globalThis.clearTimeout(this.streamPublishTimer)
+      this.streamPublishTimer = null
+    }
+    const target = this.snapshot
+    const patch = createCopilotSnapshotPatch(this.publishedSnapshot, target)
+    if (!patch) {
+      await this.publish()
+      return
+    }
+    const current = useAppStore.getState().copilot
+    if (target.revision >= current.revision) {
+      useAppStore.getState().setCopilotSnapshot(target)
+    }
+    this.publishedSnapshot = target
+    recordPatchEvent()
+    await (typeof emitTo === 'function' ? emitTo('copilot', PATCH_EVENT, patch).catch(() => emit(PATCH_EVENT, patch)) : emit(PATCH_EVENT, patch))
   }
 
   private writeRecoverySnapshot(): void {
@@ -603,6 +646,7 @@ class CopilotSessionHost {
     this.answering = false
     const sessionId = ++this.sessionSequence
     this.persistenceSessionId = globalThis.crypto.randomUUID()
+    resetRealtimeTurnMetrics()
     this.transition({ type: 'start', sessionId })
     this.sampleRate = 16_000
     this.messageSequence = 0
@@ -670,34 +714,32 @@ class CopilotSessionHost {
         throw new Error(capabilities.system_audio_reason || 'No audio capture mode is available')
       }
 
+      if (!this.isCurrent(sessionId) || (this.snapshot.phase as string) !== 'starting') return
       await this.installAudioListeners(sessionId)
       const sources: CopilotAudioSource[] = [
         ...(useSystemAudio ? ['system' as const] : []),
         ...(useMicrophone ? ['microphone' as const] : []),
       ]
-      await this.startDeepgrams(sessionId, sources, capabilities.sample_rate || 16_000)
-      if (!this.isCurrent(sessionId)) {
-        await this.cleanupRuntime()
-        return
-      }
-
+      if (!this.isCurrent(sessionId) || (this.snapshot.phase as string) !== 'starting') return
+      const controller = new AbortController()
+      this.sttController = controller
       const audioConfig = await invoke<{ sample_rate: number; mode: string; capture_id: number }>('start_audio_capture', {
-        useSystemAudio,
-        useMicrophone,
+        useSystemAudio, useMicrophone,
         deviceName: config.deviceName ?? settings.micDevice ?? null,
         captureOwner: 'copilot',
       })
-      this.captureId = audioConfig.capture_id
-      if (!this.isCurrent(sessionId)) {
-        await this.stopOwnedCapture()
-        await this.cleanupRuntime()
+      if (controller.signal.aborted || !this.isCurrent(sessionId)) {
+        await invoke('stop_audio_capture', { captureId: audioConfig.capture_id })
         return
       }
+      this.captureId = audioConfig.capture_id
+      await this.startDeepgrams(sessionId, sources, audioConfig.sample_rate || 16_000)
+      if (controller.signal.aborted || !this.isCurrent(sessionId)) return
       this.sampleRate = audioConfig.sample_rate || 16_000
       this.transition({ type: 'started', sessionId, mode: audioConfig.mode })
       this.scheduleLimitStop(sessionId)
     } catch (error) {
-      if (!this.isCurrent(sessionId)) return
+      if (!this.isCurrent(sessionId) || (this.snapshot.phase as string) !== 'starting') return
       await this.stopOwnedCapture()
       await this.cleanupRuntime()
       this.transition({
@@ -724,7 +766,7 @@ class CopilotSessionHost {
     const persistenceSessionId = this.persistenceSessionId
     this.transition({ type: 'stop' })
     this.stopPromise = (async () => {
-      this.closeDeepgrams()
+      this.sttController?.abort()
       await this.stopOwnedCapture()
       await this.cleanupRuntime()
       await this.archiveSession(archiveSnapshot, persistenceSessionId)
@@ -738,7 +780,8 @@ class CopilotSessionHost {
 
   private async cleanupRuntime(): Promise<void> {
     this.clearLimitTimer()
-    this.closeDeepgrams()
+    this.sttController?.abort()
+    await this.closeDeepgrams()
     this.resetUtterances()
     this.enabledSources = []
     this.unlisteners.splice(0).forEach((unlisten) => unlisten())
@@ -770,11 +813,11 @@ class CopilotSessionHost {
     ;(this.limitTimer as { unref?: () => void }).unref?.()
   }
 
-  private closeDeepgrams(): void {
-    closeDeepgramStream(this.deepgrams.system)
-    closeDeepgramStream(this.deepgrams.microphone)
-    this.deepgrams.system = null
-    this.deepgrams.microphone = null
+  private async closeDeepgrams(): Promise<void> {
+    const handles = [this.stt.system, this.stt.microphone]
+    this.stt.system = null
+    this.stt.microphone = null
+    await Promise.all(handles.map((handle) => handle?.stop()))
   }
 
   private resetUtterances(): void {
@@ -937,8 +980,12 @@ class CopilotSessionHost {
     }
     utterance.lastSealedText = text
     utterance.lastSealedAt = now
+    const questionId = utterance.openMessageId ?? undefined
     this.resetOpenUtterance(utterance)
-    if (source === 'system') this.scheduleInterviewerAnswer(sessionId, text, boundary)
+    if (source === 'system') {
+      markRealtimeEvent('turn.sealed', undefined, undefined, questionId)
+      this.scheduleInterviewerAnswer(sessionId, text, boundary)
+    }
     if (source === 'microphone') this.maybeRestartAnswerForSealedMicrophone(sessionId)
   }
 
@@ -967,6 +1014,8 @@ class CopilotSessionHost {
   ): void {
     if (!this.isCurrent(sessionId)) return
     const now = Date.now()
+    if (event.boundary === 'interim' && event.text.trim()) markRealtimeEvent('stt.firstInterim')
+    if (event.boundary === 'speech-final') markRealtimeEvent('stt.speechFinal')
     const incoming = event.text.trim()
     if (source === 'system' && incoming && this.isLikelyEcho(incoming, now)) return
     const utterance = this.transcripts[source]
@@ -995,7 +1044,7 @@ class CopilotSessionHost {
       return
     }
     if (update.endpoint === 'speech-final' && isMinimumVoiceAnswer(this.utteranceText(utterance))) {
-      this.scheduleSeal(sessionId, source, 'speech-final', SPEECH_FINAL_GRACE_MS)
+      this.scheduleSeal(sessionId, source, 'speech-final', getSpeechFinalGraceMs(this.utteranceText(utterance)))
     }
   }
 
@@ -1011,7 +1060,7 @@ class CopilotSessionHost {
     await this.cleanupRuntime()
     const listeners = await Promise.all([
       listen<{ sample_rate: number }>('audio-config', (event) => {
-        if (!this.isCurrent(sessionId)) return
+        if (!this.isCurrent(sessionId) || this.captureId === null) return
         const nextRate = event.payload.sample_rate || 16_000
         if (nextRate !== this.sampleRate) {
           this.sampleRate = nextRate
@@ -1019,10 +1068,6 @@ class CopilotSessionHost {
             if (this.isCurrent(sessionId)) void this.fail(sessionId, String(error))
           })
         }
-      }),
-      listen<AudioSourceChunk>('audio-source-chunk', (event) => {
-        if (!this.isCurrent(sessionId)) return
-        sendAudioChunk(this.deepgrams[event.payload.source], new Float32Array(event.payload.samples))
       }),
       listen<number>('audio-amplitude', (event) => {
         if (!this.isCurrent(sessionId)) return
@@ -1041,6 +1086,10 @@ class CopilotSessionHost {
         if (!this.isCurrent(sessionId)) return
         void this.stop({ reason: 'limit' })
       }),
+      listen<string>('audio-recording-error', (event) => {
+        if (!this.isCurrent(sessionId)) return
+        this.transition({ type: 'recoverable-error', sessionId, error: event.payload })
+      }),
     ])
 
     if (!this.isCurrent(sessionId)) {
@@ -1056,43 +1105,51 @@ class CopilotSessionHost {
     sources: CopilotAudioSource[],
     sampleRate: number,
   ): Promise<void> {
-    this.enabledSources = sources
-    await Promise.all(sources.map((source) => this.startDeepgram(sessionId, source, sampleRate)))
-    if (useAppStore.getState().settings?.sttProvider === 'apple') {
-      await ensureAppleSttSources(sources)
-    }
-  }
-
-  private async startDeepgram(
-    sessionId: number,
-    source: CopilotAudioSource,
-    sampleRate: number,
-  ): Promise<void> {
-    closeDeepgramStream(this.deepgrams[source])
-    this.clearUtteranceTimers(this.transcripts[source])
-    this.transcripts[source] = createUtteranceState()
-    this.deepgrams[source] = await startDeepgramStream(
-      (event) => this.handleTranscriptEvent(sessionId, source, event),
-      (error) => {
-        console.warn('[Copilot] Deepgram stream warning', error)
-        if (!this.isCurrent(sessionId)) return
-        const message = error instanceof Error ? error.message : String(error)
-        if (message) this.transition({ type: 'recoverable-error', sessionId, error: message })
-      },
-      sampleRate,
-      (socket) => {
-        if (!this.isCurrent(sessionId)) {
-          closeDeepgramStream(socket)
-          return
+    const controller = this.sttController
+    const captureId = this.captureId
+    if (!controller || controller.signal.aborted || captureId === null) return
+    const restart = this.sttRestart.catch(() => {}).then(async () => {
+      if (controller.signal.aborted || !this.isCurrent(sessionId)) return
+      this.enabledSources = sources
+      await this.closeDeepgrams()
+      const acquired: RealtimeSttHandle[] = []
+      try {
+        // Apple starts the complete source set on its first call. Subsequent calls attach.
+        const apple = useAppStore.getState().settings?.aiAccessMode !== 'hosted'
+          && useAppStore.getState().settings?.sttProvider === 'apple'
+        const open = async (source: CopilotAudioSource) => {
+          controller.signal.throwIfAborted()
+          this.clearUtteranceTimers(this.transcripts[source])
+          this.transcripts[source] = createUtteranceState()
+          const handle = await startRealtimeStt({
+            source, sources, sampleRate, sessionId, captureId, signal: controller.signal,
+            endpointingMs: COPILOT_ENDPOINTING_MS, utteranceEndMs: COPILOT_UTTERANCE_END_MS,
+          }, {
+            onTranscript: (event) => this.handleTranscriptEvent(sessionId, source, event),
+            onError: (error) => {
+              if (controller.signal.aborted || !this.isCurrent(sessionId)) return
+              this.transition({ type: 'recoverable-error', sessionId, error: String(error) })
+            },
+          })
+          acquired.push(handle)
+          if (controller.signal.aborted || !this.isCurrent(sessionId)) { await handle.stop(); return }
+          this.stt[source] = handle
+          markRealtimeEvent('stt.connected')
         }
-        this.deepgrams[source] = socket
-      },
-      {
-        endpointingMs: COPILOT_ENDPOINTING_MS,
-        utteranceEndMs: COPILOT_UTTERANCE_END_MS,
-        source,
-      },
-    )
+        if (apple) { for (const source of sources) await open(source) }
+        else {
+          const results = await Promise.allSettled(sources.map((source) => open(source).catch((error) => { controller.abort(); throw error })))
+          const failed = results.find((result) => result.status === 'rejected')
+          if (failed?.status === 'rejected') throw failed.reason
+        }
+      } catch (error) {
+        controller.abort()
+        await Promise.allSettled(acquired.map((handle) => handle.stop()))
+        throw error
+      }
+    })
+    this.sttRestart = restart
+    return restart
   }
 
   private buildContext(question: string, excludeReplyToId?: number): string {
@@ -1177,6 +1234,7 @@ class CopilotSessionHost {
 
     try {
       const context = this.buildContext(question)
+      markRealtimeEvent('llm.requestStart', undefined, idBase, replyToId)
       let fullText = ''
       let continuationAttempt = 0
 
@@ -1188,6 +1246,10 @@ class CopilotSessionHost {
           {
             onDelta: (_delta, accumulated) => {
               if (!this.isCurrent(sessionId) || controller.signal.aborted) return
+              const isFirstDelta = this.activeAnswer?.controller === controller && !this.activeAnswer.emittedText
+              if (isFirstDelta) {
+                markRealtimeEvent('llm.firstDelta', undefined, idBase)
+              }
               if (this.activeAnswer?.controller === controller) this.activeAnswer.emittedText = true
               fullText = attemptBaseText
                 ? mergeContinuationText(attemptBaseText, accumulated)
@@ -1478,6 +1540,17 @@ export async function mountCopilotSessionClient(): Promise<() => void> {
       useAppStore.getState().setCopilotSnapshot(reconcileCopilotSnapshot(current, event.payload))
     }
   })
+  const unlistenPatch = await listen<CopilotSnapshotPatch>(PATCH_EVENT, (event) => {
+    const current = useAppStore.getState().copilot
+    if (current.revision >= event.payload.revision) return
+    const patched = applyCopilotSnapshotPatch(current, event.payload)
+    if (patched) {
+      useAppStore.getState().setCopilotSnapshot(patched)
+      return
+    }
+    // A missed/coalesced patch is recoverable through the existing snapshot command.
+    void sendCopilotCommand({ type: 'request-snapshot' })
+  })
   const unlistenAmplitude = await listen<{ sessionId: number | null; amplitude: number }>(AMPLITUDE_EVENT, (event) => {
     const store = useAppStore.getState()
     if (event.payload.sessionId === store.copilot.sessionId) {
@@ -1485,7 +1558,7 @@ export async function mountCopilotSessionClient(): Promise<() => void> {
     }
   })
   await sendCopilotCommand({ type: 'request-snapshot' })
-  return () => { unlisten(); unlistenAmplitude() }
+  return () => { unlisten(); unlistenPatch(); unlistenAmplitude() }
 }
 
 export async function sendCopilotCommand(command: CopilotSessionCommand): Promise<void> {

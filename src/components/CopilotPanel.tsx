@@ -9,6 +9,7 @@ import { waveformSampleLevel } from "../lib/copilotWaveform"
 import { setCopilotWindowOpacity, type CopilotWindowStatus } from "../lib/copilotWindow"
 import { protectionMessageKey } from "../lib/copilotWindowState"
 import { extractKeyTakeaways } from "../lib/copilotPresentation"
+import { getRealtimePerformanceSnapshot, useRealtimeHudVisible, type RealtimePerformanceSnapshot } from "../lib/realtimeMetrics"
 import { loadAppSettings, saveAppSettings, type CopilotFontSize } from "../lib/settingsStore"
 import { useAppStore } from "../stores/useAppStore"
 
@@ -259,6 +260,20 @@ export default function CopilotPanel({
     const points = extractKeyTakeaways(latest.text)
     return points.length ? points : [latest.text]
   }, [copilot.messages, hudMode, floating])
+  const showRealtimeHud = useRealtimeHudVisible()
+  const [realtimeHud, setRealtimeHud] = useState<RealtimePerformanceSnapshot | null>(null)
+  useEffect(() => {
+    if (!showRealtimeHud || !running) return
+    let cancelled = false
+    const tick = () => {
+      void getRealtimePerformanceSnapshot().then((snapshot) => {
+        if (!cancelled) setRealtimeHud(snapshot)
+      })
+    }
+    tick()
+    const timer = window.setInterval(tick, 1000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [running, showRealtimeHud])
 
   return (
     <section
@@ -473,6 +488,16 @@ export default function CopilotPanel({
 
       <CopilotChat key={copilot.startedAt ?? "idle"} messages={copilot.messages} showMyBubbles={showMyBubbles}
         fontSize={fontSize} running={running} generatingReplyToIds={copilot.generatingReplyToIds} floating={floating} visible={!floating || windowStatus?.visible !== false} />
+      {showRealtimeHud && realtimeHud && (
+        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-[var(--bg-subtle)] px-2.5 py-2 font-mono text-[11px] text-[var(--text-muted)]" aria-label={t("copilot.realtime.hud")}>
+          <span>IPC {realtimeHud.audioIpcKbPerSecond.toFixed(1)} KB/s</span>
+          <span>STT {realtimeHud.sttQueueMs.toFixed(0)} ms</span>
+          <span>Rec {realtimeHud.recorderQueueMs.toFixed(0)} ms</span>
+          <span>Drop {realtimeHud.droppedAudioMs.toFixed(0)} ms</span>
+          <span>TTFT {realtimeHud.llmTtftMs ?? "—"}</span>
+          <span>E2E {realtimeHud.lastTurnE2eMs ?? "—"}</span>
+        </div>
+      )}
 
       {copilot.answerStatus !== "idle" && (
         <div

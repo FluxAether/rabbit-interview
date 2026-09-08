@@ -1,5 +1,6 @@
 mod audio;
 mod copilot_window;
+mod realtime_metrics;
 mod secure_store;
 mod speech;
 mod stt;
@@ -13,12 +14,14 @@ use copilot_window::{
     get_copilot_window_status, hide_copilot_window, set_copilot_window_opacity,
     show_copilot_window, toggle_copilot_window,
 };
+use realtime_metrics::{get_realtime_metrics, record_realtime_event, reset_realtime_metrics};
 use secure_store::{delete_secure_secret, load_secure_secret, save_secure_secret};
 use speech::{speak_text, stop_speaking};
 use stt::apple::{
     get_apple_stt_status, get_microphone_permission_status, request_microphone_permission_command,
     start_apple_stt, stop_apple_stt, test_apple_stt,
 };
+use stt::realtime::{set_realtime_stt_accept_audio, start_realtime_stt, stop_realtime_stt};
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
@@ -72,6 +75,9 @@ pub fn run() {
             export_audio_recording,
             get_audio_capabilities,
             list_audio_devices,
+            get_realtime_metrics,
+            record_realtime_event,
+            reset_realtime_metrics,
             show_copilot_window,
             hide_copilot_window,
             toggle_copilot_window,
@@ -83,6 +89,9 @@ pub fn run() {
             start_apple_stt,
             stop_apple_stt,
             test_apple_stt,
+            start_realtime_stt,
+            stop_realtime_stt,
+            set_realtime_stt_accept_audio,
             get_microphone_permission_status,
             request_microphone_permission_command,
             load_secure_secret,
@@ -129,6 +138,7 @@ pub fn run() {
                 audio::stop_audio_capture_and_wait();
                 speech::stop_current();
                 stt::apple::stop();
+                stt::realtime::stop_all();
             }
         });
 }

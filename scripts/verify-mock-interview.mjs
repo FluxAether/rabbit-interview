@@ -33,7 +33,7 @@ const checks = [
   [!page.includes('Math.random'), 'random scoring removed'],
   [!page.includes("role: 'Product Designer'"), 'fixed demo role removed'],
   [page.includes('generateQuestionForSlot') && page.includes('evaluateMockTurn') && page.includes('decideNextAction'), 'planned interview flow wired'],
-  [voice.includes('startDeepgramStream') && voice.includes('ensureAppleSttSources') && voice.includes("invoke<AudioConfig>('start_audio_capture'"), 'voice runtime owns microphone transcription'],
+  [voice.includes('startRealtimeStt') && voice.includes("invoke<AudioConfig>('start_audio_capture'"), 'voice runtime owns microphone transcription'],
   [page.includes('mockInterviewVoiceSession.start') && page.includes('mockInterviewVoiceSession.ask'), 'page delegates voice turns to voice runtime'],
   [!page.includes('startDeepgramStream') && !page.includes("listen<AudioChunk>('audio-source-chunk'"), 'page no longer owns STT transport'],
   [page.includes("invoke('speak_text'"), 'text fallback speech wired'],

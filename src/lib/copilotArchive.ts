@@ -14,6 +14,7 @@ export interface SavedRecording {
   path: string
   duration_seconds: number
   sample_rate: number
+  partial?: boolean
 }
 
 export function generateCopilotSessionTitle(

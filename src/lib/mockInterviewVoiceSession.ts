@@ -1,13 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { SupportedLanguage } from '../i18n/types'
-import {
-  closeDeepgramStream,
-  ensureAppleSttSources,
-  sendAudioChunk,
-  startDeepgramStream,
-  type DeepgramTranscriptEvent,
-} from './llm'
+import { type DeepgramTranscriptEvent } from './llm'
+import { startRealtimeStt, type RealtimeSttHandle } from './realtimeStt'
 import { tryRequestMicrophone } from './permissions'
 import {
   applyVoiceTranscriptEvent,
@@ -64,11 +59,6 @@ export type MockInterviewVoiceEvent =
 
 type VoiceListener = (event: MockInterviewVoiceEvent) => void
 
-interface AudioChunk {
-  source: 'system' | 'microphone'
-  samples: number[]
-}
-
 interface AudioConfig {
   sample_rate: number
   mode: string
@@ -90,7 +80,7 @@ export class MockInterviewVoiceSession {
   private snapshot = createMockInterviewVoiceSnapshot()
   private readonly listeners = new Set<VoiceListener>()
   private config: MockInterviewVoiceConfig | null = null
-  private socket: WebSocket | null = null
+  private stt: RealtimeSttHandle | null = null
   private unlisteners: UnlistenFn[] = []
   private sampleRate = 16_000
   private captureId: number | null = null
@@ -102,6 +92,7 @@ export class MockInterviewVoiceSession {
   private runtimeGeneration = 0
   private answerGeneration = 0
   private finalizedAnswerGeneration = -1
+  private sttController: AbortController | null = null
   private startPromise: Promise<void> | null = null
   private stopPromise: Promise<SavedRecording | null> | null = null
 
@@ -112,7 +103,7 @@ export class MockInterviewVoiceSession {
   }
 
   async start(config: MockInterviewVoiceConfig): Promise<void> {
-    if (this.snapshot.captureActive && this.socket) return
+    if (this.snapshot.captureActive && this.stt) return
     if (this.startPromise) return this.startPromise
     if (this.stopPromise) await this.stopPromise
 
@@ -125,7 +116,7 @@ export class MockInterviewVoiceSession {
 
   async ask(text: string, options: { preserveTranscript?: boolean } = {}): Promise<void> {
     const config = this.config
-    if (!config || !this.snapshot.captureActive || !this.socket) {
+    if (!config || !this.snapshot.captureActive || !this.stt) {
       throw new Error('Voice session is not ready.')
     }
 
@@ -133,6 +124,7 @@ export class MockInterviewVoiceSession {
     const answerGeneration = ++this.answerGeneration
     this.finalizedAnswerGeneration = -1
     this.acceptingAudio = false
+    await this.stt?.setAcceptAudio(false)
     this.clearFinalizeTimer()
     if (!options.preserveTranscript) this.endpoint = createVoiceEndpointState()
     this.updateSnapshot({
@@ -160,6 +152,8 @@ export class MockInterviewVoiceSession {
 
     if (!this.isCurrent(runtimeGeneration, answerGeneration)) return
     this.acceptingAudio = true
+    await this.stt?.setAcceptAudio(true)
+    if (!this.isCurrent(runtimeGeneration, answerGeneration)) return
     this.updateSnapshot({
       phase: 'listening',
       amplitude: 0,
@@ -168,16 +162,17 @@ export class MockInterviewVoiceSession {
   }
 
   finalizeAnswer(): void {
-    this.finalizeCurrentAnswer('manual', true)
+    void this.finalizeCurrentAnswer('manual', true)
   }
 
   restartAnswer(): void {
-    if (!this.snapshot.captureActive || !this.socket) return
+    if (!this.snapshot.captureActive || !this.stt) return
     this.answerGeneration += 1
     this.finalizedAnswerGeneration = -1
     this.clearFinalizeTimer()
     this.endpoint = createVoiceEndpointState()
     this.acceptingAudio = true
+    void this.stt?.setAcceptAudio(true).catch((error) => this.fail(String(error)))
     this.updateSnapshot({
       phase: 'listening',
       finalTranscript: '',
@@ -222,31 +217,25 @@ export class MockInterviewVoiceSession {
       await this.installAudioListeners(runtimeGeneration)
       if (runtimeGeneration !== this.runtimeGeneration) return
 
+      const controller = new AbortController()
+      this.sttController = controller
       const audioConfig = await invoke<AudioConfig>('start_audio_capture', {
-        useSystemAudio: false,
-        useMicrophone: true,
-        deviceName: config.microphoneDevice,
-        captureOwner: 'mock-interview',
+        useSystemAudio: false, useMicrophone: true,
+        deviceName: config.microphoneDevice, captureOwner: 'mock-interview',
       })
+      if (controller.signal.aborted || runtimeGeneration !== this.runtimeGeneration) {
+        await invoke('stop_audio_capture', { captureId: audioConfig.capture_id })
+        return
+      }
       this.captureId = audioConfig.capture_id
-      if (runtimeGeneration !== this.runtimeGeneration) {
-        await this.stopOwnedCapture()
-        return
-      }
-
       this.sampleRate = audioConfig.sample_rate || 16_000
-      this.updateSnapshot({ captureActive: true })
-      this.socket = await this.openDeepgram(runtimeGeneration, this.sampleRate)
-      if (this.config && this.socket && (this.socket as { __sttProvider?: string }).__sttProvider === 'apple') {
-        await ensureAppleSttSources(['microphone'], this.config.language)
-      }
-      if (runtimeGeneration !== this.runtimeGeneration) {
-        closeDeepgramStream(this.socket)
-        this.socket = null
-        await this.stopOwnedCapture()
+      const stt = await this.openDeepgram(runtimeGeneration, this.sampleRate)
+      if (controller.signal.aborted || runtimeGeneration !== this.runtimeGeneration) {
+        await stt.stop()
         return
       }
-
+      this.stt = stt
+      this.updateSnapshot({ captureActive: true })
       this.updateSnapshot({ phase: 'paused', error: null })
     } catch (error) {
       if (runtimeGeneration !== this.runtimeGeneration) return
@@ -258,6 +247,7 @@ export class MockInterviewVoiceSession {
   }
 
   private async stopRuntime(saveRecording: boolean, preserveRecording: boolean): Promise<SavedRecording | null> {
+    this.sttController?.abort()
     this.runtimeGeneration += 1
     this.answerGeneration += 1
     this.acceptingAudio = false
@@ -290,11 +280,6 @@ export class MockInterviewVoiceSession {
   private async installAudioListeners(runtimeGeneration: number): Promise<void> {
     this.removeAudioListeners()
     const listeners = await Promise.all([
-      listen<AudioChunk>('audio-source-chunk', event => {
-        if (runtimeGeneration !== this.runtimeGeneration) return
-        if (!this.acceptingAudio || event.payload.source !== 'microphone') return
-        sendAudioChunk(this.socket, new Float32Array(event.payload.samples))
-      }),
       listen<number>('audio-amplitude', event => {
         if (runtimeGeneration !== this.runtimeGeneration || !this.acceptingAudio) return
         const amplitude = Math.max(0, Math.min(1, Number(event.payload) || 0))
@@ -315,6 +300,10 @@ export class MockInterviewVoiceSession {
         if (runtimeGeneration !== this.runtimeGeneration) return
         this.emit({ type: 'limit-reached' })
       }),
+      listen<string>('audio-recording-error', event => {
+        if (runtimeGeneration !== this.runtimeGeneration) return
+        this.fail(event.payload)
+      }),
     ])
 
     if (runtimeGeneration !== this.runtimeGeneration) {
@@ -324,24 +313,26 @@ export class MockInterviewVoiceSession {
     this.unlisteners.push(...listeners)
   }
 
-  private async openDeepgram(runtimeGeneration: number, sampleRate: number): Promise<WebSocket> {
+  private async openDeepgram(runtimeGeneration: number, sampleRate: number): Promise<RealtimeSttHandle> {
     const config = this.config
     if (!config) throw new Error('Voice session configuration is missing.')
-    return startDeepgramStream(
-      event => this.handleTranscript(runtimeGeneration, event),
-      error => {
-        if (runtimeGeneration !== this.runtimeGeneration) return
-        console.warn('[MockInterviewVoice] Deepgram warning', error)
+    return startRealtimeStt(
+      {
+        source: 'microphone',
+        sampleRate,
+        sessionId: runtimeGeneration,
+        captureId: this.captureId!,
+        signal: this.sttController?.signal,
+        acceptAudio: false,
+        language: config.language,
       },
-      sampleRate,
-      next => {
-        if (runtimeGeneration !== this.runtimeGeneration) {
-          closeDeepgramStream(next)
-          return
-        }
-        this.socket = next
+      {
+        onTranscript: event => this.handleTranscript(runtimeGeneration, event),
+        onError: error => {
+          if (runtimeGeneration !== this.runtimeGeneration) return
+          console.warn('[MockInterviewVoice] Deepgram warning', error)
+        },
       },
-      { language: config.language, source: 'microphone' },
     )
   }
 
@@ -350,18 +341,19 @@ export class MockInterviewVoiceSession {
     const wasAcceptingAudio = this.acceptingAudio
     this.acceptingAudio = false
     this.updateSnapshot({ amplitude: 0 })
-    closeDeepgramStream(this.socket)
-    this.socket = null
+    await this.stt?.stop()
+    this.stt = null
     this.sampleRate = sampleRate
 
     try {
       const next = await this.openDeepgram(runtimeGeneration, sampleRate)
       if (runtimeGeneration !== this.runtimeGeneration) {
-        closeDeepgramStream(next)
+        await next.stop()
         return
       }
-      this.socket = next
+      this.stt = next
       this.acceptingAudio = wasAcceptingAudio
+      await this.stt.setAcceptAudio(wasAcceptingAudio)
     } catch (error) {
       if (runtimeGeneration !== this.runtimeGeneration) return
       this.fail(error instanceof Error ? error.message : String(error))
@@ -390,7 +382,7 @@ export class MockInterviewVoiceSession {
 
     const finalText = transcriptFromEndpointState(this.endpoint)
     if (update.endpoint === 'utterance-end') {
-      if (isMinimumVoiceAnswer(finalText)) this.finalizeCurrentAnswer('utterance-end', false)
+      if (isMinimumVoiceAnswer(finalText)) void this.finalizeCurrentAnswer('utterance-end', false)
       return
     }
 
@@ -403,16 +395,16 @@ export class MockInterviewVoiceSession {
           || answerGeneration !== this.answerGeneration
           || !this.acceptingAudio
         ) return
-        this.finalizeCurrentAnswer('speech-final', false)
+        void this.finalizeCurrentAnswer('speech-final', false)
       }, SPEECH_FINAL_GRACE_MS)
       ;(this.finalizeTimer as { unref?: () => void }).unref?.()
     }
   }
 
-  private finalizeCurrentAnswer(
+  private async finalizeCurrentAnswer(
     reason: 'utterance-end' | 'speech-final' | 'manual',
     includeInterim: boolean,
-  ): void {
+  ): Promise<void> {
     if (!this.acceptingAudio) return
     if (this.finalizedAnswerGeneration === this.answerGeneration) return
 
@@ -437,6 +429,9 @@ export class MockInterviewVoiceSession {
       interimTranscript: '',
       amplitude: 0,
     })
+    try { await this.stt?.setAcceptAudio(false) }
+    catch (error) { this.fail(String(error)); return }
+    if (answerGeneration !== this.answerGeneration) return
     this.emit({ type: 'answer-final', text, startedAt, endedAt, reason })
 
     if (answerGeneration === this.answerGeneration && this.snapshot.phase === 'finalizing') {
@@ -444,15 +439,15 @@ export class MockInterviewVoiceSession {
     }
   }
 
-  private async cleanupRuntime(stopCapture: boolean): Promise<void> {
+  private async cleanupRuntime(_stopCapture: boolean): Promise<void> {
+    this.sttController?.abort()
     this.acceptingAudio = false
     this.clearFinalizeTimer()
-    closeDeepgramStream(this.socket)
-    this.socket = null
+    const stt = this.stt
+    this.stt = null
+    await stt?.stop()
     this.removeAudioListeners()
-    if (stopCapture || this.snapshot.captureActive) {
-      await this.stopOwnedCapture()
-    }
+    await this.stopOwnedCapture()
     this.updateSnapshot({ captureActive: false, amplitude: 0 })
   }
 
@@ -479,6 +474,7 @@ export class MockInterviewVoiceSession {
 
   private fail(error: string): void {
     this.acceptingAudio = false
+    void this.stt?.setAcceptAudio(false).catch((cause) => console.warn('Unable to pause STT', cause))
     this.clearFinalizeTimer()
     this.updateSnapshot({ phase: 'error', amplitude: 0, error })
     this.emit({ type: 'error', error })

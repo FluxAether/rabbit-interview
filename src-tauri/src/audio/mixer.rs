@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::VecDeque;
 
 const SYSTEM_GAIN_WHEN_MIXED: f32 = 1.0;
 const MICROPHONE_GAIN_WHEN_MIXED: f32 = 0.25;
-// Dual-source alignment only needs a short holdback window. Sleep/wake backlog
-// otherwise becomes an O(n log n) BTreeMap storm and multi-second silence fill.
+// Dual-source alignment only needs a short holdback window. The ring stays bounded
+// to this lag after each drain, including when one source stalls.
 const MAX_PENDING_SECONDS: f64 = 0.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,7 +27,8 @@ pub(crate) struct TimedAudioMixer {
     system_progress: Option<i64>,
     microphone_progress: Option<i64>,
     next_frame: Option<i64>,
-    pending: BTreeMap<i64, MixedFrame>,
+    pending_start: Option<i64>,
+    pending: VecDeque<MixedFrame>,
 }
 
 impl TimedAudioMixer {
@@ -41,7 +42,8 @@ impl TimedAudioMixer {
             system_progress: None,
             microphone_progress: None,
             next_frame: None,
-            pending: BTreeMap::new(),
+            pending_start: None,
+            pending: VecDeque::new(),
         }
     }
 
@@ -79,15 +81,84 @@ impl TimedAudioMixer {
         samples.into_iter().map(Self::clamp_sample).collect()
     }
 
-    fn drop_stale_pending(&mut self, completed_through: i64) {
-        let max_pending = ((f64::from(self.sample_rate) * MAX_PENDING_SECONDS).round() as i64).max(1);
-        let keep_from = completed_through.saturating_sub(max_pending);
-        while self
-            .pending
-            .first_key_value()
-            .is_some_and(|(frame, _)| *frame < keep_from)
-        {
-            self.pending.pop_first();
+    fn clear_pending(&mut self) {
+        self.pending.clear();
+        self.pending_start = None;
+    }
+
+    fn trim_pending_before(&mut self, keep_from: i64) {
+        let Some(start) = self.pending_start else {
+            return;
+        };
+        if keep_from <= start {
+            return;
+        }
+        let remove = (keep_from - start).min(self.pending.len() as i64) as usize;
+        self.pending.drain(..remove);
+        if self.pending.is_empty() {
+            self.pending_start = None;
+        } else {
+            self.pending_start = Some(start + remove as i64);
+        }
+    }
+
+    fn ensure_pending_range(&mut self, start_frame: i64, end_frame: i64) {
+        if end_frame <= start_frame {
+            return;
+        }
+        if self.pending.is_empty() {
+            self.pending_start = Some(start_frame);
+            self.pending
+                .resize_with((end_frame - start_frame) as usize, MixedFrame::default);
+            return;
+        }
+
+        let current_start = self
+            .pending_start
+            .expect("non-empty ring has a start frame");
+        if start_frame < current_start {
+            let prepend = (current_start - start_frame) as usize;
+            self.pending.reserve(prepend);
+            for _ in 0..prepend {
+                self.pending.push_front(MixedFrame::default());
+            }
+            self.pending_start = Some(start_frame);
+        }
+
+        let ring_start = self.pending_start.expect("ring start set above");
+        let current_end = ring_start.saturating_add(self.pending.len() as i64);
+        if end_frame > current_end {
+            self.pending
+                .resize_with((end_frame - ring_start) as usize, MixedFrame::default);
+        }
+    }
+
+    fn insert_samples(&mut self, source: AudioSource, start_frame: i64, samples: Vec<f32>) {
+        let Some(end_frame) = start_frame.checked_add(samples.len() as i64) else {
+            return;
+        };
+        let skip = self
+            .next_frame
+            .map_or(0, |next| next.saturating_sub(start_frame).max(0)) as usize;
+        if skip >= samples.len() {
+            return;
+        }
+        let start_frame = start_frame + skip as i64;
+        self.ensure_pending_range(start_frame, end_frame);
+        let ring_start = self.pending_start.unwrap_or(start_frame);
+        for (offset, sample) in samples.into_iter().skip(skip).enumerate() {
+            let frame_number = start_frame + offset as i64;
+            if self.next_frame.is_some_and(|next| frame_number < next) {
+                continue;
+            }
+            let index = (frame_number - ring_start) as usize;
+            let Some(frame) = self.pending.get_mut(index) else {
+                continue;
+            };
+            match source {
+                AudioSource::System => frame.system = Some(sample),
+                AudioSource::Microphone => frame.microphone = Some(sample),
+            }
         }
     }
 
@@ -101,18 +172,22 @@ impl TimedAudioMixer {
             return Vec::new();
         }
 
-        let start_frame = (timestamp_seconds * f64::from(self.sample_rate)).round() as i64;
+        let scaled = timestamp_seconds * f64::from(self.sample_rate);
+        if scaled < i64::MIN as f64 || scaled > i64::MAX as f64 {
+            return Vec::new();
+        }
+        let start_frame = scaled.round() as i64;
         let Some(end_frame) = start_frame.checked_add(samples.len() as i64) else {
             return Vec::new();
         };
 
-        // Fast path: single-source capture never needs per-frame alignment.
         if let Some(expected) = self.single_source_enabled() {
             if source != expected {
                 return Vec::new();
             }
             return self.push_single_source(source, samples);
         }
+
         match source {
             AudioSource::System => {
                 self.first_system_frame.get_or_insert(start_frame);
@@ -131,26 +206,16 @@ impl TimedAudioMixer {
         }
 
         // After sleep/wake, wall-clock timestamps can jump far ahead of next_frame.
-        // Skip the multi-second silence hole instead of filling millions of zeros.
+        // Skip the multi-second silence hole instead of materializing it in the ring.
         if let Some(next_frame) = self.next_frame {
             let max_gap = self.max_source_lag().saturating_mul(4).max(1);
             if start_frame.saturating_sub(next_frame) > max_gap {
                 self.next_frame = Some(start_frame);
-                self.pending.clear();
+                self.clear_pending();
             }
         }
 
-        for (offset, sample) in samples.into_iter().enumerate() {
-            let frame_number = start_frame + offset as i64;
-            if self.next_frame.is_some_and(|next| frame_number < next) {
-                continue;
-            }
-            let frame = self.pending.entry(frame_number).or_default();
-            match source {
-                AudioSource::System => frame.system = Some(sample),
-                AudioSource::Microphone => frame.microphone = Some(sample),
-            }
-        }
+        self.insert_samples(source, start_frame, samples);
 
         let max_source_lag = self.max_source_lag();
         let first_frame = match (self.system_enabled, self.microphone_enabled) {
@@ -180,9 +245,7 @@ impl TimedAudioMixer {
         let completed_through = match (self.system_enabled, self.microphone_enabled) {
             (true, true) => match (self.system_progress, self.microphone_progress) {
                 (Some(system), Some(microphone)) => {
-                    let lagged_leader = system
-                        .max(microphone)
-                        .saturating_sub(max_source_lag);
+                    let lagged_leader = system.max(microphone).saturating_sub(max_source_lag);
                     system.min(microphone).max(lagged_leader)
                 }
                 (Some(system), None) => system.saturating_sub(max_source_lag),
@@ -194,12 +257,14 @@ impl TimedAudioMixer {
             (false, false) => return Vec::new(),
         };
         if completed_through <= next_frame {
-            self.drop_stale_pending(next_frame);
+            let keep_from = next_frame.saturating_sub(max_source_lag);
+            self.trim_pending_before(keep_from);
             return Vec::new();
         }
 
         let mixed = self.drain_until(completed_through);
-        self.drop_stale_pending(completed_through);
+        let keep_from = completed_through.saturating_sub(max_source_lag);
+        self.trim_pending_before(keep_from);
         mixed
     }
 
@@ -228,9 +293,36 @@ impl TimedAudioMixer {
         if completed_through <= next_frame {
             return Vec::new();
         }
+
+        self.trim_pending_before(next_frame);
         let mut mixed = Vec::with_capacity((completed_through - next_frame) as usize);
         for frame_number in next_frame..completed_through {
-            let frame = self.pending.remove(&frame_number).unwrap_or_default();
+            let frame = match self.pending_start {
+                Some(start) if start == frame_number => {
+                    let frame = self.pending.pop_front().unwrap_or_default();
+                    if self.pending.is_empty() {
+                        self.pending_start = None;
+                    } else {
+                        self.pending_start = Some(start + 1);
+                    }
+                    frame
+                }
+                Some(start) if start < frame_number => {
+                    self.trim_pending_before(frame_number);
+                    if self.pending_start == Some(frame_number) {
+                        let frame = self.pending.pop_front().unwrap_or_default();
+                        if self.pending.is_empty() {
+                            self.pending_start = None;
+                        } else {
+                            self.pending_start = Some(frame_number + 1);
+                        }
+                        frame
+                    } else {
+                        MixedFrame::default()
+                    }
+                }
+                _ => MixedFrame::default(),
+            };
             let sample = match (frame.system, frame.microphone) {
                 (Some(system), Some(microphone)) => {
                     system * SYSTEM_GAIN_WHEN_MIXED + microphone * MICROPHONE_GAIN_WHEN_MIXED
@@ -244,11 +336,31 @@ impl TimedAudioMixer {
         self.next_frame = Some(completed_through);
         mixed
     }
+    pub(crate) fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{AudioSource, TimedAudioMixer};
+
+    #[test]
+    fn stale_callbacks_do_not_expand_ring() {
+        let mut mixer = TimedAudioMixer::new(true, true, 16_000);
+        mixer.next_frame = Some(944_000);
+        mixer.insert_samples(AudioSource::System, 944_000, vec![0.5; 8_000]);
+        let capacity = mixer.pending.capacity();
+        for start in (0..16_000).step_by(160) {
+            mixer.insert_samples(AudioSource::Microphone, start, vec![0.2; 160]);
+            assert_eq!(mixer.pending.capacity(), capacity);
+            assert_eq!(mixer.pending.len(), 8_000);
+        }
+        mixer.insert_samples(AudioSource::Microphone, 943_998, vec![0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(mixer.pending[0].microphone, Some(0.3));
+        assert_eq!(mixer.pending[1].microphone, Some(0.4));
+        assert_eq!(mixer.pending.capacity(), capacity);
+    }
 
     #[test]
     fn mixes_aligned_sources_with_headroom() {
@@ -342,7 +454,9 @@ mod tests {
         assert!(mixer.pending.len() <= 50);
         let mixed = mixer.push(AudioSource::Microphone, 30.0, vec![0.0; 10]);
         assert_eq!(mixed.len(), 10);
-        assert!(mixed.iter().all(|sample| (*sample - 0.25).abs() < 0.000_001));
+        assert!(mixed
+            .iter()
+            .all(|sample| (*sample - 0.25).abs() < 0.000_001));
     }
 
     #[test]
@@ -352,5 +466,23 @@ mod tests {
         let second = mixer.push(AudioSource::Microphone, 120.0, vec![0.3, 0.4]);
         assert_eq!(first, vec![0.1, 0.2]);
         assert_eq!(second, vec![0.3, 0.4]);
+    }
+
+    #[test]
+    fn ring_stays_bounded_after_repeated_one_sided_pushes() {
+        let mut mixer = TimedAudioMixer::new(true, true, 16_000);
+        assert!(mixer
+            .push(AudioSource::System, 0.0, vec![0.25; 160])
+            .is_empty());
+        assert_eq!(
+            mixer
+                .push(AudioSource::Microphone, 0.0, vec![0.0; 160])
+                .len(),
+            160
+        );
+        for index in 1..20 {
+            let _ = mixer.push(AudioSource::System, index as f64 * 0.1, vec![0.25; 1_600]);
+            assert!(mixer.pending.len() <= 8_000);
+        }
     }
 }

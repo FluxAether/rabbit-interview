@@ -20,6 +20,9 @@ pub struct AppleSttStatus {
 
 #[derive(Clone, Serialize)]
 pub struct AppleTranscriptEvent {
+    #[serde(rename = "sessionId")]
+    pub session_id: Option<u64>,
+    pub generation: Option<u64>,
     pub source: String,
     pub text: String,
     pub is_final: bool,
@@ -28,23 +31,32 @@ pub struct AppleTranscriptEvent {
 
 #[derive(Clone, Serialize)]
 pub struct AppleSttErrorEvent {
+    #[serde(rename = "sessionId")]
+    pub session_id: Option<u64>,
+    pub generation: Option<u64>,
     pub source: String,
     pub message: String,
 }
 
 static APP: OnceCell<AppHandle> = OnceCell::new();
 static CALLBACKS_READY: AtomicBool = AtomicBool::new(false);
+// ponytail: the Swift bridge is global; serialize startup until it supports independent runtimes.
+static LIFECYCLE: Mutex<()> = Mutex::new(());
 static STARTED_SOURCES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 #[cfg(target_os = "macos")]
 #[link(name = "AppleSttBridge", kind = "static")]
 unsafe extern "C" {
     fn rabbit_apple_stt_set_callbacks(
-        transcript: extern "C" fn(*const c_char, *const c_char, bool, *const c_char),
-        error: extern "C" fn(*const c_char, *const c_char),
+        transcript: extern "C" fn(*const c_char, *const c_char, bool, *const c_char, u64),
+        error: extern "C" fn(*const c_char, *const c_char, u64),
     );
     fn rabbit_apple_stt_status_json() -> *mut c_char;
-    fn rabbit_apple_stt_start(sources: *const c_char, language: *const c_char) -> *mut c_char;
+    fn rabbit_apple_stt_start(
+        sources: *const c_char,
+        language: *const c_char,
+        generation: u64,
+    ) -> *mut c_char;
     fn rabbit_apple_stt_push(source: *const c_char, samples: *const c_float, count: c_int);
     fn rabbit_apple_stt_stop();
     fn rabbit_apple_stt_free_string(ptr: *mut c_char);
@@ -56,7 +68,9 @@ fn cstr_to_string(ptr: *const c_char) -> String {
     if ptr.is_null() {
         return String::new();
     }
-    unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
+    unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn take_c_string(ptr: *mut c_char) -> String {
@@ -76,13 +90,20 @@ extern "C" fn on_transcript(
     text: *const c_char,
     is_final: bool,
     boundary: *const c_char,
+    generation: u64,
 ) {
     let Some(app) = APP.get() else {
         return;
     };
+    let identity = super::realtime::apple_identity(&cstr_to_string(source));
+    if identity.map(|id| id.1).unwrap_or(0) != generation {
+        return;
+    }
     let _ = app.emit(
         TRANSCRIPT_EVENT,
         AppleTranscriptEvent {
+            session_id: identity.map(|id| id.0),
+            generation: identity.map(|id| id.1),
             source: cstr_to_string(source),
             text: cstr_to_string(text),
             is_final,
@@ -91,19 +112,24 @@ extern "C" fn on_transcript(
     );
 }
 
-extern "C" fn on_error(source: *const c_char, message: *const c_char) {
+extern "C" fn on_error(source: *const c_char, message: *const c_char, generation: u64) {
     let Some(app) = APP.get() else {
         return;
     };
+    let identity = super::realtime::apple_identity(&cstr_to_string(source));
+    if identity.map(|id| id.1).unwrap_or(0) != generation {
+        return;
+    }
     let _ = app.emit(
         ERROR_EVENT,
         AppleSttErrorEvent {
+            session_id: identity.map(|id| id.0),
+            generation: identity.map(|id| id.1),
             source: cstr_to_string(source),
             message: cstr_to_string(message),
         },
     );
 }
-
 
 pub fn microphone_permission_status() -> String {
     #[cfg(not(target_os = "macos"))]
@@ -155,11 +181,35 @@ pub fn status() -> AppleSttStatus {
     {
         let raw = unsafe { rabbit_apple_stt_status_json() };
         let json = take_c_string(raw);
-        serde_json::from_str(&json).unwrap_or_else(|_| unavailable_status("Apple STT status was invalid"))
+        serde_json::from_str(&json)
+            .unwrap_or_else(|_| unavailable_status("Apple STT status was invalid"))
     }
 }
 
 pub fn start(sources: &[String], language: &str) -> Result<(), String> {
+    let _lifecycle = LIFECYCLE.lock().unwrap_or_else(|e| e.into_inner());
+    if super::realtime::has_apple_sessions() {
+        return Err("Apple STT is owned by an active capture".into());
+    }
+    start_inner(sources, language, 0)
+}
+
+pub(crate) fn start_owned(
+    sources: &[String],
+    language: &str,
+    generation: u64,
+) -> Result<(), String> {
+    let _lifecycle = LIFECYCLE.lock().unwrap_or_else(|e| e.into_inner());
+    if !sources
+        .iter()
+        .all(|source| super::realtime::is_generation(source, generation))
+    {
+        return Err("Apple STT startup was cancelled".into());
+    }
+    start_inner(sources, language, generation)
+}
+
+fn start_inner(sources: &[String], language: &str, generation: u64) -> Result<(), String> {
     if sources.is_empty() {
         return Err("No Apple STT audio sources were requested".into());
     }
@@ -175,7 +225,7 @@ pub fn start(sources: &[String], language: &str) -> Result<(), String> {
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = sources;
+        let _ = (sources, generation);
         return Err("Apple on-device STT is only available on macOS".into());
     }
 
@@ -184,12 +234,15 @@ pub fn start(sources: &[String], language: &str) -> Result<(), String> {
         let csv = sources.join(",");
         let sources_c = CString::new(csv).map_err(|error| error.to_string())?;
         let language_c = CString::new(language).map_err(|error| error.to_string())?;
-        let error_ptr = unsafe { rabbit_apple_stt_start(sources_c.as_ptr(), language_c.as_ptr()) };
+        let error_ptr =
+            unsafe { rabbit_apple_stt_start(sources_c.as_ptr(), language_c.as_ptr(), generation) };
         let error = take_c_string(error_ptr);
         if !error.is_empty() {
             return Err(error);
         }
-        *STARTED_SOURCES.lock().unwrap_or_else(|error| error.into_inner()) = sources.to_vec();
+        *STARTED_SOURCES
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = sources.to_vec();
         Ok(())
     }
 }
@@ -215,6 +268,13 @@ pub fn push_samples(source: &str, samples: &[f32]) {
 }
 
 pub fn stop() {
+    let _lifecycle = LIFECYCLE.lock().unwrap_or_else(|e| e.into_inner());
+    if !super::realtime::has_apple_sessions() {
+        stop_inner();
+    }
+}
+
+fn stop_inner() {
     #[cfg(target_os = "macos")]
     unsafe {
         rabbit_apple_stt_stop();
@@ -238,7 +298,10 @@ pub fn get_apple_stt_status() -> AppleSttStatus {
 }
 
 #[tauri::command]
-pub async fn start_apple_stt(sources: Vec<String>, language: String) -> Result<AppleSttStatus, String> {
+pub async fn start_apple_stt(
+    sources: Vec<String>,
+    language: String,
+) -> Result<AppleSttStatus, String> {
     start(&sources, &language)?;
     Ok(status())
 }

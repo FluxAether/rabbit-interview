@@ -85,8 +85,8 @@ let callbackListener: Promise<() => void> | null = null
 let pendingLogin: PendingLogin | null = null
 let pendingLogoutState = ''
 let discoveryPromise: Promise<OidcDiscovery> | null = null
-const subscribers = new Set<() => void>()
-const activeConnections = new Set<() => void>()
+const subscribers = new Set<() => void | Promise<void>>()
+const activeConnections = new Set<() => void | Promise<void>>()
 
 async function loadStoredRefreshToken(): Promise<string | null> {
   const fromKeychain = await invoke<string | null>('load_secure_secret', { key: REFRESH_TOKEN_KEY }).catch(() => null)
@@ -230,8 +230,9 @@ export async function signInHosted(): Promise<void> {
 }
 
 export async function signOutHosted(): Promise<void> {
-  activeConnections.forEach((close) => close())
+  const closing = [...activeConnections]
   activeConnections.clear()
+  await Promise.allSettled(closing.map((close) => Promise.resolve().then(close)))
   const refreshToken = await loadStoredRefreshToken()
   const logoutIdToken = idToken
   const discovery = await getDiscovery().catch(() => null)
@@ -257,7 +258,7 @@ export async function signOutHosted(): Promise<void> {
   }
 }
 
-export function registerHostedConnection(close: () => void): () => void {
+export function registerHostedConnection(close: () => void | Promise<void>): () => void {
   activeConnections.add(close)
   return () => activeConnections.delete(close)
 }
@@ -405,7 +406,7 @@ async function applyToken(token: TokenResponse, discovery: OidcDiscovery, expect
   }
   await validateIdToken(token.id_token, token.access_token, discovery, expectedNonce)
   if (token.refresh_token) {
-    await invoke('save_secure_secret', { key: REFRESH_TOKEN_KEY, value: token.refresh_token })
+    await invoke('save_secure_secret', { key: REFRESH_TOKEN_KEY, value: token.refresh_token }).catch(() => {})
     await saveSecret(REFRESH_TOKEN_KEY, encryptSecret(token.refresh_token)).catch(() => {})
   }
   accessToken = token.access_token

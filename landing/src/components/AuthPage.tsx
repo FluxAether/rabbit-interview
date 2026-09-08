@@ -75,9 +75,9 @@ const primaryButton = 'inline-flex h-11 items-center justify-center rounded-xl b
 const secondaryButton = 'inline-flex h-11 items-center justify-center rounded-xl border border-white/15 bg-white/[0.04] px-5 text-sm font-medium text-ink disabled:cursor-not-allowed disabled:opacity-50'
 
 const env = (import.meta as ImportMeta & {
-  readonly env?: { readonly VITE_HOSTED_GATEWAY_URL?: string }
+  readonly env?: { readonly VITE_HOSTED_GATEWAY_URL?: string; readonly DEV?: boolean }
 }).env
-const gateway = (env?.VITE_HOSTED_GATEWAY_URL?.trim() || window.location.origin).replace(/\/$/, '')
+const gateway = (env?.VITE_HOSTED_GATEWAY_URL?.trim() || (env?.DEV ? 'http://127.0.0.1:8787' : window.location.origin)).replace(/\/$/, '')
 
 let cachedFragment: URLSearchParams | undefined
 
@@ -1349,10 +1349,10 @@ function AuthShell({
   )
 }
 
-export default function AuthPage() {
+export default function AuthPage({ path: propPath }: { path?: string } = {}) {
   const [lang, setLangState] = useState<AuthLang>(initialLang)
   const t = authCopy[lang]
-  const path = window.location.pathname
+  const path = propPath || window.location.pathname
 
   useEffect(() => {
     document.documentElement.lang = t.htmlLang

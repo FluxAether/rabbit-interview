@@ -36,6 +36,17 @@ export interface CopilotSnapshot {
   generatingReplyToIds: number[]
 }
 
+type CopilotPatchField = Exclude<keyof CopilotSnapshot, 'messages' | 'revision'>
+
+export interface CopilotSnapshotPatch {
+  baseRevision: number
+  revision: number
+  fields?: Partial<Omit<CopilotSnapshot, 'messages' | 'revision'>>
+  answerDelta?: { id: number; text: string; replyToId?: number }
+  upsertMessage?: CopilotMessage
+  removeMessageId?: number
+}
+
 export type CopilotSnapshotAction =
   | { type: 'start'; sessionId: number }
   | { type: 'started'; sessionId: number; mode: string }
@@ -102,6 +113,81 @@ function upsertMessage(messages: CopilotMessage[], message: CopilotMessage): Cop
     return next
   }
   return [...messages, message]
+}
+
+function sameMessage(left: CopilotMessage, right: CopilotMessage): boolean {
+  return left.id === right.id
+    && left.text === right.text
+    && left.role === right.role
+    && left.source === right.source
+    && left.createdAt === right.createdAt
+    && left.replyToId === right.replyToId
+}
+
+/** Build a constant-size patch when message changes can be expressed as one upsert/removal. */
+export function createCopilotSnapshotPatch(
+  previous: CopilotSnapshot,
+  next: CopilotSnapshot,
+): CopilotSnapshotPatch | null {
+  if (next.revision <= previous.revision) return null
+  const previousById = new Map(previous.messages.map((message) => [message.id, message]))
+  const nextById = new Map(next.messages.map((message) => [message.id, message]))
+  const changed = next.messages.filter((message) => {
+    const old = previousById.get(message.id)
+    return !old || !sameMessage(old, message)
+  })
+  const removed = previous.messages.filter((message) => !nextById.has(message.id))
+  if (changed.length > 1 || removed.length > 1) return null
+  const fields: Partial<Omit<CopilotSnapshot, 'messages' | 'revision'>> = {}
+  for (const key of Object.keys(next) as Array<keyof CopilotSnapshot>) {
+    if (key === 'messages' || key === 'revision') continue
+    const field = key as CopilotPatchField
+    if (previous[field] !== next[field]) fields[field] = next[field] as never
+  }
+  const upsert = changed[0]
+  const previousText = upsert ? previousById.get(upsert.id)?.text ?? '' : ''
+  const answerDelta = upsert?.role === 'assistant' && upsert.source === 'llm' && previousText && upsert.text.startsWith(previousText)
+    ? { id: upsert.id, text: upsert.text.slice(previousText.length), replyToId: upsert.replyToId }
+    : undefined
+  return {
+    baseRevision: previous.revision,
+    revision: next.revision,
+    fields: Object.keys(fields).length ? fields : undefined,
+    answerDelta,
+    upsertMessage: answerDelta ? undefined : upsert,
+    removeMessageId: removed[0]?.id,
+  }
+}
+
+export function applyCopilotSnapshotPatch(
+  current: CopilotSnapshot,
+  patch: CopilotSnapshotPatch,
+): CopilotSnapshot | null {
+  if (current.revision !== patch.baseRevision) return null
+  let messages = current.messages
+  if (patch.removeMessageId != null) {
+    messages = messages.filter((message) => message.id !== patch.removeMessageId)
+  }
+  if (patch.answerDelta) {
+    const existing = messages.find((message) => message.id === patch.answerDelta?.id)
+    messages = upsertMessage(messages, {
+      id: patch.answerDelta.id,
+      role: 'assistant',
+      source: 'llm',
+      text: (existing?.text ?? '') + patch.answerDelta.text,
+      createdAt: existing?.createdAt ?? Date.now(),
+      replyToId: patch.answerDelta.replyToId ?? existing?.replyToId,
+    })
+  }
+  if (patch.upsertMessage) {
+    messages = upsertMessage(messages, patch.upsertMessage)
+  }
+  return {
+    ...current,
+    ...patch.fields,
+    messages,
+    revision: patch.revision,
+  }
 }
 
 /** Preserve unchanged row identities when a snapshot crosses the WebView boundary. */

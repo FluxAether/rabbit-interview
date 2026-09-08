@@ -45,6 +45,14 @@ export function shouldHoldOpenUtterance(text: string): boolean {
   return !TERMINAL_PUNCTUATION_PATTERN.test(normalized)
 }
 
+export function getSpeechFinalGraceMs(text: string): number {
+  const normalized = text.trim()
+  if (isLikelyIncompleteInterviewPrompt(normalized)) return 1_200
+  if (TERMINAL_PUNCTUATION_PATTERN.test(normalized) && isCompleteInterviewPrompt(normalized)) return 250
+  if (isCompleteInterviewPrompt(normalized)) return 500
+  return 900
+}
+
 export function getInterviewerCommitDelay(
   text: string,
   boundary: TranscriptBoundary,

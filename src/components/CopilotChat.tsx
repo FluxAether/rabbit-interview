@@ -5,6 +5,7 @@ import { shallow } from "zustand/vanilla/shallow"
 import { useTranslation } from "../i18n"
 import { extractKeyTakeaways, groupCopilotMessages } from "../lib/copilotPresentation"
 import { sendCopilotCommand } from "../lib/copilotSession"
+import { markRealtimeEvent } from "../lib/realtimeMetrics"
 import type { CopilotMessage } from "../lib/copilotSessionState"
 import type { CopilotFontSize } from "../lib/settingsStore"
 
@@ -23,6 +24,13 @@ const CopilotMessageRow = memo(function CopilotMessageRow({ message, fontSize, r
   const mine = message.role === "me"
   const assistant = message.role === "assistant"
   const isGeneratingAnswer = assistant && !message.text
+  const paintedAnswer = useRef<number | null>(null)
+  useEffect(() => {
+    if (assistant && message.text && paintedAnswer.current !== message.id) {
+      paintedAnswer.current = message.id
+      markRealtimeEvent('ui.firstPaint', undefined, message.id)
+    }
+  }, [assistant, message.id, message.text])
   const canCollapse = assistant && (message.text.length > 280 || message.text.split("\n").length > 8)
   const keyTakeaways = useMemo(() => assistant ? extractKeyTakeaways(message.text) : [], [assistant, message.text])
   const [copied, setCopied] = useState(false)

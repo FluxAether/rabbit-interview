@@ -69,7 +69,7 @@ const defaultCapability = source('src-tauri/capabilities/default.json')
 const tauriConfig = source('src-tauri/tauri.conf.json')
 const { recordingBytes } = loadTypeScriptModule('src/lib/recordingBytes.ts', ['recordingBytes'])
 const { waveformSampleLevel } = loadTypeScriptModule('src/lib/copilotWaveform.ts', ['waveformSampleLevel'])
-const copilotStateApi = loadTypeScriptModule('src/lib/copilotSessionState.ts', ['createInitialSnapshot', 'reduceCopilotSnapshot', 'orderCopilotMessagesForDisplay', 'reconcileCopilotSnapshot'])
+const copilotStateApi = loadTypeScriptModule('src/lib/copilotSessionState.ts', ['createInitialSnapshot', 'reduceCopilotSnapshot', 'orderCopilotMessagesForDisplay', 'reconcileCopilotSnapshot', 'createCopilotSnapshotPatch', 'applyCopilotSnapshotPatch'])
 const { groupCopilotMessages, extractKeyTakeaways } = loadTypeScriptModule('src/lib/copilotPresentation.ts', ['groupCopilotMessages', 'extractKeyTakeaways'], copilotStateApi)
 
 check(session.length > 0, 'single Copilot session host exists')
@@ -206,7 +206,7 @@ check(
 check(
   hostedAuth.includes('if (refreshPromise) return refreshPromise')
     && hostedAuth.includes("const REFRESH_TOKEN_KEY = 'HOSTED_REFRESH_TOKEN'")
-    && hostedAuth.includes("activeConnections.forEach((close) => close())")
+    && hostedAuth.includes("await Promise.allSettled(closing.map")
     && hostedAuth.includes("code_challenge_method', 'S256'")
     && hostedAuth.includes("/.well-known/openid-configuration")
     && hostedAuth.includes("'ui_locales'")
@@ -246,8 +246,7 @@ check(
 )
 check(!app.includes("listen<number[]>('audio-chunk'") && !page.includes("listen<number[]>('audio-chunk'"), 'views do not own audio listeners')
 check(
-  session.includes('startDeepgramStream')
-    && session.includes("listen<AudioSourceChunk>('audio-source-chunk'")
+  session.includes('startRealtimeStt')
     && session.includes("listen<number>('audio-amplitude'"),
   'session host owns STT and lightweight audio events',
 )
@@ -262,7 +261,14 @@ check(
     && !session.includes("invoke('stop_audio_capture').catch"),
   'Copilot can only stop the native capture it owns',
 )
-check(rustAudio.includes('"audio-source-chunk"') && session.includes("listen<AudioSourceChunk>('audio-source-chunk'"), 'system and microphone audio retain their source through transcription')
+check(rustAudio.includes('"audio-source-chunk"') && session.includes('startRealtimeStt'), 'system and microphone audio retain their source through transcription')
+const realtimeStt = source('src/lib/realtimeStt.ts')
+check(
+  realtimeStt.includes('interview_id: interviewId')
+    && realtimeStt.includes('crypto.randomUUID()')
+    && !realtimeStt.includes('interview_id: String(config.sessionId)'),
+  'hosted native STT sends UUID interview ids instead of numeric session ids',
+)
 check(sessionState.includes("'system-stt' | 'microphone-stt' | 'follow-up' | 'llm'"), 'chat messages retain their exact source')
 check(!db.includes('upsertCopilotMessage') && !db.includes('copilot_messages'), 'write-only copilot_messages path is removed')
 check(!session.includes('upsertCopilotMessage'), 'copilot session no longer writes per-message SQLite rows')
@@ -273,7 +279,8 @@ check(
   'stopping capture automatically archives the session and native recording',
 )
 check(
-  rustAudio.includes('live_recording: Mutex<Option<LiveRecording>>')
+  rustAudio.includes('live_recording: Mutex<Option<Arc<RecordingHandle>>>')
+    && rustAudio.includes('RecordingSink::start')
     && rustAudio.includes('append_live_recording')
     && rustAudio.includes('finalize_live_recording')
     && rustAudio.includes('save_audio_recording')
@@ -410,9 +417,9 @@ check(llm.includes('MAX_DEEPGRAM_BUFFERED_BYTES') && llm.includes('ws.bufferedAm
 check(llm.includes('KeepAlive') && llm.includes('scheduleDeepgramReconnect') && llm.includes('onSocketChange'), 'Deepgram streams keep alive and reconnect after disconnects')
 check(rustAudio.includes('24 * 60 * 60') && rustAudio.includes('begin_live_recording'), 'native live recording starts with the session and caps at 24 hours')
 check(
-  rustAudio.includes('notify_recording_limit')
-    && rustAudio.includes('"audio-recording-limit"')
-    && rustAudio.includes('limit_notified'),
+  source('src-tauri/src/audio/recording.rs').includes('notify_limit_if_needed')
+    && source('src-tauri/src/audio/recording.rs').includes('"audio-recording-limit"')
+    && source('src-tauri/src/audio/recording.rs').includes('limit_notified'),
   'native live recording emits a one-shot limit event at the 24-hour cap',
 )
 check(
@@ -1291,6 +1298,7 @@ const {
   shouldHoldOpenUtterance,
   shouldInterruptForInterviewerContinuation,
   shouldQueueSeparateInterviewerQuestion,
+  getSpeechFinalGraceMs,
 } = loadTypeScriptModule(
   'src/lib/interviewerTurnDetector.ts',
   [
@@ -1299,11 +1307,18 @@ const {
     'shouldHoldOpenUtterance',
     'shouldInterruptForInterviewerContinuation',
     'shouldQueueSeparateInterviewerQuestion',
+    'getSpeechFinalGraceMs',
   ],
 )
 check(
   getInterviewerCommitDelay('请介绍一下你上一个项目。', 'speech-final') === 180,
   'complete interview prompts use the fast commit path',
+)
+check(
+  getSpeechFinalGraceMs('请介绍一下你上一个项目。') === 250
+    && getSpeechFinalGraceMs('请介绍一下你上一个项目') === 500
+    && getSpeechFinalGraceMs('你负责什么，以及') === 1_200,
+  'speech-final grace shortens complete prompts and keeps incomplete prompts long',
 )
 check(
   isLikelyIncompleteInterviewPrompt('你负责什么，以及')
@@ -1688,6 +1703,7 @@ const copilotTurnDetector = loadTypeScriptModule(
     'isNewInterviewQuestion',
     'shouldHoldOpenUtterance',
     'shouldInterruptForInterviewerContinuation',
+    'getSpeechFinalGraceMs',
   ],
 )
 const uniqueMessages = (messages) => {
@@ -1706,6 +1722,7 @@ function createCopilotSessionHost(sessionId) {
     'src/lib/copilotSession.ts',
     ['CopilotSessionHost'],
     {
+      useAppStore: { getState: () => ({ settings: {} }) },
       createInitialSnapshot: () => ({
         sessionId,
         messages: [],
@@ -1731,9 +1748,21 @@ function createCopilotSessionHost(sessionId) {
         transcripts[options?.source || 'default'] = onTranscript
         return {}
       },
+      startRealtimeStt: async (config, handlers) => {
+        lastTranscript = handlers.onTranscript
+        transcripts[config.source || 'default'] = handlers.onTranscript
+        handlers.onReady?.()
+        return { stop: async () => {}, setAcceptAudio: async () => {} }
+      },
+      markRealtimeEvent: () => {},
+      recordSnapshotEvent: () => {},
+      recordPatchEvent: () => {},
+      resetRealtimeTurnMetrics: () => {},
     },
   )
   const host = new CopilotSessionHost()
+  host.captureId = 1
+  host.sttController = new AbortController()
   host.snapshot = {
     sessionId,
     messages: [],
@@ -1782,6 +1811,11 @@ function createCopilotSessionHost(sessionId) {
     createSessionIdentity: () => ({ isTestSession: false }),
     globalThis: timers.global, useAppStore: store,
     emit: async (name, payload) => { events.push({ name, payload }) },
+    markRealtimeEvent: () => {},
+    recordSnapshotEvent: () => {},
+    recordPatchEvent: () => {},
+    resetRealtimeTurnMetrics: () => {},
+    markFirstPaintAfterDelta: () => {},
     createRecoverySnapshot: (_identity, messages, question, startedAt) => messages.length ? { messages, question, startedAt } : null,
     SESSION_RECOVERY_KEY: 'test-recovery',
     saveSetting: async (_key, value) => { writes.push(JSON.parse(value)); lifecycle.push('write') },
@@ -1800,9 +1834,10 @@ function createCopilotSessionHost(sessionId) {
   stream(10, 'first')
   for (let i = 1; i <= 20; i++) stream(10, 'first' + '.'.repeat(i))
   host.transition({ type: 'amplitude', sessionId: 41, amplitude: 0.3 })
-  check(fullEvents().length === 2 && timers.pending(40).length === 1 && current.messages.at(-1).text === 'first', 'stream deltas share one publication timer and audio cannot leak buffered text')
+  const patchEvents = () => events.filter((event) => event.name === 'copilot-session-patch')
+  check((fullEvents().length + patchEvents().length) === 2 && timers.pending(40).length === 1 && current.messages.at(-1).text === 'first', 'stream deltas share one publication timer and audio cannot leak buffered text')
   await timers.runTimeout(40)
-  check(fullEvents().length === 3 && current.messages.at(-1).text === 'first' + '.'.repeat(20), 'stream publication flushes the latest accumulated text')
+  check(patchEvents().length >= 1 && current.messages.at(-1).text === 'first' + '.'.repeat(20), 'stream publication flushes the latest accumulated text')
   stream(10, 'penultimate')
   host.transition({ type: 'complete-answer', sessionId: 41, answerId: 10, answer: 'complete final text', suggestions: [], replyToId: 1 })
   check(current.messages.at(-1).text === 'complete final text' && timers.pending(40).length === 0, 'completion immediately flushes final text and cancels the stream timer')
@@ -1847,6 +1882,12 @@ function createCopilotSessionHost(sessionId) {
   check(current.amplitude === 0.7 && current.revision === 100 && current.messages === rows, 'floating audio events preserve chat identity and do not advance the full-snapshot revision')
   listeners.get('copilot-session-snapshot')({ payload: JSON.parse(JSON.stringify({ ...current, revision: 101, question: 'updated' })) })
   check(current.revision === 101 && current.question === 'updated' && current.messages === rows, 'a full floating snapshot still arrives after intervening meter events')
+  const patched = copilotStateApi.applyCopilotSnapshotPatch(current, copilotStateApi.createCopilotSnapshotPatch(current, {
+    ...current, revision: 102, question: 'patched', messages: [...current.messages, { id: 2, text: 'delta', role: 'assistant', source: 'llm', createdAt: 2 }],
+  }))
+  check(patched?.question === 'patched' && patched.messages.at(-1).text === 'delta' && patched.messages[0] === current.messages[0], 'a one-row patch updates only the changed message')
+  check(!copilotStateApi.createCopilotSnapshotPatch(current, { ...current, revision: 102, question: 'patched', messages: [...current.messages, { id: 2, text: 'delta', role: 'assistant', source: 'llm', createdAt: 2 }] })?.fields?.messages, 'a one-row patch does not reserialize the chat history')
+  check(copilotStateApi.applyCopilotSnapshotPatch(current, { baseRevision: 99, revision: 103, upsertMessage: current.messages[0] }) == null, 'a gapped patch is rejected so the client can resync')
   listeners.get('copilot-session-amplitude')({ payload: { sessionId: 60, amplitude: 0.1 } })
   listeners.get('copilot-session-snapshot')({ payload: { ...current, revision: 99, question: 'stale' } })
   check(current.amplitude === 0.7 && current.question === 'updated', 'floating client ignores old-session audio and stale snapshots')
@@ -1856,7 +1897,7 @@ function createCopilotSessionHost(sessionId) {
 
 const geminiHost = createCopilotSessionHost(7)
 const geminiMessages = geminiHost.messages
-await geminiHost.host.startDeepgram(7, 'microphone', 16_000)
+await geminiHost.host.startDeepgrams(7, ['microphone'], 16_000)
 copilotOnTranscript = geminiHost.onTranscript
 
 const geminiEvents = []
@@ -2085,7 +2126,7 @@ check(
 const deepgramHost = createCopilotSessionHost(8)
 const deepgramHostMessages = deepgramHost.messages
 const deepgramHostAnswers = deepgramHost.answers
-await deepgramHost.host.startDeepgram(8, 'system', 16_000)
+await deepgramHost.host.startDeepgrams(8, ['system'], 16_000)
 let deepgramHostOnTranscript = deepgramHost.onTranscript
 
 deepgramHostOnTranscript({ text: '请介绍一下你上一个项目', isFinal: true, boundary: 'speech-final' })
@@ -2174,7 +2215,7 @@ check(
   'the sliding hard cap force-seals an unfinished interviewer prompt',
 )
 
-await deepgramHost.host.startDeepgram(8, 'microphone', 16_000)
+await deepgramHost.host.startDeepgrams(8, ['microphone'], 16_000)
 deepgramHostOnTranscript = deepgramHost.onTranscript
 const micStart = uniqueMessages(deepgramHostMessages).length
 deepgramHostOnTranscript({ text: '我最近负责支付', isFinal: true, boundary: 'speech-final' })
@@ -2196,7 +2237,7 @@ check(
 )
 
 const appleHost = createCopilotSessionHost(10)
-await appleHost.host.startDeepgram(10, 'system', 16_000)
+await appleHost.host.startDeepgrams(10, ['system'], 16_000)
 appleHost.onTranscript({ text: '请介绍一下你上一个项目', isFinal: true, boundary: 'final' })
 appleHost.onTranscript({ text: '尤其是你负责的模块', isFinal: true, boundary: 'final' })
 appleHost.onTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
@@ -2276,8 +2317,7 @@ apple.api.closeDeepgramStream(appleMicSocket)
 const echoHost = createCopilotSessionHost(9)
 const echoMessages = echoHost.messages
 const echoAnswers = echoHost.answers
-await echoHost.host.startDeepgram(9, 'system', 16_000)
-await echoHost.host.startDeepgram(9, 'microphone', 16_000)
+await echoHost.host.startDeepgrams(9, ['system', 'microphone'], 16_000)
 const echoSystem = echoHost.transcripts.system
 const echoMic = echoHost.transcripts.microphone
 
@@ -2319,7 +2359,7 @@ restartHost.activeAnswer = {
   requestType: 'interviewer-question',
   emittedText: false,
 }
-await restartHost.startDeepgram(11, 'microphone', 16_000)
+await restartHost.startDeepgrams(11, ['microphone'], 16_000)
 let restartOnTranscript = restartHarness.onTranscript
 restartOnTranscript({ text: 'I enjoy product interviews and shipping desktop tools', isFinal: true, boundary: 'speech-final' })
 restartOnTranscript({ text: '', isFinal: false, boundary: 'utterance-end' })
@@ -2501,6 +2541,10 @@ function createKeyStoreHarness({
     globalThis: timers.global,
     useAppStore: store,
     emit: async () => {},
+    markRealtimeEvent: () => {},
+    recordSnapshotEvent: () => {},
+    recordPatchEvent: () => {},
+    resetRealtimeTurnMetrics: () => {},
     createRecoverySnapshot: () => null,
     SESSION_RECOVERY_KEY: 'test',
     saveSetting: async () => {},
@@ -2562,6 +2606,8 @@ check(tauriConfig.includes('thomas92118/rabbit-interview'), 'updater points at t
     'admin page loads and switches the global hosted STT and LLM routes',
   )
 }
+
+await import('./verify-realtime-lifecycle.mjs')
 
 console.log(`=== RESULT: ${passed} passed, ${failed} failed ===`)
 if (failed > 0) process.exit(1)

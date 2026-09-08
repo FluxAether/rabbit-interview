@@ -7,7 +7,7 @@ const landingRoot = fileURLToPath(new URL('.', import.meta.url))
 export default defineConfig({
   plugins: [react()],
   root: landingRoot,
-  envDir: fileURLToPath(new URL("..", import.meta.url)),
+  envDir: fileURLToPath(new URL("../server", import.meta.url)),
   css: {
     postcss: landingRoot,
   },
@@ -25,10 +25,24 @@ export default defineConfig({
     port: 4174,
     strictPort: true,
     host: true,
+    proxy: {
+      '/oauth2': 'http://127.0.0.1:8787',
+      '/account': 'http://127.0.0.1:8787',
+      '/v1': 'http://127.0.0.1:8787',
+      '/internal': 'http://127.0.0.1:8787',
+      '/.well-known': 'http://127.0.0.1:8787',
+    },
   },
   preview: {
     port: 4174,
     strictPort: true,
     host: true,
+    proxy: {
+      '/oauth2': 'http://127.0.0.1:8787',
+      '/account': 'http://127.0.0.1:8787',
+      '/v1': 'http://127.0.0.1:8787',
+      '/internal': 'http://127.0.0.1:8787',
+      '/.well-known': 'http://127.0.0.1:8787',
+    },
   },
 })

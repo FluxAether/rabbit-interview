@@ -1,5 +1,6 @@
 mod audiotee;
 mod mixer;
+mod recording;
 
 #[cfg(target_os = "macos")]
 use audiotee::AudioTeeProcess;
@@ -9,9 +10,10 @@ use cpal::{
     Data, FromSample, Sample, SampleFormat, SampleRate, SizedSample, SupportedStreamConfigRange,
 };
 use mixer::{AudioSource, TimedAudioMixer};
+use recording::{RecordingHandle, RecordingSink};
 use serde::Serialize;
-use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Seek, SeekFrom, Write};
+use std::fs;
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -23,8 +25,6 @@ const TARGET_SAMPLE_RATE: u32 = AUDIOTEE_SAMPLE_RATE;
 const MAX_RECORDING_SECONDS: usize = 24 * 60 * 60;
 // Sleep/wake can deliver multi-second audio backlog in one callback. Bound work per push.
 const MAX_SOURCE_CHUNK_SAMPLES: usize = TARGET_SAMPLE_RATE as usize; // 1s
-const MAX_RECORDING_WRITE_SAMPLES: usize = TARGET_SAMPLE_RATE as usize * 2; // 2s
-const RECORDING_FLUSH_EVERY_SAMPLES: u64 = TARGET_SAMPLE_RATE as u64 / 2; // ~500ms
 const AMPLITUDE_EMIT_MIN_INTERVAL_MS: u128 = 50;
 // After wake, device/pipe backlog can arrive faster than realtime. Allow a short
 // burst, then drop excess so mixer/IPC/STT cannot spin at full speed.
@@ -58,14 +58,6 @@ pub struct AudioCapabilities {
     pub failure_reason: Option<String>,
     pub sample_rate: u32,
     pub audiotee_commit: String,
-}
-
-struct LiveRecording {
-    path: PathBuf,
-    writer: BufWriter<File>,
-    sample_count: u64,
-    samples_since_flush: u64,
-    limit_notified: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,7 +123,7 @@ struct AudioCapture {
     lease: Mutex<AudioCaptureLease>,
     current_mode: Mutex<String>,
     failure_reason: Mutex<Option<String>>,
-    live_recording: Mutex<Option<LiveRecording>>,
+    live_recording: Mutex<Option<Arc<RecordingHandle>>>,
     last_recording: Mutex<Option<SavedRecording>>,
     last_amplitude_emit: Mutex<Option<Instant>>,
 }
@@ -156,6 +148,7 @@ pub struct SavedRecording {
     pub path: String,
     pub duration_seconds: u64,
     pub sample_rate: u32,
+    pub partial: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -169,8 +162,14 @@ static AUDIO_STATE: once_cell::sync::Lazy<AudioCapture> =
     once_cell::sync::Lazy::new(AudioCapture::default);
 
 fn remember_audio_state(mode: &str, failure_reason: Option<String>) {
-    *AUDIO_STATE.current_mode.lock().unwrap_or_else(|e| e.into_inner()) = mode.into();
-    *AUDIO_STATE.failure_reason.lock().unwrap_or_else(|e| e.into_inner()) = failure_reason;
+    *AUDIO_STATE
+        .current_mode
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = mode.into();
+    *AUDIO_STATE
+        .failure_reason
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = failure_reason;
 }
 
 fn remember_audio_failure(error: impl Into<String>) {
@@ -205,6 +204,7 @@ fn admit_realtime_samples(
     let budget = elapsed_frames.saturating_add(burst_samples);
     let already = produced.load(Ordering::Relaxed);
     if already >= budget {
+        crate::realtime_metrics::record_capture_drop(samples.len());
         return Vec::new();
     }
 
@@ -217,6 +217,7 @@ fn admit_realtime_samples(
     // Prefer the newest audio when a single callback dumps a long backlog.
     let kept = samples[samples.len() - allowed..].to_vec();
     produced.fetch_add(kept.len() as u64, Ordering::Relaxed);
+    crate::realtime_metrics::record_capture_drop(samples.len() - kept.len());
     kept
 }
 
@@ -290,6 +291,12 @@ impl MonoResampler {
 
     fn process(&mut self, interleaved: &[f32]) -> Vec<f32> {
         let mut output = Vec::new();
+        self.process_into(interleaved, &mut output);
+        output
+    }
+
+    fn process_into(&mut self, interleaved: &[f32], output: &mut Vec<f32>) {
+        output.clear();
         for frame in interleaved.chunks_exact(self.channels) {
             let mono = frame.iter().sum::<f32>() / self.channels as f32;
             self.window_sum += mono;
@@ -305,7 +312,6 @@ impl MonoResampler {
                 self.window_frames = 0;
             }
         }
-        output
     }
 }
 
@@ -326,7 +332,11 @@ fn sample_to_pcm16(sample: f32) -> i16 {
     }
 }
 
-fn write_wav_header<W: Write>(writer: &mut W, sample_rate: u32, data_size: u32) -> Result<(), String> {
+fn write_wav_header<W: Write>(
+    writer: &mut W,
+    sample_rate: u32,
+    data_size: u32,
+) -> Result<(), String> {
     let byte_rate = sample_rate * 2;
     writer
         .write_all(b"RIFF")
@@ -367,7 +377,7 @@ fn write_wav_header<W: Write>(writer: &mut W, sample_rate: u32, data_size: u32) 
     Ok(())
 }
 
-fn patch_wav_sizes(file: &mut File, data_size: u32) -> Result<(), String> {
+fn patch_wav_sizes<W: Write + Seek>(file: &mut W, data_size: u32) -> Result<(), String> {
     file.seek(SeekFrom::Start(4))
         .map_err(|error| error.to_string())?;
     file.write_all(&(36_u32 + data_size).to_le_bytes())
@@ -470,162 +480,82 @@ fn clear_audio_recordings_in_dir(
 }
 
 fn discard_live_recording() {
-    let live = AUDIO_STATE.live_recording.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let live = AUDIO_STATE
+        .live_recording
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
     if let Some(live) = live {
-        drop(live.writer);
-        let _ = fs::remove_file(live.path);
+        live.discard();
     }
 }
 
 fn begin_live_recording(app: &AppHandle) -> Result<(), String> {
     discard_live_recording();
-    let mut live_recording = AUDIO_STATE
-        .live_recording
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_millis();
     let path = recordings_dir(app)?.join(format!("interview-live-{timestamp}.wav"));
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .read(true)
-        .open(&path)
-        .map_err(|error| error.to_string())?;
-    let mut writer = BufWriter::new(file);
-    write_wav_header(&mut writer, TARGET_SAMPLE_RATE, 0)?;
-    writer.flush().map_err(|error| error.to_string())?;
-    *live_recording = Some(LiveRecording {
+    let handle = RecordingSink::start(
+        app.clone(),
         path,
-        writer,
-        sample_count: 0,
-        samples_since_flush: 0,
-        limit_notified: false,
-    });
+        TARGET_SAMPLE_RATE,
+        MAX_RECORDING_SECONDS as u64,
+    )?;
+    *AUDIO_STATE
+        .live_recording
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(Arc::new(handle));
     Ok(())
 }
 
-fn append_live_recording(app: &AppHandle, samples: &[f32]) {
+fn append_live_recording(_app: &AppHandle, samples: &[f32]) {
     if samples.is_empty() {
         return;
     }
-    let mut live_guard = AUDIO_STATE.live_recording.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(live) = live_guard.as_mut() else {
-        return;
-    };
-    let max_samples = (TARGET_SAMPLE_RATE as u64).saturating_mul(MAX_RECORDING_SECONDS as u64);
-    if live.sample_count >= max_samples {
-        notify_recording_limit(app, live);
-        return;
-    }
-    let remaining = (max_samples - live.sample_count) as usize;
-    // Bound worst-case write work after sleep/wake backlog.
-    let write_limit = remaining.min(MAX_RECORDING_WRITE_SAMPLES);
-    let samples = if samples.len() > write_limit {
-        &samples[..write_limit]
-    } else {
-        samples
-    };
-
-    let mut pcm = Vec::with_capacity(samples.len() * 2);
-    for sample in samples {
-        pcm.extend_from_slice(&sample_to_pcm16(*sample).to_le_bytes());
-    }
-    if let Err(error) = live.writer.write_all(&pcm) {
-        let error_msg = format!("Disk write failed for live recording: {error}");
-        drop(live_guard);
-        remember_audio_failure(&error_msg);
-        let _ = app.emit("audio-error", error_msg);
-        return;
-    }
-    live.sample_count += samples.len() as u64;
-    live.samples_since_flush += samples.len() as u64;
-    // Keep crash recovery close to wall clock without flushing every packet.
-    if live.samples_since_flush >= RECORDING_FLUSH_EVERY_SAMPLES {
-        let _ = live.writer.flush();
-        live.samples_since_flush = 0;
-    }
-    if live.sample_count >= max_samples {
-        notify_recording_limit(app, live);
-    }
-}
-
-fn notify_recording_limit(app: &AppHandle, live: &mut LiveRecording) {
-    if live.limit_notified {
-        return;
-    }
-    live.limit_notified = true;
-    let _ = live.writer.flush();
-    let _ = app.emit("audio-recording-limit", MAX_RECORDING_SECONDS as u64);
-}
-
-fn finalize_live_recording(final_path: &Path) -> Result<Option<SavedRecording>, String> {
-    let mut live_recording = AUDIO_STATE
+    let live = AUDIO_STATE
         .live_recording
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let Some(mut live) = live_recording.take() else {
+    if let Some(live) = live.as_ref() {
+        live.try_push(samples);
+    }
+}
+
+fn finalize_live_recording(final_path: &Path) -> Result<Option<SavedRecording>, String> {
+    let live = AUDIO_STATE
+        .live_recording
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
+    let Some(live) = live else {
         return Ok(None);
     };
-    live.writer.flush().map_err(|error| error.to_string())?;
-    let mut file = live
-        .writer
-        .into_inner()
-        .map_err(|error| error.to_string())?;
-    if live.sample_count == 0 {
-        drop(file);
-        let _ = fs::remove_file(&live.path);
-        return Ok(None);
-    }
-    let data_size = live
-        .sample_count
-        .checked_mul(2)
-        .and_then(|size| u32::try_from(size).ok())
-        .ok_or_else(|| "Recording is too large to save as WAV".to_string())?;
-    patch_wav_sizes(&mut file, data_size)?;
-    drop(file);
-
-    if live.path != final_path {
-        if final_path.exists() {
-            fs::remove_file(final_path).map_err(|error| error.to_string())?;
-        }
-        fs::rename(&live.path, final_path).or_else(|_| {
-            fs::copy(&live.path, final_path).map(|_| ()).and_then(|_| fs::remove_file(&live.path))
-        }).map_err(|error| error.to_string())?;
-    }
-
-    Ok(Some(SavedRecording {
-        path: final_path.to_string_lossy().into_owned(),
-        duration_seconds: live.sample_count / u64::from(TARGET_SAMPLE_RATE),
+    let saved = live.finalize(final_path)?;
+    Ok(saved.map(|saved| SavedRecording {
+        path: saved.path.to_string_lossy().into_owned(),
+        duration_seconds: saved.sample_count / u64::from(TARGET_SAMPLE_RATE),
         sample_rate: TARGET_SAMPLE_RATE,
+        partial: saved.partial,
     }))
 }
 
 fn export_live_recording_snapshot(path: &Path) -> Result<Option<SavedRecording>, String> {
-    let mut live_guard = AUDIO_STATE.live_recording.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(live) = live_guard.as_mut() else {
+    let live = AUDIO_STATE
+        .live_recording
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    let Some(live) = live.as_ref() else {
         return Ok(None);
     };
-    live.writer.flush().map_err(|error| error.to_string())?;
-    let data_size = live
-        .sample_count
-        .checked_mul(2)
-        .and_then(|size| u32::try_from(size).ok())
-        .ok_or_else(|| "Recording is too large to save as WAV".to_string())?;
-
-    // Patch header on the live file first so the copied bytes are a valid WAV.
-    {
-        let file = live.writer.get_mut();
-        patch_wav_sizes(file, data_size)?;
-    }
-    fs::copy(&live.path, path).map_err(|error| error.to_string())?;
-    Ok(Some(SavedRecording {
-        path: path.to_string_lossy().into_owned(),
-        duration_seconds: live.sample_count / u64::from(TARGET_SAMPLE_RATE),
+    let saved = live.snapshot(path)?;
+    Ok(saved.map(|saved| SavedRecording {
+        path: saved.path.to_string_lossy().into_owned(),
+        duration_seconds: saved.sample_count / u64::from(TARGET_SAMPLE_RATE),
         sample_rate: TARGET_SAMPLE_RATE,
+        partial: saved.partial,
     }))
 }
 
@@ -675,13 +605,20 @@ fn emit_audio_source_chunk(app: &AppHandle, source: &'static str, samples: &[f32
     if samples.is_empty() {
         return;
     }
-    crate::stt::apple::push_samples(source, samples);
+    crate::realtime_metrics::record_capture(source, samples.len(), Instant::now());
+    match crate::stt::realtime::route_audio(source, samples) {
+        crate::stt::realtime::AudioRoute::Native | crate::stt::realtime::AudioRoute::Apple => {
+            return
+        }
+        crate::stt::realtime::AudioRoute::Webview => {}
+    }
     // Cap IPC payload size after device backlog so the frontend/STT path stays bounded.
     let samples = if samples.len() > MAX_SOURCE_CHUNK_SAMPLES {
         &samples[samples.len() - MAX_SOURCE_CHUNK_SAMPLES..]
     } else {
         samples
     };
+    crate::realtime_metrics::record_audio_ipc(source, samples.len() * std::mem::size_of::<f32>());
     let _ = app.emit(
         "audio-source-chunk",
         AudioSourceChunkPayload {
@@ -714,10 +651,12 @@ fn push_mixed_audio(
         (timestamp_seconds, samples)
     };
 
-    let output = mixer
-        .lock()
-        .unwrap()
-        .push(source, timestamp_seconds, samples);
+    let output = {
+        let mut mixer = mixer.lock().unwrap();
+        let output = mixer.push(source, timestamp_seconds, samples);
+        crate::realtime_metrics::record_mixer_pending(mixer.pending_len());
+        output
+    };
     emit_audio_chunk(app, output);
 }
 
@@ -753,9 +692,9 @@ fn preferred_input_config(device: &cpal::Device) -> Result<cpal::SupportedStream
 
 #[cfg(target_os = "windows")]
 fn select_loopback_device() -> Result<cpal::Device, String> {
-    cpal::default_host()
-        .default_output_device()
-        .ok_or_else(|| "No default output audio device available for WASAPI loopback capture".into())
+    cpal::default_host().default_output_device().ok_or_else(|| {
+        "No default output audio device available for WASAPI loopback capture".into()
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -767,36 +706,89 @@ fn preferred_loopback_config(device: &cpal::Device) -> Result<cpal::SupportedStr
         .map_err(|error| format!("No supported WASAPI loopback configuration: {error}"))
 }
 
+// Hold the lease only while registering STT, never while connecting to a provider.
+pub(crate) fn with_capture_lease<T>(
+    capture_id: u64,
+    sources: &[String],
+    action: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let lease = AUDIO_STATE.lease.lock().unwrap_or_else(|e| e.into_inner());
+    if !lease.is_current(capture_id) {
+        return Err("Audio capture lease is no longer active".into());
+    }
+    let mode = AUDIO_STATE
+        .current_mode
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if sources.iter().any(|source| match source.as_str() {
+        "system" => !mode.contains("system"),
+        "microphone" => !mode.contains("microphone") && !mode.contains("mic"),
+        _ => true,
+    }) {
+        return Err("STT source is not enabled by this capture".into());
+    }
+    drop(mode);
+    action()
+}
+
 fn stop_audio_capture_sync_inner() {
-    if let Some(tx) = AUDIO_STATE.tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(tx) = AUDIO_STATE
+        .tx
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+    {
         let _ = tx.send(AudioCommand::Stop);
     }
-    if let Some(handle) = AUDIO_STATE.handle.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(handle) = AUDIO_STATE
+        .handle
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+    {
         thread::spawn(move || {
             let _ = handle.join();
         });
     }
-    *AUDIO_STATE.current_mode.lock().unwrap_or_else(|e| e.into_inner()) = "idle".into();
+    *AUDIO_STATE
+        .current_mode
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = "idle".into();
 }
 
 fn stop_audio_capture_and_wait_inner() {
-    if let Some(tx) = AUDIO_STATE.tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(tx) = AUDIO_STATE
+        .tx
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+    {
         let _ = tx.send(AudioCommand::Stop);
     }
-    if let Some(handle) = AUDIO_STATE.handle.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(handle) = AUDIO_STATE
+        .handle
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+    {
         let _ = handle.join();
     }
-    *AUDIO_STATE.current_mode.lock().unwrap_or_else(|e| e.into_inner()) = "idle".into();
+    *AUDIO_STATE
+        .current_mode
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = "idle".into();
 }
 
 pub(crate) fn stop_audio_capture_sync() {
     let mut lease = AUDIO_STATE.lease.lock().unwrap_or_else(|e| e.into_inner());
+    crate::stt::realtime::stop_all();
     stop_audio_capture_sync_inner();
     lease.clear();
 }
 
 pub(crate) fn stop_audio_capture_and_wait() {
     let mut lease = AUDIO_STATE.lease.lock().unwrap_or_else(|e| e.into_inner());
+    crate::stt::realtime::stop_all();
     stop_audio_capture_and_wait_inner();
     lease.clear();
 }
@@ -806,6 +798,7 @@ fn stop_audio_capture_if_current_and_wait(capture_id: u64) -> bool {
     if !lease.is_current(capture_id) {
         return false;
     }
+    crate::stt::realtime::stop_all();
     stop_audio_capture_and_wait_inner();
     lease.release_current(capture_id)
 }
@@ -842,25 +835,32 @@ pub async fn get_audio_capabilities() -> AudioCapabilities {
     } else {
         true
     };
-    let current_mode = AUDIO_STATE.current_mode.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let current_mode = AUDIO_STATE
+        .current_mode
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     AudioCapabilities {
         system_audio_available: system_audio.is_ok(),
         microphone_available,
         system_audio_reason: system_audio.err(),
-        microphone_reason: (!microphone_available)
-            .then(|| {
-                if microphone_permission == "denied" {
-                    "Microphone permission was denied".into()
-                } else {
-                    "No microphone input device is available".into()
-                }
-            }),
+        microphone_reason: (!microphone_available).then(|| {
+            if microphone_permission == "denied" {
+                "Microphone permission was denied".into()
+            } else {
+                "No microphone input device is available".into()
+            }
+        }),
         current_mode: if current_mode.is_empty() {
             "idle".into()
         } else {
             current_mode
         },
-        failure_reason: AUDIO_STATE.failure_reason.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+        failure_reason: AUDIO_STATE
+            .failure_reason
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone(),
         sample_rate: TARGET_SAMPLE_RATE,
         audiotee_commit: integration_version().into(),
     }
@@ -891,7 +891,8 @@ pub async fn start_audio_capture(
             .await
             .unwrap_or_else(|_| "denied".into());
         if status != "granted" {
-            let error = "Microphone permission is required for the selected capture mode".to_string();
+            let error =
+                "Microphone permission is required for the selected capture mode".to_string();
             remember_audio_failure(error.clone());
             return Err(error);
         }
@@ -908,7 +909,10 @@ pub async fn start_audio_capture(
         .acquire(capture_owner)?;
 
     discard_live_recording();
-    *AUDIO_STATE.last_recording.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *AUDIO_STATE
+        .last_recording
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = None;
     remember_audio_state("starting", None);
     if let Err(error) = begin_live_recording(&app) {
         AUDIO_STATE
@@ -1314,8 +1318,8 @@ pub async fn clear_audio_recordings(app: AppHandle) -> Result<RecordingStorageUs
         .current_mode
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let recording_active = capture_thread_active
-        || !matches!(current_mode.as_str(), "" | "idle" | "error");
+    let recording_active =
+        capture_thread_active || !matches!(current_mode.as_str(), "" | "idle" | "error");
     if recording_active {
         return Err("recording-active".into());
     }
@@ -1323,12 +1327,13 @@ pub async fn clear_audio_recordings(app: AppHandle) -> Result<RecordingStorageUs
         .last_recording
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let mut live_recording = AUDIO_STATE
+    let live_recording = AUDIO_STATE
         .live_recording
         .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    if let Some(live) = live_recording.take() {
-        drop(live.writer);
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
+    if let Some(live) = live_recording {
+        live.discard();
     }
     let usage = clear_audio_recordings_in_dir(&recording_dir, false)?;
     *last_recording = None;
@@ -1341,7 +1346,10 @@ pub async fn export_audio_recording(app: AppHandle) -> Result<Option<SavedRecord
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_millis();
-    let download_dir = app.path().download_dir().map_err(|error| error.to_string())?;
+    let download_dir = app
+        .path()
+        .download_dir()
+        .map_err(|error| error.to_string())?;
     fs::create_dir_all(&download_dir).map_err(|error| error.to_string())?;
     let path = download_dir.join(format!("interview-recording-{timestamp}.wav"));
 
@@ -1349,7 +1357,12 @@ pub async fn export_audio_recording(app: AppHandle) -> Result<Option<SavedRecord
         return Ok(Some(saved));
     }
 
-    let Some(last_recording) = AUDIO_STATE.last_recording.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
+    let Some(last_recording) = AUDIO_STATE
+        .last_recording
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+    else {
         return Ok(None);
     };
     fs::copy(&last_recording.path, &path).map_err(|error| error.to_string())?;
@@ -1357,6 +1370,7 @@ pub async fn export_audio_recording(app: AppHandle) -> Result<Option<SavedRecord
         path: path.to_string_lossy().into_owned(),
         duration_seconds: last_recording.duration_seconds,
         sample_rate: last_recording.sample_rate,
+        partial: last_recording.partial,
     }))
 }
 
@@ -1376,8 +1390,9 @@ pub async fn list_audio_devices() -> Result<Vec<String>, String> {
 mod tests {
     use super::{
         admit_realtime_samples, capture_origin_frame, clear_audio_recordings_in_dir,
-        convert_samples, process_output_audio, recording_storage_usage_in_dir, saved_recording_file_name,
-        stop_audio_capture_and_wait, write_pcm16_wav, AtomicU64, AudioCaptureLease, MonoResampler,
+        convert_samples, process_output_audio, recording_storage_usage_in_dir,
+        saved_recording_file_name, stop_audio_capture_and_wait, write_pcm16_wav, AtomicU64,
+        AudioCaptureLease, MonoResampler,
     };
     use std::time::Instant;
 

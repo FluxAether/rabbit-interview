@@ -36,13 +36,14 @@ private final class AppleSttRuntime: @unchecked Sendable {
     // AnalyzerInput is not realtime-safe; cpal/CoreAudio calls push() on the IO thread.
     private let ingestQueue = DispatchQueue(label: "com.rabbitinterview.apple-stt.ingest")
     private var generation: UInt64 = 0
+    private var ownerGeneration: UInt64 = 0
     private var sessions: [String: SourceSession] = [:]
-    private var emitTranscript: ((UnsafePointer<CChar>, UnsafePointer<CChar>, Bool, UnsafePointer<CChar>) -> Void)?
-    private var emitError: ((UnsafePointer<CChar>, UnsafePointer<CChar>) -> Void)?
+    private var emitTranscript: ((UnsafePointer<CChar>, UnsafePointer<CChar>, Bool, UnsafePointer<CChar>, UInt64) -> Void)?
+    private var emitError: ((UnsafePointer<CChar>, UnsafePointer<CChar>, UInt64) -> Void)?
 
     func setCallbacks(
-        transcript: @escaping @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>, Bool, UnsafePointer<CChar>) -> Void,
-        error: @escaping @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>) -> Void
+        transcript: @escaping @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>, Bool, UnsafePointer<CChar>, UInt64) -> Void,
+        error: @escaping @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>, UInt64) -> Void
     ) {
         lock.lock()
         emitTranscript = transcript
@@ -80,8 +81,11 @@ private final class AppleSttRuntime: @unchecked Sendable {
         ])
     }
 
-    func start(sourcesCSV: String, language: String) -> String {
+    func start(sourcesCSV: String, language: String, owner: UInt64) -> String {
         stop()
+        lock.lock()
+        ownerGeneration = owner
+        lock.unlock()
         let sources = sourcesCSV
             .split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespaces) }
@@ -97,16 +101,21 @@ private final class AppleSttRuntime: @unchecked Sendable {
         }
         let started = DispatchSemaphore(value: 0)
         var startError: String?
+        let current = currentGeneration()
         Task { @MainActor in
             do {
-                try await self.startAvailable(sources: sources, language: language)
+                try await self.startAvailable(sources: sources, language: language, generation: current)
             } catch {
                 startError = error.localizedDescription
             }
             started.signal()
         }
-        _ = started.wait(timeout: .now() + 45)
-        return startError ?? ""
+        if started.wait(timeout: .now() + 45) == .timedOut {
+            stop()
+            return "Apple STT startup timed out"
+        }
+        if let startError { stop(); return startError }
+        return ""
     }
 
     func push(source: String, samples: UnsafePointer<Float>, count: Int) {
@@ -160,7 +169,7 @@ private final class AppleSttRuntime: @unchecked Sendable {
 
     @available(macOS 26.0, *)
     @MainActor
-    private func startAvailable(sources: [String], language: String) async throws {
+    private func startAvailable(sources: [String], language: String, generation current: UInt64) async throws {
         if let tccReason = tccIdentityError() {
             throw appleError(tccReason)
         }
@@ -170,11 +179,9 @@ private final class AppleSttRuntime: @unchecked Sendable {
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
             try await request.downloadAndInstall()
         }
-        lock.lock()
-        generation += 1
-        let current = generation
-        lock.unlock()
+        guard current == currentGeneration() else { throw CancellationError() }
         for source in sources {
+            guard current == currentGeneration() else { throw CancellationError() }
             try await startSource(
                 source: source,
                 module: cloneModule(module, locale: locale),
@@ -227,6 +234,11 @@ private final class AppleSttRuntime: @unchecked Sendable {
             throw appleError("Apple STT could not determine a compatible audio format")
         }
         try await analyzer.prepareToAnalyze(in: format)
+        guard generation == currentGeneration() else {
+            inputBuilder.finish()
+            await analyzer.cancelAndFinishNow()
+            throw CancellationError()
+        }
         let session = SourceSession(source: source, inputBuilder: inputBuilder)
         session.convertInput = makeInputConverter(format: format)
         session.analyzer = analyzer
@@ -268,8 +280,17 @@ private final class AppleSttRuntime: @unchecked Sendable {
             }
         }
         lock.lock()
-        sessions[source] = session
-        lock.unlock()
+        if generation == self.generation {
+            sessions[source] = session
+            lock.unlock()
+        } else {
+            lock.unlock()
+            session.resultsTask?.cancel()
+            session.analysisTask?.cancel()
+            inputBuilder.finish()
+            await analyzer.cancelAndFinishNow()
+            throw CancellationError()
+        }
     }
 
     private func handleResult(source: String, generation: UInt64, text: String, isFinal: Bool) {
@@ -287,7 +308,7 @@ private final class AppleSttRuntime: @unchecked Sendable {
             }
         }
         lock.unlock()
-        emit(source: source, text: trimmed, isFinal: isFinal, boundary: isFinal ? "final" : "interim")
+        emit(source: source, text: trimmed, isFinal: isFinal, boundary: isFinal ? "final" : "interim", generation: generation)
     }
 
     private func scheduleUtteranceEndLocked(session: SourceSession, generation: UInt64) {
@@ -309,7 +330,7 @@ private final class AppleSttRuntime: @unchecked Sendable {
         }
         session.utteranceEnded = true
         lock.unlock()
-        emit(source: source, text: "", isFinal: true, boundary: "utterance-end")
+        emit(source: source, text: "", isFinal: true, boundary: "utterance-end", generation: generation)
     }
 
     private func fail(source: String, generation: UInt64, message: String) {
@@ -317,29 +338,33 @@ private final class AppleSttRuntime: @unchecked Sendable {
         lock.lock()
         sessions[source]?.failed = true
         lock.unlock()
-        emitFailure(source: source, message: message)
+        emitFailure(source: source, message: message, generation: generation)
     }
 
-    private func emit(source: String, text: String, isFinal: Bool, boundary: String) {
+    private func emit(source: String, text: String, isFinal: Bool, boundary: String, generation: UInt64) {
         lock.lock()
+        guard generation == self.generation else { lock.unlock(); return }
+        let owner = ownerGeneration
         let callback = emitTranscript
         lock.unlock()
         source.withCString { sourcePtr in
             text.withCString { textPtr in
                 boundary.withCString { boundaryPtr in
-                    callback?(sourcePtr, textPtr, isFinal, boundaryPtr)
+                    callback?(sourcePtr, textPtr, isFinal, boundaryPtr, owner)
                 }
             }
         }
     }
 
-    private func emitFailure(source: String, message: String) {
+    private func emitFailure(source: String, message: String, generation: UInt64) {
         lock.lock()
+        guard generation == self.generation else { lock.unlock(); return }
+        let owner = ownerGeneration
         let callback = emitError
         lock.unlock()
         source.withCString { sourcePtr in
             message.withCString { messagePtr in
-                callback?(sourcePtr, messagePtr)
+                callback?(sourcePtr, messagePtr, owner)
             }
         }
     }
@@ -567,8 +592,8 @@ private func jsonString(_ object: [String: Any]) -> String {
 
 @_cdecl("rabbit_apple_stt_set_callbacks")
 public func rabbit_apple_stt_set_callbacks(
-    transcript: @escaping @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>, Bool, UnsafePointer<CChar>) -> Void,
-    error: @escaping @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>) -> Void
+    transcript: @escaping @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>, Bool, UnsafePointer<CChar>, UInt64) -> Void,
+    error: @escaping @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>, UInt64) -> Void
 ) {
     if #available(macOS 26.0, *) { AppleSttRuntime.shared.setCallbacks(transcript: transcript, error: error) }
 }
@@ -584,12 +609,14 @@ public func rabbit_apple_stt_status_json() -> UnsafeMutablePointer<CChar> {
 @_cdecl("rabbit_apple_stt_start")
 public func rabbit_apple_stt_start(
     sources: UnsafePointer<CChar>,
-    language: UnsafePointer<CChar>
+    language: UnsafePointer<CChar>,
+    owner: UInt64
 ) -> UnsafeMutablePointer<CChar>? {
     if #available(macOS 26.0, *) {
         let error = AppleSttRuntime.shared.start(
             sourcesCSV: String(cString: sources),
-            language: String(cString: language)
+            language: String(cString: language),
+            owner: owner
         )
         return error.isEmpty ? nil : strdup(error)
     }

@@ -11,20 +11,29 @@ pub(crate) struct Pcm16LeDecoder {
 
 impl Pcm16LeDecoder {
     pub(crate) fn push(&mut self, bytes: &[u8]) -> Vec<f32> {
-        let mut input = Vec::with_capacity(bytes.len() + usize::from(self.pending_byte.is_some()));
-        if let Some(byte) = self.pending_byte.take() {
-            input.push(byte);
-        }
-        input.extend_from_slice(bytes);
+        let mut output = Vec::new();
+        self.push_into(bytes, &mut output);
+        output
+    }
 
-        if input.len() % 2 == 1 {
-            self.pending_byte = input.pop();
+    pub(crate) fn push_into(&mut self, bytes: &[u8], output: &mut Vec<f32>) {
+        output.clear();
+        let mut offset = 0;
+        if let Some(pending) = self.pending_byte.take() {
+            if bytes.is_empty() {
+                self.pending_byte = Some(pending);
+                return;
+            }
+            output.push(i16::from_le_bytes([pending, bytes[0]]) as f32 / 32768.0);
+            offset = 1;
         }
-
-        input
-            .chunks_exact(2)
-            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
-            .collect()
+        let remaining = &bytes[offset..];
+        if remaining.len() % 2 == 1 {
+            self.pending_byte = remaining.last().copied();
+        }
+        for chunk in remaining.chunks_exact(2) {
+            output.push(i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0);
+        }
     }
 }
 
