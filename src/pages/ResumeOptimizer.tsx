@@ -91,11 +91,12 @@ export default function ResumeOptimizer() {
   const [activeSuggestion, setActiveSuggestion] = useState<ResumeSuggestion | null>(null)
   const [viewMode, setViewMode] = useState<"split" | "diff" | "requirements">("split")
   const [syncScroll, setSyncScroll] = useState(true)
+  const activeScrollerRef = useRef<"original" | "optimized" | null>(null)
+  const scrollEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [activeDiffChange, setActiveDiffChange] = useState(0)
   const analysisRequests = useRef(createResumeAnalysisRequestCoordinator(120_000))
   const originalScrollRef = useRef<HTMLTextAreaElement>(null)
   const optimizedEditorRef = useRef<HTMLTextAreaElement>(null)
-  const isScrollingSync = useRef(false)
   const reviewSectionRef = useRef<HTMLDivElement>(null)
   const diffContainerRef = useRef<HTMLDivElement>(null)
   const isMounted = useRef(true)
@@ -105,6 +106,7 @@ export default function ResumeOptimizer() {
     return () => {
       isMounted.current = false
       analysisRequests.current.cancel()
+      if (scrollEndTimerRef.current) clearTimeout(scrollEndTimerRef.current)
     }
   }, [])
 
@@ -232,32 +234,42 @@ export default function ResumeOptimizer() {
     setStatus({ kind: "warning", text: t("resume.analysisCancelled") })
   }
 
+  const setActiveScroller = (scroller: "original" | "optimized") => {
+    activeScrollerRef.current = scroller
+    if (scrollEndTimerRef.current) clearTimeout(scrollEndTimerRef.current)
+    scrollEndTimerRef.current = setTimeout(() => {
+      activeScrollerRef.current = null
+    }, 200)
+  }
+
   const handleScrollOriginal = (e: React.UIEvent<HTMLTextAreaElement>) => {
-    if (!syncScroll || isScrollingSync.current || !optimizedEditorRef.current) return
+    if (!syncScroll || activeScrollerRef.current !== "original" || !optimizedEditorRef.current) return
+    setActiveScroller("original")
     const target = e.currentTarget
     const maxSrc = target.scrollHeight - target.clientHeight
     if (maxSrc <= 0) return
     const ratio = target.scrollTop / maxSrc
     const destMax = optimizedEditorRef.current.scrollHeight - optimizedEditorRef.current.clientHeight
-    isScrollingSync.current = true
-    optimizedEditorRef.current.scrollTop = ratio * destMax
-    requestAnimationFrame(() => {
-      isScrollingSync.current = false
-    })
+    if (destMax <= 0) return
+    const nextScrollTop = Math.round(ratio * destMax)
+    if (Math.abs(optimizedEditorRef.current.scrollTop - nextScrollTop) > 1) {
+      optimizedEditorRef.current.scrollTop = nextScrollTop
+    }
   }
 
   const handleScrollOptimized = (e: React.UIEvent<HTMLTextAreaElement>) => {
-    if (!syncScroll || isScrollingSync.current || !originalScrollRef.current) return
+    if (!syncScroll || activeScrollerRef.current !== "optimized" || !originalScrollRef.current) return
+    setActiveScroller("optimized")
     const target = e.currentTarget
     const maxSrc = target.scrollHeight - target.clientHeight
     if (maxSrc <= 0) return
     const ratio = target.scrollTop / maxSrc
     const destMax = originalScrollRef.current.scrollHeight - originalScrollRef.current.clientHeight
-    isScrollingSync.current = true
-    originalScrollRef.current.scrollTop = ratio * destMax
-    requestAnimationFrame(() => {
-      isScrollingSync.current = false
-    })
+    if (destMax <= 0) return
+    const nextScrollTop = Math.round(ratio * destMax)
+    if (Math.abs(originalScrollRef.current.scrollTop - nextScrollTop) > 1) {
+      originalScrollRef.current.scrollTop = nextScrollTop
+    }
   }
 
   const handleRejectDiff = (block: ResumeDiffBlock) => {
@@ -777,7 +789,7 @@ export default function ResumeOptimizer() {
               </div>
             </div>
             <p className="mb-2 text-xs text-[var(--text-muted)]">{t("resume.confirmExtraction")}</p>
-            <textarea ref={originalScrollRef} onScroll={handleScrollOriginal} value={resumeOriginal} maxLength={MAX_RESUME_TEXT_LENGTH} disabled={busy} aria-label={t("resume.original")} placeholder={t("resume.originalPlaceholder")} onChange={event => { updateResumeWorkspace({ original: event.target.value }); setUndo(null) }} className="min-h-[360px] max-h-[640px] w-full resize-y rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm leading-relaxed disabled:opacity-60" />
+            <textarea ref={originalScrollRef} onScroll={handleScrollOriginal} onWheel={() => setActiveScroller("original")} onPointerDown={() => setActiveScroller("original")} onTouchStart={() => setActiveScroller("original")} value={resumeOriginal} maxLength={MAX_RESUME_TEXT_LENGTH} disabled={busy} aria-label={t("resume.original")} placeholder={t("resume.originalPlaceholder")} onChange={event => { updateResumeWorkspace({ original: event.target.value }); setUndo(null) }} className="min-h-[360px] max-h-[640px] w-full resize-y rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm leading-relaxed disabled:opacity-60" />
           </section>
 
           <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
@@ -799,6 +811,9 @@ export default function ResumeOptimizer() {
               ref={optimizedEditorRef}
               value={resumeOptimized}
               onScroll={handleScrollOptimized}
+              onWheel={() => setActiveScroller("optimized")}
+              onPointerDown={() => setActiveScroller("optimized")}
+              onTouchStart={() => setActiveScroller("optimized")}
               disabled={busy}
               onChange={(event) => {
                 setReviewedOptimizedText("")
