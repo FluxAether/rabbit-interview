@@ -1,6 +1,7 @@
 mod audio;
 mod copilot_window;
 mod realtime_metrics;
+mod resume_export;
 mod secure_store;
 mod speech;
 mod stt;
@@ -73,6 +74,7 @@ pub fn run() {
             get_recording_storage_usage,
             clear_audio_recordings,
             export_audio_recording,
+            resume_export::export_resume_docx,
             get_audio_capabilities,
             list_audio_devices,
             get_realtime_metrics,

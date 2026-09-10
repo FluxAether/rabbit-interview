@@ -55,3 +55,4 @@ src-tauri/binaries/audiotee-universal-apple-darwin
 .mcp.json
 
 outputs/
+artifacts/

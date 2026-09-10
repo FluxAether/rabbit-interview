@@ -5,6 +5,7 @@ import { useCurrentLanguage, useTranslation } from "../i18n"
 import { downloadResumeDocx, sanitizeResumeFilename } from "../lib/resumeDocuments"
 import {
   MAX_RESUME_FILE_SIZE,
+  MAX_RESUME_TEXT_LENGTH,
   extractResumeText,
   validateResumeFile,
   type ResumeFileValidationError,
@@ -13,14 +14,19 @@ import {
   countResumeWords,
   createResumeAnalysisRequestCoordinator,
   resumeTextFingerprint,
+  resumeTargetFingerprint,
+  isResumeAnalysisStale,
+  isResumeReviewed,
   type ResumeSuggestion,
   type ResumeSuggestionCategory,
 } from "../lib/resumeOptimizer"
 import { optimizeResumeWithLlm } from "../lib/resumeOptimizerAi"
 import {
   clearResumeWorkspace as clearSavedResumeWorkspace,
+  loadResumeWorkspace,
 } from "../lib/resumeWorkspaceStore"
-import { useAppStore } from "../stores/useAppStore"
+import { computeResumeDiff, revertResumeDiff, type ResumeDiffBlock } from "../lib/resumeDiff"
+import { useAppStore, selectResumeWorkspace } from "../stores/useAppStore"
 
 const SAMPLE_RESUME = `Alex Morgan
 Product Designer
@@ -55,16 +61,15 @@ export default function ResumeOptimizer() {
     jobDescription,
     resumeSuggestions,
     resumeSourceFileName,
-    resumeTargetKeywords,
     resumeRequirements,
     resumeMatchedKeywords,
-    resumeAnalysisOriginalFingerprint,
-    resumeAnalysisJobDescriptionFingerprint,
     resumeAnalysisSource,
     resumeTargetRole,
     resumeTargetCompany,
     resumeHydrated,
     resumePersistenceError,
+    hydrateResumeWorkspace,
+    setResumePersistenceError,
     updateResumeWorkspace,
     setResumeAnalysis,
     clearResumeWorkspace,
@@ -75,12 +80,20 @@ export default function ResumeOptimizer() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [status, setStatus] = useState<PageStatus>(null)
-  const [reviewedOptimizedText, setReviewedOptimizedText] = useState("")
+  const workspace = selectResumeWorkspace(useAppStore.getState())
+  const reviewedOptimizedText = isResumeReviewed(workspace) ? resumeOptimized : ""
+  const setReviewedOptimizedText = (text: string) => updateResumeWorkspace({
+    reviewedFingerprint: text ? resumeTextFingerprint(text) : "",
+    reviewedAt: text ? new Date().toISOString() : "",
+  })
+  const [inputsOpen, setInputsOpen] = useState(!resumeOptimized.trim())
+  const [undo, setUndo] = useState<{ before: string; after: string } | null>(null)
+  const [activeSuggestion, setActiveSuggestion] = useState<ResumeSuggestion | null>(null)
   const [viewMode, setViewMode] = useState<"split" | "diff" | "requirements">("split")
   const [syncScroll, setSyncScroll] = useState(true)
   const [activeDiffChange, setActiveDiffChange] = useState(0)
   const analysisRequests = useRef(createResumeAnalysisRequestCoordinator(120_000))
-  const originalScrollRef = useRef<HTMLDivElement>(null)
+  const originalScrollRef = useRef<HTMLTextAreaElement>(null)
   const optimizedEditorRef = useRef<HTMLTextAreaElement>(null)
   const isScrollingSync = useRef(false)
   const reviewSectionRef = useRef<HTMLDivElement>(null)
@@ -143,7 +156,8 @@ export default function ResumeOptimizer() {
         kind: "error",
         text: t(error instanceof Error && error.message === "resume-text-too-long"
           ? "resume.textTooLong"
-          : "resume.importError"),
+          : error instanceof Error && error.message === "empty-resume-text"
+            ? "resume.noExtractedText" : "resume.importError"),
       })
     } finally {
       if (isMounted.current) setIsParsing(false)
@@ -181,17 +195,23 @@ export default function ResumeOptimizer() {
     const request = analysisRequests.current.start()
     const originalFingerprint = resumeTextFingerprint(resumeOriginal)
     const jobDescriptionFingerprint = resumeTextFingerprint(jobDescription)
+    const targetFingerprint = resumeTargetFingerprint(resumeTargetRole, resumeTargetCompany)
     setIsAnalyzing(true)
     setReviewedOptimizedText("")
     setStatus(null)
     try {
-      const result = await optimizeResumeWithLlm(source, jobDescription, language, request.signal)
+      const result = await optimizeResumeWithLlm(source, jobDescription, language, request.signal, { role: resumeTargetRole, company: resumeTargetCompany })
       if (!request.isLatest() || !isMounted.current) return
       setResumeAnalysis(result, {
         source: sourceKind,
         originalFingerprint,
         jobDescriptionFingerprint,
+        targetFingerprint,
+        resumeFingerprint: resumeTextFingerprint(source),
       })
+      setInputsOpen(false)
+      setUndo(null)
+      setActiveSuggestion(null)
       setViewMode("diff")
       setActiveDiffChange(0)
       setStatus({ kind: "success", text: t("resume.analysisComplete") })
@@ -212,7 +232,7 @@ export default function ResumeOptimizer() {
     setStatus({ kind: "warning", text: t("resume.analysisCancelled") })
   }
 
-  const handleScrollOriginal = (e: React.UIEvent<HTMLDivElement>) => {
+  const handleScrollOriginal = (e: React.UIEvent<HTMLTextAreaElement>) => {
     if (!syncScroll || isScrollingSync.current || !optimizedEditorRef.current) return
     const target = e.currentTarget
     const maxSrc = target.scrollHeight - target.clientHeight
@@ -240,11 +260,19 @@ export default function ResumeOptimizer() {
     })
   }
 
-  const handleRejectLineDiff = (lineText: string) => {
-    if (!resumeOptimized.includes(lineText)) return
-    const updated = resumeOptimized.replace(lineText + "\n", "").replace(lineText, "")
-    setReviewedOptimizedText("")
+  const handleRejectDiff = (block: ResumeDiffBlock) => {
+    const updated = revertResumeDiff(resumeOptimized, block)
+    setUndo({ before: resumeOptimized, after: updated })
+    setActiveDiffChange(0)
     updateResumeWorkspace({ optimized: updated })
+  }
+
+  const retryWorkspaceLoad = async () => {
+    try {
+      hydrateResumeWorkspace(await loadResumeWorkspace())
+    } catch {
+      setResumePersistenceError(true)
+    }
   }
 
   const handleExport = async () => {
@@ -263,9 +291,9 @@ export default function ResumeOptimizer() {
     setIsExporting(true)
     setStatus(null)
     try {
-      await downloadResumeDocx(resumeOptimized, sanitizeResumeFilename(resumeSourceFileName))
+      const path = await downloadResumeDocx(resumeOptimized, sanitizeResumeFilename(resumeSourceFileName))
       if (!isMounted.current) return
-      setStatus({ kind: "success", text: t("resume.exportSuccess") })
+      setStatus({ kind: "success", text: t("resume.exportSaved", { path }) })
     } catch (error) {
       console.warn("Failed to export resume", error)
       if (!isMounted.current) return
@@ -280,9 +308,9 @@ export default function ResumeOptimizer() {
     setReviewedOptimizedText("")
     setViewMode("split")
     setActiveDiffChange(0)
-    clearResumeWorkspace()
     try {
       await clearSavedResumeWorkspace()
+      clearResumeWorkspace()
       if (!isMounted.current) return
       setStatus({ kind: "success", text: t("resume.cleared") })
     } catch {
@@ -308,6 +336,8 @@ export default function ResumeOptimizer() {
     })
     setReviewedOptimizedText("")
     setViewMode("split")
+    setInputsOpen(true)
+    setUndo(null)
     setActiveDiffChange(0)
     setStatus({ kind: "success", text: t("resume.sampleLoaded") })
   }
@@ -330,12 +360,23 @@ export default function ResumeOptimizer() {
     })
   }
 
-  const handleManualSuggestion = () => {
+  const handleManualSuggestion = (suggestion: ResumeSuggestion) => {
     setViewMode("split")
+    setActiveSuggestion(suggestion)
     window.requestAnimationFrame(() => {
-      optimizedEditorRef.current?.focus()
-      optimizedEditorRef.current?.scrollIntoView({ block: "center" })
+      const editor = optimizedEditorRef.current
+      if (!editor) return
+      const index = suggestion.anchor ? resumeOptimized.indexOf(suggestion.anchor) : -1
+      editor.focus()
+      editor.setSelectionRange(index < 0 ? resumeOptimized.length : index, index < 0 ? resumeOptimized.length : index + suggestion.anchor!.length)
+      editor.scrollIntoView({ block: "center" })
     })
+  }
+
+  const resolveSuggestion = (suggestion: ResumeSuggestion, resolution: 'done' | 'skipped') => {
+    updateResumeWorkspace({ suggestions: resumeSuggestions.map(item => item.id === suggestion.id
+      ? { ...item, resolution, resolutionFingerprint: resumeTextFingerprint(resumeOptimized) } : item) })
+    setActiveSuggestion(null)
   }
 
   const handleStartFactReview = () => {
@@ -350,63 +391,14 @@ export default function ResumeOptimizer() {
   }
 
 
-  const computeLineDiff = (original: string, optimized: string) => {
-    const origLines = original.split("\n")
-    const optLines = optimized.split("\n")
-    const origSet = new Set(origLines.map((l) => l.trim()).filter(Boolean))
-    const optSet = new Set(optLines.map((l) => l.trim()).filter(Boolean))
-
-    const result: { type: "same" | "removed" | "added"; text: string }[] = []
-    let i = 0
-    let j = 0
-    while (i < origLines.length || j < optLines.length) {
-      if (i < origLines.length && j < optLines.length && origLines[i] === optLines[j]) {
-        result.push({ type: "same", text: origLines[i] })
-        i++
-        j++
-      } else if (i < origLines.length && !optSet.has(origLines[i].trim())) {
-        result.push({ type: "removed", text: origLines[i] })
-        i++
-      } else if (j < optLines.length && !origSet.has(optLines[j].trim())) {
-        result.push({ type: "added", text: optLines[j] })
-        j++
-      } else {
-        if (i < origLines.length) {
-          result.push({ type: "removed", text: origLines[i] })
-          i++
-        }
-        if (j < optLines.length) {
-          result.push({ type: "added", text: optLines[j] })
-          j++
-        }
-      }
-    }
-    return result
-  }
-
-  const diffLines = useMemo(() => computeLineDiff(resumeOriginal, resumeOptimized), [resumeOriginal, resumeOptimized])
-  const changedDiffIndices = useMemo(
-    () => diffLines.flatMap((line, index) => line.type === "same" ? [] : [index]),
-    [diffLines],
-  )
-  const sensitiveDiffCount = useMemo(
-    () => diffLines.filter((line) => line.type !== "same" && /\d|@|(?:https?:\/\/|www\.)/i.test(line.text)).length,
-    [diffLines],
-  )
-  const analysisStale = Boolean(resumeOptimized.trim()) && (
-    !resumeAnalysisOriginalFingerprint
-    || !resumeAnalysisJobDescriptionFingerprint
-    || resumeTextFingerprint(resumeOriginal) !== resumeAnalysisOriginalFingerprint
-    || resumeTextFingerprint(jobDescription) !== resumeAnalysisJobDescriptionFingerprint
-  )
+  const diffBlocks = useMemo(() => computeResumeDiff(resumeOriginal, resumeOptimized), [resumeOriginal, resumeOptimized])
+  const changedDiffIndices = diffBlocks.flatMap((block, index) => block.type === "same" ? [] : [index])
+  const sensitiveDiffCount = diffBlocks.filter(block => block.type === "change" && /\d|@|(?:https?:\/\/|www\.)/i.test(block.before + block.after)).length
+  const analysisStale = Boolean(resumeOptimized.trim()) && isResumeAnalysisStale(workspace)
   const supportedRequirements = resumeRequirements.filter((requirement) => requirement.status === "supported")
   const unsupportedRequirements = resumeRequirements.filter((requirement) => requirement.status === "unsupported")
   const matchedKeywordSet = new Set(resumeMatchedKeywords.map((keyword) => keyword.toLocaleLowerCase()))
-  const totalKeywords = (resumeTargetKeywords.length > 0 ? resumeTargetKeywords : resumeRequirements.map(r => r.keyword)).length
-  const atsMatchRate = totalKeywords > 0
-    ? Math.min(100, Math.round((matchedKeywordSet.size / totalKeywords) * 100))
-    : (resumeMatchedKeywords.length > 0 ? 85 : 0)
-  const factCheckPassed = sensitiveDiffCount === 0 || reviewedOptimizedText === resumeOptimized
+  const totalKeywords = workspace.matchedKeywords.length + workspace.missingKeywords.length
   const coveredRequirements = resumeRequirements.filter((requirement) => matchedKeywordSet.has(requirement.keyword.toLocaleLowerCase()))
 
   const jumpToDiffChange = (direction: -1 | 1) => {
@@ -473,7 +465,8 @@ export default function ResumeOptimizer() {
                 : "border-[var(--success)] text-[var(--success)]"
           }`}
         >
-          {resumePersistenceError ? t("resume.persistenceError") : status?.text}
+          {resumePersistenceError ? t(resumeHydrated ? "resume.persistenceError" : "resume.loadError") : status?.text}
+          {resumePersistenceError && !resumeHydrated && <button type="button" className="ml-3 underline" onClick={() => void retryWorkspaceLoad()}>{t("resume.retryLoad")}</button>}
         </div>
       )}
 
@@ -516,7 +509,9 @@ export default function ResumeOptimizer() {
         </div>
       )}
 
-      <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <details open={inputsOpen} onToggle={event => setInputsOpen(event.currentTarget.open)} className="mb-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)]">
+        <summary className="cursor-pointer p-4 text-sm font-medium">{t("resume.inputMaterials")} · {resumeSourceFileName || t("resume.pastedText")} {resumeTargetRole && `· ${resumeTargetRole}`}</summary>
+      <div className="grid grid-cols-1 gap-4 px-4 pb-4 lg:grid-cols-2">
         <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
           <div className="mb-4 flex items-center gap-2 text-sm font-medium"><Upload className="h-4 w-4" /> {t("resume.upload.title")}</div>
           <div {...getRootProps()} className={`flex h-36 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-[var(--border-color)] bg-[var(--bg-subtle)] text-center transition-colors hover:bg-[var(--bg-hover)] ${isDragActive ? "border-[var(--action)] bg-[var(--bg-hover)]" : ""} ${isParsing ? "cursor-wait opacity-60" : ""}`}>
@@ -525,6 +520,7 @@ export default function ResumeOptimizer() {
             <div className="text-sm">{isParsing ? t("resume.upload.parsing") : isDragActive ? t("resume.upload.drop") : t("resume.upload.choose")}</div>
             <div className="text-xs text-[var(--text-muted)]">{resumeSourceFileName || t("resume.upload.hint")}</div>
           </div>
+          <button type="button" disabled={busy} onClick={() => { setViewMode("split"); window.requestAnimationFrame(() => { originalScrollRef.current?.focus(); originalScrollRef.current?.scrollIntoView({ block: "center" }) }) }} className="mt-3 w-full rounded-md border border-[var(--border-color)] py-2 text-sm disabled:opacity-50">{t("resume.pasteText")}</button>
           <button type="button" onClick={useSample} disabled={busy} className="mt-4 w-full rounded-md border border-[var(--border-color)] py-2 text-sm transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50">{t("common.useSample")}</button>
         </section>
 
@@ -534,21 +530,27 @@ export default function ResumeOptimizer() {
             <span className="text-xs font-normal text-[var(--text-muted)]">{jobDescription.length}/5000</span>
           </div>
           <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <input
+            <label className="text-xs text-[var(--text-muted)]">{t("resume.targetRole")}<input
+              disabled={busy}
+              maxLength={160}
               value={resumeTargetRole}
               onChange={(event) => updateResumeWorkspace({ targetRole: event.target.value, profileUpdatedAt: new Date().toISOString() })}
-              className="rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-2 text-sm outline-none"
+              className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-2 text-sm outline-none"
               placeholder={t('resume.targetRole')}
               aria-label={t('resume.targetRole')}
             />
-            <input
+            </label>
+            <label className="text-xs text-[var(--text-muted)]">{t("resume.targetCompany")}<input
+              disabled={busy}
+              maxLength={160}
               value={resumeTargetCompany}
               onChange={(event) => updateResumeWorkspace({ targetCompany: event.target.value, profileUpdatedAt: new Date().toISOString() })}
-              className="rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-2 text-sm outline-none"
+              className="mt-1 w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-2 text-sm outline-none"
               placeholder={t('resume.targetCompany')}
               aria-label={t('resume.targetCompany')}
-            />
+            /></label>
           </div>
+          <p className="mb-2 text-xs text-[var(--text-muted)]">{t("resume.targetHint")}</p>
           <textarea
             value={jobDescription}
             maxLength={5000}
@@ -576,6 +578,7 @@ export default function ResumeOptimizer() {
           )}
         </section>
       </div>
+      </details>
 
       {resumeOptimized.trim() && !analysisStale && (
         <section className="mb-4 rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
@@ -588,18 +591,14 @@ export default function ResumeOptimizer() {
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <div className="flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-1 text-xs font-semibold">
                   <Sparkles className="h-3.5 w-3.5 text-[var(--action)]" />
-                  <span>ATS 匹配率:</span>
-                  <span className={atsMatchRate >= 75 ? "text-[var(--success)]" : atsMatchRate >= 50 ? "text-[var(--warning)]" : "text-[var(--danger)]"}>
-                    {atsMatchRate}%
-                  </span>
+                  <span>{t("resume.keywordCoverage")}: </span>
+                  <span>{jobDescription.trim() ? `${matchedKeywordSet.size}/${totalKeywords}` : t("resume.noJobDescription")}</span>
                 </div>
                 <div className="flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-subtle)] px-3 py-1 text-xs">
-                  <ShieldCheck className={`h-3.5 w-3.5 ${factCheckPassed ? "text-[var(--success)]" : "text-[var(--warning)]"}`} />
-                  <span className="text-[var(--text-muted)]">真实性合规:</span>
-                  <span className={factCheckPassed ? "font-medium text-[var(--success)]" : "font-medium text-[var(--warning)]"}>
-                    {factCheckPassed ? "已合规验证" : `${sensitiveDiffCount} 处敏感数字/链接需核对`}
-                  </span>
+                  <ShieldCheck className="h-3.5 w-3.5 text-[var(--text-muted)]" />
+                  <span>{t("resume.literalCheck", { count: sensitiveDiffCount })}</span>
                 </div>
+                <span className={`text-xs ${factsReviewed ? "text-[var(--success)]" : "text-[var(--warning)]"}`}>{t(factsReviewed ? "resume.userReviewed" : "resume.manualReviewPending")}</span>
                 {resumeMatchedKeywords.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1 text-[11px] text-[var(--text-muted)]">
                     {resumeMatchedKeywords.slice(0, 5).map(kw => (
@@ -632,6 +631,10 @@ export default function ResumeOptimizer() {
               </div>
             )}
           </div>
+          {jobDescription.trim() && <div className="mt-3 flex gap-4 text-xs text-[var(--text-muted)]">{(['required', 'preferred'] as const).map(priority => {
+            const items = resumeRequirements.filter(item => item.priority === priority)
+            return <span key={priority}>{t(priority === 'required' ? 'resume.requirementRequired' : 'resume.requirementPreferred')}: {items.filter(item => matchedKeywordSet.has(item.keyword.toLocaleLowerCase())).length}/{items.length}</span>
+          })}</div>}
         </section>
       )}
 
@@ -701,39 +704,16 @@ export default function ResumeOptimizer() {
             </div>
           </div>
           <div ref={diffContainerRef} className="max-h-[560px] min-h-[320px] overflow-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm font-mono leading-relaxed">
-            {diffLines.map((line, idx) => (
-              <div
-                key={idx}
-                data-diff-index={idx}
-                className={`group flex items-start justify-between gap-2 px-2 py-0.5 whitespace-pre-wrap transition-shadow ${
-                  line.type !== "same" && /\d|@|(?:https?:\/\/|www\.)/i.test(line.text)
-                    ? "border-l-2 border-[var(--warning)]"
-                    : ""
-                } ${changedDiffIndices[activeDiffChange] === idx ? "ring-1 ring-[var(--action)]" : ""} ${
-                  line.type === "removed"
-                    ? "bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] text-[var(--danger)] line-through"
-                    : line.type === "added"
-                      ? "bg-[color-mix(in_srgb,var(--success)_10%,transparent)] font-medium text-[var(--success)]"
-                      : "text-[var(--text-muted)] group-hover:text-[var(--text-main)]"
-                }`}
-              >
-                <div className="flex-1">
-                  {line.type === "removed" ? "- " : line.type === "added" ? "+ " : "  "}
-                  {line.text}
-                </div>
-                {line.type === "added" && (
-                  <button
-                    type="button"
-                    onClick={() => handleRejectLineDiff(line.text)}
-                    title="放弃该新增项 (还原)"
-                    className="shrink-0 opacity-0 group-hover:opacity-100 text-[11px] flex items-center gap-0.5 rounded px-1 text-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_15%,transparent)] transition-opacity"
-                  >
-                    <X className="h-3 w-3" />
-                    <span>撤回</span>
-                  </button>
-                )}
+            {diffBlocks.map((block, idx) => (
+              <div key={idx} data-diff-index={idx} className={`mb-3 rounded p-2 whitespace-pre-wrap break-words ${changedDiffIndices[activeDiffChange] === idx ? "ring-1 ring-[var(--action)]" : ""}`}>
+                {block.type === 'same' ? <div className="text-[var(--text-muted)]">{block.after}</div> : <>
+                  {block.before && <div className="bg-[color-mix(in_srgb,var(--danger)_10%,transparent)] p-2 text-[var(--danger)]"><span className="text-xs font-semibold">{t("resume.diffRemoved")}</span><div>{block.before}</div></div>}
+                  {block.after && <div className="bg-[color-mix(in_srgb,var(--success)_10%,transparent)] p-2 text-[var(--success)]"><span className="text-xs font-semibold">{t("resume.diffAdded")}</span><div>{block.after}</div></div>}
+                  <button type="button" disabled={busy} onClick={() => handleRejectDiff(block)} aria-label={t("resume.revertChangeNumber", { number: idx + 1 })} className="mt-2 flex items-center gap-1 rounded border border-[var(--border-color)] px-2 py-1 text-xs text-[var(--text-main)] hover:bg-[var(--bg-hover)] disabled:opacity-40"><X className="h-3 w-3" />{t("resume.revertChange")}</button>
+                </>}
               </div>
             ))}
+            {undo && undo.after === resumeOptimized && <button type="button" disabled={busy} onClick={() => { updateResumeWorkspace({ optimized: undo.before }); setUndo(null) }} className="mt-2 rounded border border-[var(--border-color)] px-3 py-2 text-xs">{t("resume.undoRevert")}</button>}
           </div>
         </section>
       ) : viewMode === "requirements" ? (
@@ -782,7 +762,7 @@ export default function ResumeOptimizer() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
             <div className="mb-2 flex flex-wrap justify-between gap-2 text-sm">
-              <div>{t("resume.original")} <span className="border-l border-[var(--border-color)] pl-1.5 text-xs text-[var(--text-muted)]">v1</span></div>
+              <div>{t("resume.original")}</div>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-1 text-xs text-[var(--text-muted)] cursor-pointer select-none">
                   <input
@@ -791,19 +771,18 @@ export default function ResumeOptimizer() {
                     onChange={(e) => setSyncScroll(e.target.checked)}
                     className="rounded border-[var(--border-color)] text-[var(--action)] text-xs"
                   />
-                  <span>双栏同步滚动</span>
+                  <span>{t("resume.syncScroll")}</span>
                 </label>
                 <div className="text-[var(--text-muted)]">{t("resume.wordCount")}: {countResumeWords(resumeOriginal)}</div>
               </div>
             </div>
-            <div ref={originalScrollRef} onScroll={handleScrollOriginal} className="max-h-[560px] min-h-[360px] overflow-auto whitespace-pre-wrap rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm leading-relaxed">
-              {resumeOriginal || t("resume.originalPlaceholder")}
-            </div>
+            <p className="mb-2 text-xs text-[var(--text-muted)]">{t("resume.confirmExtraction")}</p>
+            <textarea ref={originalScrollRef} onScroll={handleScrollOriginal} value={resumeOriginal} maxLength={MAX_RESUME_TEXT_LENGTH} disabled={busy} aria-label={t("resume.original")} placeholder={t("resume.originalPlaceholder")} onChange={event => { updateResumeWorkspace({ original: event.target.value }); setUndo(null) }} className="min-h-[360px] max-h-[640px] w-full resize-y rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-4 text-sm leading-relaxed disabled:opacity-60" />
           </section>
 
           <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
             <div className="mb-2 flex flex-wrap justify-between gap-2 text-sm">
-              <div>{t("resume.optimized")} <span className="border-l border-[var(--border-color)] pl-1.5 text-xs text-[var(--action)]">v2</span></div>
+              <div>{t("resume.optimized")}</div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <span className="text-[var(--text-muted)]">{t("resume.wordCount")}: {countResumeWords(resumeOptimized)}</span>
                 {resumeOptimized.trim() && (
@@ -815,6 +794,7 @@ export default function ResumeOptimizer() {
                 )}
               </div>
             </div>
+            {activeSuggestion && <div className="mb-3 rounded border border-[var(--border-color)] p-3 text-xs" role="status"><p>{activeSuggestion.description}</p><p className="mt-1 text-[var(--text-muted)]">{t(activeSuggestion.anchor && resumeOptimized.includes(activeSuggestion.anchor) ? "resume.suggestionLocated" : "resume.suggestionNewSection")}</p><div className="mt-2 flex gap-3"><button type="button" className="underline" onClick={() => resolveSuggestion(activeSuggestion, 'done')}>{t("resume.markDone")}</button><button type="button" className="underline" onClick={() => resolveSuggestion(activeSuggestion, 'skipped')}>{t("resume.markSkipped")}</button></div></div>}
             <textarea
               ref={optimizedEditorRef}
               value={resumeOptimized}
@@ -823,6 +803,7 @@ export default function ResumeOptimizer() {
               onChange={(event) => {
                 setReviewedOptimizedText("")
                 setActiveDiffChange(0)
+                setUndo(null)
                 updateResumeWorkspace({ optimized: event.target.value })
               }}
               className="min-h-[360px] max-h-[640px] w-full resize-y rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] p-4 text-sm leading-relaxed outline-none transition-colors focus:border-[var(--action)] disabled:opacity-60"
@@ -836,13 +817,14 @@ export default function ResumeOptimizer() {
       {resumeOptimized.trim() && (
         <div
           ref={reviewSectionRef}
-          className={`mt-4 rounded-lg border bg-[var(--bg-surface)] p-5 ${
+          className={`sticky bottom-0 z-10 mt-4 rounded-lg border bg-[var(--bg-surface)] p-4 ${
             analysisStale || !factsReviewed ? "border-[var(--warning)]" : "border-[var(--success)]"
           }`}
         >
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="font-medium">{t("resume.reviewAndExport")}</div>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">{t("resume.exportFormat")}</p>
               <div className="mt-1 text-xs text-[var(--text-muted)]">
                 {t("resume.reviewSummary", { changes: changedDiffIndices.length, sensitive: sensitiveDiffCount })}
               </div>
@@ -896,9 +878,9 @@ export default function ResumeOptimizer() {
                     <div className="text-xs text-[var(--action)]">{categoryLabel(suggestion.category)}</div>
                     <div className="mt-1 text-sm font-medium">{suggestion.title ?? t(suggestion.titleKey ?? "")}</div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
                     <span className={`text-xs ${suggestion.applied ? "text-[var(--success)]" : "text-[var(--warning)]"}`}>
-                      {t(suggestion.applied ? "resume.aiCompleted" : "resume.needsYourInput")}
+                      {t(suggestion.resolution ? (suggestion.resolutionFingerprint !== resumeTextFingerprint(resumeOptimized) ? "resume.suggestionRecheck" : suggestion.resolution === "done" ? "resume.markDone" : "resume.markSkipped") : suggestion.applied ? "resume.aiCompleted" : "resume.needsYourInput")}
                     </span>
                     {!suggestion.applied && suggestion.replacement && (
                       <button
@@ -911,10 +893,14 @@ export default function ResumeOptimizer() {
                         {t("resume.applyOneClick")}
                       </button>
                     )}
+                    {!suggestion.applied && <>
+                      <button type="button" disabled={busy} className="text-xs underline disabled:opacity-40" onClick={() => resolveSuggestion(suggestion, 'done')}>{t("resume.markDone")}</button>
+                      <button type="button" disabled={busy} className="text-xs underline disabled:opacity-40" onClick={() => resolveSuggestion(suggestion, 'skipped')}>{t("resume.markSkipped")}</button>
+                    </>}
                     {!suggestion.applied && !suggestion.replacement && (
                       <button
                         type="button"
-                        onClick={handleManualSuggestion}
+                        onClick={() => handleManualSuggestion(suggestion)}
                         disabled={busy}
                         className="flex items-center gap-1 rounded-md border border-[var(--border-color)] px-2.5 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40"
                       >

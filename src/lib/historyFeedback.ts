@@ -36,15 +36,15 @@ export function parseHistoryFeedback(detailsJson?: string | null, fallbackScore:
     const overall = typeof score.overallScore === 'number'
       ? score.overallScore
       : fallbackScore
-    const improvements = stringArray(score.improvements)
+    const improvements = stringArray(score.priorityImprovements ?? score.improvements)
     return {
       overallScore: overall ?? null,
       summary: String(score.summary || '').trim(),
       strengths: stringArray(score.strengths),
       improvements,
-      nextAction: String(parsed.nextAction || improvements[0] || '').trim(),
+      nextAction: String(parsed.nextAction || stringArray(score.recommendedPractice)[0] || improvements[0] || '').trim(),
       quality: typeof parsed.quality === 'string' ? parsed.quality : null,
-      archivePartial: Boolean(parsed.archivePartial),
+      archivePartial: Boolean(parsed.archivePartial || score.completedNormally === false),
     }
   } catch {
     return {

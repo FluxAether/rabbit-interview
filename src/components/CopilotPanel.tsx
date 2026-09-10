@@ -486,8 +486,10 @@ export default function CopilotPanel({
         </div>
       )}
 
-      <CopilotChat key={copilot.startedAt ?? "idle"} messages={copilot.messages} showMyBubbles={showMyBubbles}
-        fontSize={fontSize} running={running} generatingReplyToIds={copilot.generatingReplyToIds} floating={floating} visible={!floating || windowStatus?.visible !== false} />
+      <div role="log" className="relative flex min-h-0 flex-1 flex-col">
+        <CopilotChat key={copilot.startedAt ?? "idle"} messages={copilot.messages} showMyBubbles={showMyBubbles}
+          fontSize={fontSize} running={running} generatingReplyToIds={copilot.generatingReplyToIds} floating={floating} visible={!floating || windowStatus?.visible !== false} />
+      </div>
       {showRealtimeHud && realtimeHud && (
         <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-[var(--bg-subtle)] px-2.5 py-2 font-mono text-[11px] text-[var(--text-muted)]" aria-label={t("copilot.realtime.hud")}>
           <span>IPC {realtimeHud.audioIpcKbPerSecond.toFixed(1)} KB/s</span>

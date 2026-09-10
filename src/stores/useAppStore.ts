@@ -64,6 +64,10 @@ export interface AppState {
   resumeTargetRole: string
   resumeTargetCompany: string
   resumeProfileUpdatedAt: string
+  resumeAnalysisTargetFingerprint: string
+  resumeAnalysisResumeFingerprint: string
+  resumeReviewedFingerprint: string
+  resumeReviewedAt: string
   resumeHydrated: boolean
   resumePersistenceError: boolean
   hydrateResumeWorkspace: (workspace: ResumeWorkspace) => void
@@ -92,6 +96,10 @@ function resumeStateFromWorkspace(workspace: ResumeWorkspace) {
     resumeTargetRole: workspace.targetRole || '',
     resumeTargetCompany: workspace.targetCompany || '',
     resumeProfileUpdatedAt: workspace.profileUpdatedAt || '',
+    resumeAnalysisTargetFingerprint: workspace.analysisTargetFingerprint,
+    resumeAnalysisResumeFingerprint: workspace.analysisResumeFingerprint,
+    resumeReviewedFingerprint: workspace.reviewedFingerprint,
+    resumeReviewedAt: workspace.reviewedAt,
   }
 }
 
@@ -112,6 +120,10 @@ export function selectResumeWorkspace(state: AppState): ResumeWorkspace {
     targetRole: state.resumeTargetRole,
     targetCompany: state.resumeTargetCompany,
     profileUpdatedAt: state.resumeProfileUpdatedAt,
+    analysisTargetFingerprint: state.resumeAnalysisTargetFingerprint,
+    analysisResumeFingerprint: state.resumeAnalysisResumeFingerprint,
+    reviewedFingerprint: state.resumeReviewedFingerprint,
+    reviewedAt: state.resumeReviewedAt,
   }
 }
 
@@ -162,9 +174,13 @@ export const useAppStore = create<AppState>((set) => ({
   resumeTargetRole: '',
   resumeTargetCompany: '',
   resumeProfileUpdatedAt: '',
+  resumeAnalysisTargetFingerprint: '',
+  resumeAnalysisResumeFingerprint: '',
+  resumeReviewedFingerprint: '',
+  resumeReviewedAt: '',
   resumeHydrated: false,
   resumePersistenceError: false,
-  hydrateResumeWorkspace: (workspace) => set({ ...resumeStateFromWorkspace(workspace), resumeHydrated: true }),
+  hydrateResumeWorkspace: (workspace) => set({ ...resumeStateFromWorkspace(workspace), resumeHydrated: true, resumePersistenceError: false }),
   updateResumeWorkspace: (workspace) => set((state) => resumeStateFromWorkspace(
     mergeResumeWorkspace(selectResumeWorkspace(state), workspace),
   )),
@@ -177,6 +193,10 @@ export const useAppStore = create<AppState>((set) => ({
       analysisOriginalFingerprint: context.originalFingerprint,
       analysisJobDescriptionFingerprint: context.jobDescriptionFingerprint,
       analysisSource: context.source,
+      analysisTargetFingerprint: context.targetFingerprint,
+      analysisResumeFingerprint: context.resumeFingerprint,
+      reviewedFingerprint: '',
+      reviewedAt: '',
     }),
   )),
   clearResumeWorkspace: () => {

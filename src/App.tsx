@@ -18,7 +18,6 @@ import {
 } from './lib/copilotSession'
 import { invoke } from '@tauri-apps/api/core'
 import type { AudioCapabilities } from './lib/copilotSession'
-import { createEmptyResumeWorkspace } from './lib/resumeOptimizer'
 import {
   getCopilotWindowStatus,
   hideCopilotWindow,
@@ -275,7 +274,7 @@ export default function App() {
           })
           loadResumeWorkspace().then(hydrateResumeWorkspace).catch((error) => {
             console.warn('Failed to load resume workspace', error)
-            hydrateResumeWorkspace(createEmptyResumeWorkspace())
+            useAppStore.getState().setResumePersistenceError(true)
           })
           loadAppSettings().then((saved) => {
             useAppStore.getState().setSettings({ ...saved, language: saved.language || DEFAULT_LANGUAGE })
@@ -318,6 +317,10 @@ export default function App() {
         && state.resumeTargetRole === previous.resumeTargetRole
         && state.resumeTargetCompany === previous.resumeTargetCompany
         && state.resumeProfileUpdatedAt === previous.resumeProfileUpdatedAt
+        && state.resumeAnalysisTargetFingerprint === previous.resumeAnalysisTargetFingerprint
+        && state.resumeAnalysisResumeFingerprint === previous.resumeAnalysisResumeFingerprint
+        && state.resumeReviewedFingerprint === previous.resumeReviewedFingerprint
+        && state.resumeReviewedAt === previous.resumeReviewedAt
       ) return
       schedulePersistence()
     })

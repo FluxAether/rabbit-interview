@@ -30,6 +30,7 @@ export interface MockInterviewConfig {
   voiceInputEnabled: boolean
   speechEnabled: boolean
   microphoneDevice: string | null
+  autoSubmitEnabled: boolean
 }
 
 export interface MockInterviewScores {
@@ -98,7 +99,7 @@ export interface MockInterviewReport {
   uncoveredCompetencies: string[]
 }
 
-export type MockInterviewPhase = 'setup' | 'starting' | 'speaking' | 'answering' | 'evaluating' | 'generating-report' | 'saving' | 'completed' | 'error'
+export type MockInterviewPhase = 'setup' | 'paused' | 'starting' | 'speaking' | 'answering' | 'evaluating' | 'generating-report' | 'saving' | 'completed' | 'error'
 
 export interface EvidenceProject {
   name: string
@@ -150,6 +151,7 @@ export type NextAction =
   | { type: 'end' }
 
 export interface MockInterviewSnapshot {
+  sessionId: string
   phase: MockInterviewPhase
   config: MockInterviewConfig
   turns: MockInterviewTurn[]
@@ -164,22 +166,51 @@ export interface MockInterviewSnapshot {
   recordingPath: string | null
   plan: InterviewPlan | null
   coverage: SlotCoverage[]
+  reportRequested: boolean
+  completedNormally: boolean
+  practice: { previousTurn: MockInterviewTurn; sourceRecordId: number | null } | null
 }
 
 export function defaultMockInterviewConfig(language: SupportedLanguage): MockInterviewConfig {
   return {
     role: '', company: '', interviewType: 'mixed', difficulty: 'mid', questionCount: 5,
     language, resumeContext: '', jobDescription: '', voiceInputEnabled: true,
-    speechEnabled: true, microphoneDevice: null,
+    speechEnabled: true, microphoneDevice: null, autoSubmitEnabled: false,
   }
 }
 
 export function createMockInterviewSnapshot(language: SupportedLanguage): MockInterviewSnapshot {
   return {
+    sessionId: crypto.randomUUID(),
     phase: 'setup', config: defaultMockInterviewConfig(language), turns: [], currentQuestion: null,
     draftAnswer: '', interimTranscript: '', startedAt: null, elapsedSeconds: 0,
     report: null, error: null, recordId: null, recordingPath: null,
-    plan: null, coverage: [],
+    plan: null, coverage: [], reportRequested: false, completedNormally: false, practice: null,
+  }
+}
+
+export function createMockPractice(snapshot: MockInterviewSnapshot, questionId: string): MockInterviewSnapshot {
+  const turn = snapshot.turns.find(item => item.question.id === questionId)
+  if (!turn) throw new Error('Practice question is missing.')
+  const slot: InterviewSlot = slotById(snapshot.plan, turn.question.slotId) ?? {
+    id: turn.question.slotId || 'slot-practice',
+    sequence: 1,
+    stage: turn.question.stage,
+    competency: turn.question.competencies[0] || 'general',
+    focus: turn.question.intent,
+    evidenceRefs: turn.question.evidenceRefs || [],
+    allowFollowUp: false,
+  }
+  const question = { ...turn.question, sequence: 1, kind: 'primary' as const, parentQuestionId: null, createdAt: Date.now() }
+  const basePlan = snapshot.plan ?? { primaryCount: 1, maxFollowUpsPerPrimary: 1 as const, maxFollowUpsSession: 0, slots: [slot], brief: { projects: [], skills: [], jdRequired: [], jdPreferred: [], overlap: [], gaps: [], resumeEmpty: true, jobDescriptionEmpty: true, source: 'empty' as const } }
+  const plan = { ...basePlan, primaryCount: 1, maxFollowUpsSession: 0, slots: [{ ...slot, sequence: 1, allowFollowUp: false }] }
+  return {
+    ...createMockInterviewSnapshot(snapshot.config.language),
+    config: { ...snapshot.config, questionCount: 1 },
+    plan, coverage: markQuestionAsked(createInitialCoverage(plan), slot.id),
+    currentQuestion: question, turns: [{ question, answer: null, feedback: null }],
+    startedAt: Date.now(), phase: 'answering',
+    practice: { previousTurn: turn, sourceRecordId: snapshot.recordId },
   }
 }
 
@@ -295,6 +326,10 @@ export function markFollowUpIssued(coverage: SlotCoverage[], slotId: string): Sl
   return coverage.map(item => item.slotId === slotId
     ? { ...item, followUpsUsed: item.followUpsUsed + 1 }
     : item)
+}
+
+export function markQuestionAsked(coverage: SlotCoverage[], slotId: string): SlotCoverage[] {
+  return coverage.map(item => item.slotId === slotId && item.status === 'pending' ? { ...item, status: 'asked' } : item)
 }
 
 export function sessionFollowUpsUsed(coverage: SlotCoverage[]): number {

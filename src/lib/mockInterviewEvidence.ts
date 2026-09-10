@@ -12,6 +12,9 @@ export interface EvidenceWorkspaceHint {
   matchedKeywords?: string[]
   missingKeywords?: string[]
   analysisOriginalFingerprint?: string
+  analysisResumeFingerprint?: string
+  reviewedFingerprint?: string
+  analysisFresh?: boolean
   analysisJobDescriptionFingerprint?: string
 }
 
@@ -80,10 +83,15 @@ function isWorkspaceFresh(
   posting: string,
   workspace?: EvidenceWorkspaceHint | null,
 ): boolean {
-  if (!workspace?.analysisOriginalFingerprint || !workspace.analysisJobDescriptionFingerprint) return false
+  if (!workspace?.analysisJobDescriptionFingerprint) return false
+  if (!workspace.analysisOriginalFingerprint && !workspace.analysisResumeFingerprint && !workspace.reviewedFingerprint) return false
   if (!resume || !posting) return false
-  return workspace.analysisOriginalFingerprint === resumeTextFingerprint(resume)
+  if (workspace.analysisFresh === false) return false
+  const fingerprint = resumeTextFingerprint(resume)
+  return (workspace.analysisResumeFingerprint || workspace.analysisOriginalFingerprint) === fingerprint
     && workspace.analysisJobDescriptionFingerprint === resumeTextFingerprint(posting)
+    || Boolean(workspace.analysisFresh && workspace.reviewedFingerprint === fingerprint
+      && workspace.analysisJobDescriptionFingerprint === resumeTextFingerprint(posting))
 }
 
 function resolveKeywords(

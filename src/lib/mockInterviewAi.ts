@@ -106,12 +106,13 @@ export async function evaluateMockTurn(
   slot: InterviewSlot | null,
   turns: MockInterviewTurn[],
   answer: string,
+  questionId: string,
   signal?: AbortSignal,
 ): Promise<MockInterviewFeedback> {
-  const current = turns[turns.length - 1]?.question
+  const current = turns.find(turn => turn.question.id === questionId)?.question
   if (!current) throw new Error('No active interview question.')
   const history = turns.map((turn, index) => (
-    `Q${index + 1} [${turn.question.kind}/${turn.question.stage}/${turn.question.competencies.join(',')}]: ${turn.question.text}\nA${index + 1}: ${turn.answer?.text || (turn.question.id === current.id ? answer : '')}`
+    `Q${index + 1} [${turn.question.kind}/${turn.question.stage}/${turn.question.competencies.join(',')}]: ${turn.question.text}\nA${index + 1}: ${turn.question.id === current.id ? answer : turn.answer?.text || ''}`
   )).join('\n\n')
   const requireTechnicalAccuracy = current.stage === 'technical' || current.competencies.includes('technical-depth')
   const result = await generateStructuredJson<any>(SYSTEM, `${sessionContext(config, plan)}
@@ -120,7 +121,8 @@ Current competency: ${slot?.competency || current.competencies[0] || 'unknown'}
 Interview history:
 ${history}
 
-Evaluate ONLY the latest answer.
+Evaluate ONLY this question and answer, regardless of its position in history:
+${JSON.stringify({ questionId: current.id, question: current.text, answer })}
 Do not generate another question.
 Set coveredCompetency true only if this answer substantively addressed the assigned competency.
 gaps must be a subset of ["metric","role","decision","tradeoff","failure","technical-depth","scope"].
@@ -145,7 +147,7 @@ export async function generateMockReport(
   const evidence = turns.map((turn, index) => (
     `Q${index + 1} [${turn.question.kind}/${turn.question.competencies.join(',')}]: ${turn.question.text}\nA: ${turn.answer?.text || ''}\nFeedback: ${turn.feedback?.summary || ''}\nGaps: ${(turn.feedback?.gaps || []).join(', ') || 'none'}`
   )).join('\n\n')
-  const result = await generateStructuredJson<any>(SYSTEM, `${sessionContext(config, plan)}
+  const result = turns.some(turn => turn.feedback) ? await generateStructuredJson<any>(SYSTEM, `${sessionContext(config, plan)}
 Deterministic overall score: ${overallScore}
 Dimension scores: ${JSON.stringify(dimensionScores)}
 Coverage: ${JSON.stringify(coverageSummary)}
@@ -153,7 +155,7 @@ Uncovered competencies: ${missing.join(', ') || 'none'}
 Evidence:
 ${evidence}
 Create a concise final coaching report without changing the supplied scores.
-Schema: {"strengths":["..."],"risks":["..."],"priorityImprovements":["..."],"recommendedPractice":["..."],"summary":"..."}.`, signal)
+Schema: {"strengths":["..."],"risks":["..."],"priorityImprovements":["..."],"recommendedPractice":["..."],"summary":"..."}.`, signal) : { summary: '' }
   return {
     overallScore,
     dimensionScores,

@@ -3,7 +3,22 @@ import { invoke } from '@tauri-apps/api/core'
 import { RefreshCw, Mic, Volume2, FileText } from 'lucide-react'
 import { useAppStore, selectResumeWorkspace } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
-import { saveInterview } from '../lib/db'
+import {
+  clearMockDraft,
+  loadMockDraft,
+  persistMockDraft,
+  saveMockInterviewRecord,
+} from '../lib/mockInterviewPersistence'
+import {
+  createMockPractice,
+  markQuestionAsked,
+  calculateDimensionScores,
+  calculateOverallScore,
+} from '../lib/mockInterviewState'
+import {
+  isResumeAnalysisStale,
+  isResumeReviewed,
+} from '../lib/resumeOptimizer'
 import { generateQuestionForSlot, generateFollowUpQuestion, evaluateMockTurn, generateMockReport } from '../lib/mockInterviewAi'
 import { buildEvidenceBrief } from '../lib/mockInterviewEvidence'
 import { buildInterviewPlan } from '../lib/mockInterviewPlan'
@@ -56,6 +71,8 @@ export default function MockInterview() {
   })
   const [voiceSnapshot, setVoiceSnapshot] = useState<MockInterviewVoiceSnapshot>(() => createMockInterviewVoiceSnapshot())
   const [endedByLimit, setEndedByLimit] = useState(false)
+  const [pendingDraft, setPendingDraft] = useState<MockInterviewSnapshot | null>(null)
+  const [savedReportSnapshot, setSavedReportSnapshot] = useState<MockInterviewSnapshot | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const finishingRef = useRef(false)
   const submittingQuestionIdRef = useRef<string | null>(null)
@@ -84,6 +101,20 @@ export default function MockInterview() {
     }, remainingMs)
     return () => window.clearTimeout(timer)
   }, [session.startedAt, session.phase, session.config.voiceInputEnabled])
+
+  useEffect(() => {
+    loadMockDraft().then(draft => {
+      if (draft && draft.turns.length > 0 && draft.phase !== 'completed') {
+        setPendingDraft(draft)
+      }
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (session.phase !== 'setup' && session.phase !== 'completed' && !session.practice) {
+      void persistMockDraft(session)
+    }
+  }, [session])
 
   useEffect(() => {
     const unsubscribe = mockInterviewVoiceSession.subscribe(event => {
@@ -125,6 +156,9 @@ export default function MockInterview() {
     return () => {
       unsubscribe()
       abortRef.current?.abort()
+      if (sessionRef.current.phase !== 'setup' && sessionRef.current.phase !== 'completed' && !sessionRef.current.practice) {
+        void persistMockDraft(sessionRef.current)
+      }
       void mockInterviewVoiceSession.stop({ saveRecording: false })
     }
   }, [])
@@ -149,7 +183,10 @@ export default function MockInterview() {
       matchedKeywords: workspace.matchedKeywords,
       missingKeywords: workspace.missingKeywords,
       analysisOriginalFingerprint: workspace.analysisOriginalFingerprint,
+      analysisResumeFingerprint: workspace.analysisResumeFingerprint,
+      reviewedFingerprint: workspace.reviewedFingerprint,
       analysisJobDescriptionFingerprint: workspace.analysisJobDescriptionFingerprint,
+      analysisFresh: !isResumeAnalysisStale(workspace),
     }
   }
 
@@ -201,8 +238,9 @@ export default function MockInterview() {
     failedAnswerRef.current = null
     const brief = buildEvidenceBrief(session.config.resumeContext, session.config.jobDescription, workspaceHint())
     const plan = buildInterviewPlan(session.config, brief)
-    const coverage = createInitialCoverage(plan)
     const firstSlot = plan.slots[0]
+    const coverage = markQuestionAsked(createInitialCoverage(plan), firstSlot.id)
+    setPendingDraft(null)
     patch({
       phase: 'starting', error: null, turns: [], report: null, recordId: null,
       startedAt: Date.now(), plan, coverage, currentQuestion: null,
@@ -261,7 +299,7 @@ export default function MockInterview() {
       const plan = current.plan
       if (!plan) throw new Error('Interview plan is missing.')
       const currentSlot = slotById(plan, question.slotId)
-      const feedback = await evaluateMockTurn(current.config, plan, currentSlot, answeredTurns, answer, controller.signal)
+      const feedback = await evaluateMockTurn(current.config, plan, currentSlot, answeredTurns, answer, question.id, controller.signal)
       const evaluated = answeredTurns.map(turn => turn.question.id === question.id ? { ...turn, feedback } : turn)
       const coverageAfterAnswer = applyAnswerCoverage(current.coverage, currentSlot?.id || question.slotId || '', feedback)
       const action = decideNextAction({
@@ -270,6 +308,18 @@ export default function MockInterview() {
         currentSlotId: currentSlot?.id || question.slotId || '',
         feedback,
       })
+
+      if (current.practice) {
+        submittingQuestionIdRef.current = null
+        failedAnswerRef.current = null
+        setSession(latest => ({
+          ...latest,
+          phase: 'answering',
+          turns: evaluated,
+          currentQuestion: null,
+        }))
+        return
+      }
 
       if (action.type === 'end') {
         submittingQuestionIdRef.current = null
@@ -290,7 +340,7 @@ export default function MockInterview() {
         )
       const nextCoverage = action.type === 'follow-up'
         ? markFollowUpIssued(coverageAfterAnswer, action.slotId)
-        : coverageAfterAnswer
+        : markQuestionAsked(coverageAfterAnswer, nextSlot.id)
 
       failedAnswerRef.current = null
       submittingQuestionIdRef.current = null
@@ -347,8 +397,9 @@ export default function MockInterview() {
         mode: `mock-${current.config.interviewType}`, recordingPath: recording?.path || null,
         detailsJson: JSON.stringify({ version: 2, config: current.config, plan: current.plan, coverage, turns, report }),
       }
-      const id = await saveInterview(record)
+      const id = await saveMockInterviewRecord(record, current.sessionId)
       addHistory({ ...record, id })
+      await clearMockDraft().catch(() => {})
       setSession(latest => ({ ...latest, turns, coverage, report, recordId: id, recordingPath: recording?.path || null, phase: 'completed', currentQuestion: null }))
     } catch (error) {
       finishingRef.current = false
@@ -364,6 +415,7 @@ export default function MockInterview() {
     submittingQuestionIdRef.current = null
     failedAnswerRef.current = null
     abortRef.current?.abort()
+    void clearMockDraft().catch(() => {})
     void mockInterviewVoiceSession.stop({ saveRecording: false })
     const initial = createMockInterviewSnapshot(language)
     initial.config.resumeContext = workspaceResume
@@ -406,7 +458,7 @@ export default function MockInterview() {
 
   const switchToTextAnswer = async () => {
     const current = sessionRef.current
-    const preservedAnswer = current.draftAnswer
+    const preservedAnswer = [current.draftAnswer, voiceSnapshot.finalTranscript, voiceSnapshot.interimTranscript].filter(Boolean).join(' ').trim()
     abortRef.current?.abort()
     submittingQuestionIdRef.current = null
     failedAnswerRef.current = null
@@ -419,6 +471,44 @@ export default function MockInterview() {
       interimTranscript: '',
       error: null,
     }))
+  }
+
+  const startPractice = (turn: MockInterviewSnapshot['turns'][number]) => {
+    try {
+      const practiceSession = createMockPractice(session, turn.question.id)
+      setSavedReportSnapshot(session)
+      setSession(practiceSession)
+    } catch (error) {
+      patch({ error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  const returnFromPractice = () => {
+    if (savedReportSnapshot) {
+      setSession(savedReportSnapshot)
+      setSavedReportSnapshot(null)
+    }
+  }
+
+  const applyPracticeToReport = () => {
+    if (!savedReportSnapshot || !session.practice || !session.turns[0]?.feedback) return
+    const newTurn = session.turns[0]
+    const updatedTurns = savedReportSnapshot.turns.map(turn =>
+      turn.question.id === session.practice?.previousTurn.question.id ? newTurn : turn,
+    )
+    const updatedDimensionScores = calculateDimensionScores(updatedTurns)
+    const updatedOverall = calculateOverallScore(updatedTurns)
+    const updatedReport = {
+      ...savedReportSnapshot.report!,
+      overallScore: updatedOverall,
+      dimensionScores: updatedDimensionScores,
+    }
+    setSession({
+      ...savedReportSnapshot,
+      turns: updatedTurns,
+      report: updatedReport,
+    })
+    setSavedReportSnapshot(null)
   }
 
   const exportReport = () => {
@@ -434,6 +524,30 @@ export default function MockInterview() {
   if (session.phase === 'setup') return (
     <div className="w-full bg-[var(--bg-app)] px-5 py-6 text-[var(--text-main)] lg:px-8">
       <section className="mx-auto max-w-4xl rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5 lg:p-7">
+      {pendingDraft && (
+        <div className="mb-4 flex flex-col gap-3 rounded-md border border-[var(--action)] bg-[var(--bg-subtle)] p-4 text-sm lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="font-semibold text-[var(--action)]">{t('mock.draft.banner', { count: pendingDraft.turns.filter(t => t.answer).length })}</div>
+            <div className="text-xs text-[var(--text-muted)]">{pendingDraft.config.role} · {pendingDraft.config.company || '未指定'}</div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => { setSession(pendingDraft); setPendingDraft(null) }}
+              className="rounded-md bg-[var(--action)] px-3 py-1.5 text-xs font-medium text-[var(--action-text)] transition-opacity hover:opacity-90"
+            >
+              {t('mock.draft.resume')}
+            </button>
+            <button
+              type="button"
+              onClick={() => { void clearMockDraft().catch(() => {}); setPendingDraft(null) }}
+              className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-xs transition-colors hover:bg-[var(--bg-hover)]"
+            >
+              {t('mock.draft.discard')}
+            </button>
+          </div>
+        </div>
+      )}
       <h1 className="text-xl font-semibold tracking-tight">{copy.title}</h1>
       <p className="mt-1 text-sm text-[var(--text-muted)]">{t('mock.setup.subtitle')}</p>
 
@@ -477,8 +591,21 @@ export default function MockInterview() {
 
       <div className="mt-6 border-t border-[var(--border-color)] pt-5">
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-2 text-sm font-medium">
+          <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
             <FileText className="h-4 w-4 text-[var(--action)]" /> 面试上下文 (Resume & JD Context)
+            {isResumeReviewed(selectResumeWorkspace(useAppStore.getState())) ? (
+              <span className="rounded bg-[color-mix(in_srgb,var(--success)_15%,transparent)] px-2 py-0.5 text-xs text-[var(--success)] font-medium">
+                {t('mock.context.resumeVerified')}
+              </span>
+            ) : resumeOptimized.trim() ? (
+              <span className="rounded bg-[color-mix(in_srgb,var(--warning)_15%,transparent)] px-2 py-0.5 text-xs text-[var(--warning)] font-medium">
+                {t('mock.context.resumeUnverified')}
+              </span>
+            ) : (
+              <span className="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-xs text-[var(--text-muted)]">
+                {t('mock.context.resumeOriginal')}
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -530,25 +657,42 @@ export default function MockInterview() {
         <p className="mt-4 rounded-md border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-sm text-[var(--text-muted)]">{t('mock.limit.reached')}</p>
       )}
       <p className="mt-5 border-l-2 border-[var(--action)] bg-[var(--bg-subtle)] p-4">{session.report.summary}</p>
-      {/* Competency Radar / Visual Score Matrix */}
+      {/* Competency Score Matrix (M1) */}
       <section className="mt-5 rounded-md border border-[var(--border-color)] p-4">
-        <h2 className="font-medium text-sm text-[var(--text-muted)] mb-3">六维胜任力与覆盖画像</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-medium text-sm text-[var(--text-muted)]">{t('mock.report.dimensions')}</h2>
+          <span className="text-xs text-[var(--text-muted)]">
+            {session.report.completedNormally
+              ? t('mock.report.completedNormally', { count: session.report.answeredQuestionCount })
+              : t('mock.report.completedEarly', { count: session.report.answeredQuestionCount, total: session.report.targetQuestionCount })}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <div className="rounded border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-center">
-            <div className="text-xs text-[var(--text-muted)]">逻辑结构</div>
-            <div className="mt-1 font-mono text-xl font-bold text-[var(--action)]">{session.report.overallScore}%</div>
+            <div className="text-xs text-[var(--text-muted)]">{t('mock.dimension.structure')}</div>
+            <div className="mt-1 font-mono text-xl font-bold text-[var(--action)]">{session.report.dimensionScores.structure ?? '-'}%</div>
           </div>
           <div className="rounded border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-center">
-            <div className="text-xs text-[var(--text-muted)]">题意契合</div>
-            <div className="mt-1 font-mono text-xl font-bold text-[var(--success)]">{Math.min(100, session.report.overallScore + 4)}%</div>
+            <div className="text-xs text-[var(--text-muted)]">{t('mock.dimension.relevance')}</div>
+            <div className="mt-1 font-mono text-xl font-bold text-[var(--success)]">{session.report.dimensionScores.relevance ?? '-'}%</div>
           </div>
           <div className="rounded border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-center">
-            <div className="text-xs text-[var(--text-muted)]">语言精练</div>
-            <div className="mt-1 font-mono text-xl font-bold text-[var(--action)]">{Math.max(40, session.report.overallScore - 2)}%</div>
+            <div className="text-xs text-[var(--text-muted)]">{t('mock.dimension.clarity')}</div>
+            <div className="mt-1 font-mono text-xl font-bold text-[var(--action)]">{session.report.dimensionScores.clarity ?? '-'}%</div>
           </div>
           <div className="rounded border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-center">
-            <div className="text-xs text-[var(--text-muted)]">成果量化</div>
-            <div className="mt-1 font-mono text-xl font-bold text-[var(--warning)]">{Math.max(35, session.report.overallScore - 8)}%</div>
+            <div className="text-xs text-[var(--text-muted)]">{t('mock.dimension.specificity')}</div>
+            <div className="mt-1 font-mono text-xl font-bold text-[var(--action)]">{session.report.dimensionScores.specificity ?? '-'}%</div>
+          </div>
+          <div className="rounded border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-center">
+            <div className="text-xs text-[var(--text-muted)]">{t('mock.dimension.impact')}</div>
+            <div className="mt-1 font-mono text-xl font-bold text-[var(--warning)]">{session.report.dimensionScores.impact ?? '-'}%</div>
+          </div>
+          <div className="rounded border border-[var(--border-color)] bg-[var(--bg-subtle)] p-3 text-center">
+            <div className="text-xs text-[var(--text-muted)]">{t('mock.dimension.technical')}</div>
+            <div className="mt-1 font-mono text-xl font-bold text-[var(--text-main)]">
+              {session.report.dimensionScores.technicalAccuracy != null ? `${session.report.dimensionScores.technicalAccuracy}%` : t('common.notApplicable')}
+            </div>
           </div>
         </div>
       </section>
@@ -576,17 +720,32 @@ export default function MockInterview() {
             <p className="mt-3 font-medium">{turn.question.text}</p>
             <p className="mt-2 rounded bg-[var(--bg-subtle)] p-3 text-sm">{turn.answer?.text || '（无回答文本）'}</p>
             <p className="mt-2 text-sm text-[var(--text-muted)]">{turn.feedback?.summary}</p>
+            {turn.feedback && (
+              <div className="mt-3 space-y-2 text-xs">
+                {turn.feedback.strengths.length > 0 && (
+                  <div className="rounded bg-[var(--bg-subtle)] p-2">
+                    <span className="font-medium text-[var(--success)]">回答亮点：</span>
+                    {turn.feedback.strengths.join('；')}
+                  </div>
+                )}
+                {turn.feedback.improvements.length > 0 && (
+                  <div className="rounded bg-[var(--bg-subtle)] p-2">
+                    <span className="font-medium text-[var(--warning)]">改进建议：</span>
+                    {turn.feedback.improvements.join('；')}
+                  </div>
+                )}
+                {turn.feedback.suggestedAnswer && (
+                  <div className="rounded bg-[var(--bg-subtle)] p-2">
+                    <span className="font-medium text-[var(--action)]">示范回答：</span>
+                    <p className="mt-1 whitespace-pre-wrap">{turn.feedback.suggestedAnswer}</p>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="mt-3 pt-2 border-t border-[var(--border-color)]">
               <button
                 type="button"
-                onClick={() => {
-                  setSession(cur => ({
-                    ...cur,
-                    phase: 'answering',
-                    currentQuestion: turn.question,
-                    draftAnswer: '',
-                  }))
-                }}
+                onClick={() => startPractice(turn)}
                 className="rounded border border-[var(--action)] px-2.5 py-1 text-xs font-medium text-[var(--action)] hover:bg-[var(--action)]/10"
               >
                 🎯 针对本题单独重练
@@ -612,6 +771,35 @@ export default function MockInterview() {
   return (
     <div className="w-full bg-[var(--bg-app)] px-5 py-6 text-[var(--text-main)] lg:px-8">
       <section className="mx-auto max-w-6xl rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5 lg:p-7">
+            {session.practice && (
+        <div className="mb-4 flex flex-col gap-3 rounded-md border border-[var(--action)] bg-[var(--bg-subtle)] p-4 text-sm lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="font-semibold text-[var(--action)]">{t('mock.practice.badge')}</div>
+            <div className="text-xs text-[var(--text-muted)]">
+              {t('mock.practice.previousScore', { score: session.practice.previousTurn.feedback?.overallScore ?? '-' })}
+              {session.turns[0]?.feedback && ` · ${t('mock.practice.newScore', { score: session.turns[0].feedback.overallScore })}`}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {session.turns[0]?.feedback && (
+              <button
+                type="button"
+                onClick={applyPracticeToReport}
+                className="rounded-md bg-[var(--action)] px-3 py-1.5 text-xs font-medium text-[var(--action-text)] hover:opacity-90"
+              >
+                {t('mock.practice.applyToReport')}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={returnFromPractice}
+              className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-xs hover:bg-[var(--bg-hover)]"
+            >
+              {t('mock.practice.returnToReport')}
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between gap-4"><div><h1 className="text-xl font-semibold tracking-tight">{copy.title}</h1><div className="mt-1 text-sm text-[var(--text-muted)]">{t('mock.progress.primary', { current: countPrimaryQuestions(session.turns), total: session.plan?.primaryCount ?? session.config.questionCount })}{session.currentQuestion?.kind === 'follow-up' ? ` · ${t('mock.progress.followUp')}` : ''} · <span className="tabular-nums">{Math.floor(session.elapsedSeconds / 60)}:{String(session.elapsedSeconds % 60).padStart(2, '0')}</span></div></div><button onClick={() => finishInterview(session.turns, session.coverage, false)} disabled={finishBusy} className="rounded-md border border-[var(--danger)] px-4 py-2 text-sm text-[var(--danger)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40">{session.phase === 'generating-report' || session.phase === 'saving' ? copy.ending : copy.end}</button></div>
       <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
         <section className="rounded-md border border-[var(--border-color)] p-5">

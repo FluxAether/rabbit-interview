@@ -20,6 +20,7 @@ import {
   type CopilotSnapshotPatch,
 } from './copilotSessionState'
 import { useAppStore, type Suggestion } from '../stores/useAppStore'
+import type { ResumeWorkspace } from './resumeOptimizer'
 import { createEmptyResumeWorkspace } from './resumeOptimizer'
 import { buildInterviewContext, createSessionIdentity, interviewProfileFromWorkspace } from './interviewProfile'
 import { createRecoverySnapshot, parseRecoverySnapshot, SESSION_RECOVERY_KEY } from './sessionRecovery'
@@ -104,6 +105,30 @@ interface ActiveAnswer {
   startedAt: number
   requestType: SuggestionRequestType
   emittedText: boolean
+}
+
+function workspaceFromStore(store: any): ResumeWorkspace {
+  return {
+    original: store.resumeOriginal || '',
+    optimized: store.resumeOptimized || '',
+    jobDescription: store.jobDescription || '',
+    suggestions: store.resumeSuggestions || [],
+    sourceFileName: store.resumeSourceFileName || '',
+    requirements: store.resumeRequirements || [],
+    targetKeywords: store.resumeTargetKeywords || [],
+    matchedKeywords: store.resumeMatchedKeywords || [],
+    missingKeywords: store.resumeMissingKeywords || [],
+    analysisOriginalFingerprint: store.resumeAnalysisOriginalFingerprint || '',
+    analysisJobDescriptionFingerprint: store.resumeAnalysisJobDescriptionFingerprint || '',
+    analysisSource: store.resumeAnalysisSource || '',
+    targetRole: store.resumeTargetRole || '',
+    targetCompany: store.resumeTargetCompany || '',
+    profileUpdatedAt: store.resumeProfileUpdatedAt || '',
+    analysisTargetFingerprint: store.resumeAnalysisTargetFingerprint || '',
+    analysisResumeFingerprint: store.resumeAnalysisResumeFingerprint || '',
+    reviewedFingerprint: store.resumeReviewedFingerprint || '',
+    reviewedAt: store.resumeReviewedAt || '',
+  }
 }
 
 function createUtteranceState(): CopilotUtteranceState {
@@ -661,23 +686,7 @@ class CopilotSessionHost {
     const store = useAppStore.getState()
     this.identity = createSessionIdentity(
       'copilot',
-      interviewProfileFromWorkspace({
-        original: store.resumeOriginal,
-        optimized: store.resumeOptimized,
-        jobDescription: store.jobDescription,
-        suggestions: store.resumeSuggestions,
-        sourceFileName: store.resumeSourceFileName,
-        requirements: store.resumeRequirements,
-        targetKeywords: store.resumeTargetKeywords,
-        matchedKeywords: store.resumeMatchedKeywords,
-        missingKeywords: store.resumeMissingKeywords,
-        analysisOriginalFingerprint: store.resumeAnalysisOriginalFingerprint,
-        analysisJobDescriptionFingerprint: store.resumeAnalysisJobDescriptionFingerprint,
-        analysisSource: store.resumeAnalysisSource,
-        targetRole: store.resumeTargetRole,
-        targetCompany: store.resumeTargetCompany,
-        profileUpdatedAt: store.resumeProfileUpdatedAt,
-      }),
+      interviewProfileFromWorkspace(workspaceFromStore(store)),
       Boolean(config.isTestSession),
     )
 
@@ -1175,23 +1184,7 @@ class CopilotSessionHost {
       ? this.snapshot.messages.filter((message) => !skipIds.has(message.id))
       : this.snapshot.messages
     const recentTurns = buildRecentTurnsContext(collectCopilotTurns(messages), question)
-    return buildInterviewContext(interviewProfileFromWorkspace({
-      original: store.resumeOriginal,
-      optimized: store.resumeOptimized,
-      jobDescription: store.jobDescription,
-      suggestions: store.resumeSuggestions,
-      sourceFileName: store.resumeSourceFileName,
-      requirements: store.resumeRequirements,
-      targetKeywords: store.resumeTargetKeywords,
-      matchedKeywords: store.resumeMatchedKeywords,
-      missingKeywords: store.resumeMissingKeywords,
-      analysisOriginalFingerprint: store.resumeAnalysisOriginalFingerprint,
-      analysisJobDescriptionFingerprint: store.resumeAnalysisJobDescriptionFingerprint,
-      analysisSource: store.resumeAnalysisSource,
-      targetRole: store.resumeTargetRole,
-      targetCompany: store.resumeTargetCompany,
-      profileUpdatedAt: store.resumeProfileUpdatedAt,
-    }), recentTurns)
+    return buildInterviewContext(interviewProfileFromWorkspace(workspaceFromStore(store)), recentTurns)
   }
 
   private async answer(

@@ -15,6 +15,9 @@ export interface ResumeSuggestion {
   category: ResumeSuggestionCategory
   replacement: ResumeReplacement | null
   applied: boolean
+  anchor?: string
+  resolution?: 'done' | 'skipped'
+  resolutionFingerprint?: string
 }
 
 export interface ResumeAnalysisResult {
@@ -41,6 +44,8 @@ export interface ResumeAnalysisContext {
   source: Exclude<ResumeAnalysisSource, ''>
   originalFingerprint: string
   jobDescriptionFingerprint: string
+  targetFingerprint: string
+  resumeFingerprint: string
 }
 
 export interface ResumeWorkspace {
@@ -59,6 +64,10 @@ export interface ResumeWorkspace {
   targetRole: string
   targetCompany: string
   profileUpdatedAt: string
+  analysisTargetFingerprint: string
+  analysisResumeFingerprint: string
+  reviewedFingerprint: string
+  reviewedAt: string
 }
 
 const RESUME_SUGGESTION_CATEGORIES: ResumeSuggestionCategory[] = ['format', 'clarity', 'impact', 'keywords']
@@ -200,6 +209,8 @@ export function normalizeLlmResumeResult(
         category,
         replacement: null,
         applied: !suggestion.requiresUserInput,
+        anchor: typeof suggestion.anchor === 'string' && optimizedText.includes(suggestion.anchor.trim())
+          ? suggestion.anchor.trim().slice(0, 500) : '',
       }
     })
 
@@ -231,6 +242,10 @@ export function createEmptyResumeWorkspace(): ResumeWorkspace {
     targetRole: '',
     targetCompany: '',
     profileUpdatedAt: '',
+    analysisTargetFingerprint: '',
+    analysisResumeFingerprint: '',
+    reviewedFingerprint: '',
+    reviewedAt: '',
   }
 }
 
@@ -244,10 +259,33 @@ export function mergeResumeWorkspace(
     ? []
     : update.targetKeywords ?? current.targetKeywords
   const next = { ...current, ...update, targetKeywords }
+  if (['original', 'optimized', 'jobDescription', 'targetRole', 'targetCompany'].some(
+    key => next[key as keyof ResumeWorkspace] !== current[key as keyof ResumeWorkspace],
+  )) {
+    next.reviewedFingerprint = ''
+    next.reviewedAt = ''
+  }
   return {
     ...next,
     ...matchResumeKeywords(next.optimized || next.original, next.jobDescription, next.targetKeywords),
   }
+}
+
+export function resumeTargetFingerprint(role: string, company: string): string {
+  return resumeTextFingerprint(JSON.stringify([role.trim(), company.trim()]))
+}
+
+export function isResumeAnalysisStale(workspace: ResumeWorkspace): boolean {
+  return !workspace.analysisOriginalFingerprint
+    || workspace.analysisOriginalFingerprint !== resumeTextFingerprint(workspace.original)
+    || workspace.analysisJobDescriptionFingerprint !== resumeTextFingerprint(workspace.jobDescription)
+    || workspace.analysisTargetFingerprint !== resumeTargetFingerprint(workspace.targetRole, workspace.targetCompany)
+}
+
+export function isResumeReviewed(workspace: ResumeWorkspace): boolean {
+  return Boolean(workspace.optimized.trim() && workspace.reviewedAt)
+    && !isResumeAnalysisStale(workspace)
+    && workspace.reviewedFingerprint === resumeTextFingerprint(workspace.optimized)
 }
 
 export function createResumeAnalysisRequestCoordinator(timeoutMs = 60_000) {

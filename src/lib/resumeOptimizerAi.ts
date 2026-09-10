@@ -9,6 +9,7 @@ export function buildResumeOptimizationPrompt(
   sourceText: string,
   jobDescription: string,
   outputLanguage: string,
+  target: { role: string; company: string } = { role: "", company: "" },
 ): string {
   return `Tailor the resume in the input JSON using this evidence-first workflow.
 
@@ -17,7 +18,7 @@ export function buildResumeOptimizationPrompt(
 - keyword must be a concise literal phrase that appears in the job description, not a synonym you invented.
 - priority is required or preferred.
 - status is supported only when the source resume contains direct evidence for the requirement. For supported items, evidence must be a short exact quote from the source resume. Otherwise status is unsupported and evidence must be empty.
-- If there is no job description, return an empty requirements array and perform only general resume improvements.
+- If there is no job description, return an empty requirements array and tailor emphasis to the target role/company when provided; otherwise perform general resume improvements. Targets are aspirations, never candidate experience.
 
 2. Tailor only from supported evidence.
 - Return the complete optimized resume as plain text with clear section headings and bullet points.
@@ -37,6 +38,7 @@ export function buildResumeOptimizationPrompt(
 - Unsupported job requirements are gaps, not keywords to inject into optimizedText.
 
 5. Return actionable suggestions.
+- For a manual suggestion, anchor is a short exact quote from optimizedText identifying the paragraph to edit; use an empty string for a new section.
 - Suggestions must use ${outputLanguage}.
 - Set requiresUserInput to false for meaningful changes already included in optimizedText.
 - Set requiresUserInput to true only for a high-value improvement that needs a fact, metric, skill, or context the candidate must verify or supply. Never add that missing information to optimizedText.
@@ -44,10 +46,10 @@ export function buildResumeOptimizationPrompt(
 - Return at most 12 concise suggestions.
 
 Schema:
-{"requirements":[{"keyword":"literal phrase from job description","priority":"required|preferred","status":"supported|unsupported","evidence":"exact quote from source resume or empty"}],"optimizedText":"...","suggestions":[{"title":"...","description":"...","category":"format|clarity|impact|keywords","requiresUserInput":false}]}
+{"requirements":[{"keyword":"literal phrase from job description","priority":"required|preferred","status":"supported|unsupported","evidence":"exact quote from source resume or empty"}],"optimizedText":"...","suggestions":[{"title":"...","description":"...","category":"format|clarity|impact|keywords","requiresUserInput":false,"anchor":"exact quote from optimizedText or empty"}]}
 
 Input JSON:
-${JSON.stringify({ resume: sourceText, jobDescription })}`
+${JSON.stringify({ resume: sourceText, jobDescription, targetRole: target.role, targetCompany: target.company })}`
 }
 
 export function estimateResumeOptimizationOutputTokens(sourceText: string): number {
@@ -59,13 +61,14 @@ export async function optimizeResumeWithLlm(
   jobDescription: string,
   language: SupportedLanguage,
   signal?: AbortSignal,
+  target: { role: string; company: string } = { role: "", company: "" },
 ): Promise<ResumeAnalysisResult> {
   const validationError = validateResumeText(sourceText)
   if (validationError) throw new Error(validationError)
   const outputLanguage = language === 'zh-TW' ? 'Traditional Chinese' : language === 'en-US' ? 'English' : 'Simplified Chinese'
   const result = await generateStructuredJson<unknown>(
     SYSTEM,
-    buildResumeOptimizationPrompt(sourceText, jobDescription, outputLanguage),
+    buildResumeOptimizationPrompt(sourceText, jobDescription, outputLanguage, target),
     signal,
     {
       allowProviderFallback: false,

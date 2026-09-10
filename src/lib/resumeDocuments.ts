@@ -34,13 +34,13 @@ export async function buildResumeDocxBlob(text: string): Promise<Blob> {
     : new Blob([await blob.arrayBuffer()], { type: DOCX_MIME })
 }
 
-export async function downloadResumeDocx(text: string, fileName: string): Promise<void> {
-  const url = URL.createObjectURL(await buildResumeDocxBlob(text))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = fileName
-  link.click()
-  URL.revokeObjectURL(url)
+export async function downloadResumeDocx(text: string, fileName: string): Promise<string> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  const blob = await buildResumeDocxBlob(text)
+  return invoke<string>('export_resume_docx', {
+    fileName,
+    bytes: Array.from(new Uint8Array(await blob.arrayBuffer())),
+  })
 }
 
 export function sanitizeResumeFilename(sourceFileName: string): string {

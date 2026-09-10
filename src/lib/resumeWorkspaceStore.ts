@@ -86,6 +86,10 @@ export function normalizeResumeWorkspace(value: unknown): ResumeWorkspace {
     targetRole: typeof saved.targetRole === 'string' ? saved.targetRole.trim().slice(0, 160) : '',
     targetCompany: typeof saved.targetCompany === 'string' ? saved.targetCompany.trim().slice(0, 160) : '',
     profileUpdatedAt: typeof saved.profileUpdatedAt === 'string' ? saved.profileUpdatedAt : '',
+    analysisTargetFingerprint: typeof saved.analysisTargetFingerprint === 'string' ? saved.analysisTargetFingerprint : '',
+    analysisResumeFingerprint: typeof saved.analysisResumeFingerprint === 'string' ? saved.analysisResumeFingerprint : '',
+    reviewedFingerprint: typeof saved.reviewedFingerprint === 'string' ? saved.reviewedFingerprint : '',
+    reviewedAt: typeof saved.reviewedAt === 'string' ? saved.reviewedAt : '',
     ...keywordMatch,
   }
 }
@@ -105,6 +109,10 @@ export function toPersistedResumeWorkspace(workspace: ResumeWorkspace): Omit<Res
     targetRole: workspace.targetRole,
     targetCompany: workspace.targetCompany,
     profileUpdatedAt: workspace.profileUpdatedAt,
+    analysisTargetFingerprint: workspace.analysisTargetFingerprint,
+    analysisResumeFingerprint: workspace.analysisResumeFingerprint,
+    reviewedFingerprint: workspace.reviewedFingerprint,
+    reviewedAt: workspace.reviewedAt,
   }
 }
 
@@ -122,12 +130,13 @@ export function hasResumeWorkspaceContent(workspace: ResumeWorkspace): boolean {
 export async function loadResumeWorkspace(): Promise<ResumeWorkspace> {
   await ensureMigrated()
   const raw = await loadResumeWorkspaceJson()
-  if (!raw) return createEmptyResumeWorkspace()
-  try {
-    return normalizeResumeWorkspace(JSON.parse(raw))
-  } catch {
-    return createEmptyResumeWorkspace()
+  if (raw === null) return createEmptyResumeWorkspace()
+  const saved = JSON.parse(raw)
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)
+    || typeof saved.original !== 'string' || typeof saved.optimized !== 'string') {
+    throw new Error('Invalid saved resume workspace')
   }
+  return normalizeResumeWorkspace(saved)
 }
 
 export async function saveResumeWorkspace(workspace: ResumeWorkspace): Promise<void> {
@@ -145,7 +154,6 @@ export async function clearResumeWorkspace(): Promise<void> {
 }
 
 export async function persistResumeWorkspace(workspace: ResumeWorkspace): Promise<void> {
-  return hasResumeWorkspaceContent(workspace)
-    ? saveResumeWorkspace(workspace)
-    : clearResumeWorkspace()
+  // Only the explicit Clear action may delete the saved workspace.
+  if (hasResumeWorkspaceContent(workspace)) await saveResumeWorkspace(workspace)
 }
