@@ -13,6 +13,7 @@
     "landing:build": "tsc -b landing && vite build landing",
     "tauri": "tauri",
     "prepare:audiotee": "sh scripts/build-audiotee.sh",
+    "prepare:gateway-keys": "node scripts/generate-gateway-keys.mjs",
     "tauri:mac-audio": "npm run prepare:audiotee && tauri dev --config src-tauri/tauri.audiotee.conf.json",
     "build:mac": "sh scripts/build-audiotee.sh universal && tauri build --target universal-apple-darwin --config src-tauri/tauri.audiotee.conf.json",
     "build:win": "tauri build --target x86_64-pc-windows-msvc",

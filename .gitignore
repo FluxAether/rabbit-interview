@@ -36,6 +36,8 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+server/secrets/
+secrets/
 
 # Local machine paths and AI tooling
 Users/
