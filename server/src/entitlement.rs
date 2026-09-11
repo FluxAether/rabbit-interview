@@ -9,8 +9,31 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 
-pub const STT_METRIC: &str = "STT_AUDIO_MS";
-pub const LLM_METRIC: &str = "LLM_TOKEN_UNITS";
+pub const CREDIT_METRIC: &str = "CREDITS";
+pub const CREDIT_UNIT_SCALE: i64 = 60_000;
+pub const SIGNUP_CREDIT_UNITS: i64 = 100 * CREDIT_UNIT_SCALE;
+
+pub fn llm_credit_units(tokens: i64) -> Result<i64, AppError> {
+    tokens
+        .checked_mul(CREDIT_UNIT_SCALE / 1_000)
+        .filter(|units| *units >= 0)
+        .ok_or(AppError::ProviderProtocol)
+}
+
+pub async fn grant_signup_credits(
+    tx: &mut Transaction<'_, MySql>,
+    account_id: &str,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "INSERT INTO quota_buckets (id, account_id, metric, source_type, source_ref, granted_units, remaining_units, valid_until, priority) \
+         VALUES (?, ?, 'CREDITS', 'FREE_TRIAL', 'signup-v1', ?, ?, UTC_TIMESTAMP(6) + INTERVAL 30 DAY, 10) \
+         ON DUPLICATE KEY UPDATE id = id",
+    )
+    .bind(Uuid::new_v4().to_string()).bind(account_id)
+    .bind(SIGNUP_CREDIT_UNITS).bind(SIGNUP_CREDIT_UNITS)
+    .execute(&mut **tx).await?;
+    Ok(())
+}
 
 #[derive(Clone, Debug)]
 pub struct Account {
@@ -105,7 +128,7 @@ impl Entitlement {
         let rows = sqlx::query(
             "SELECT metric, CAST(COALESCE(SUM(remaining_units), 0) AS SIGNED) AS units \
              FROM quota_buckets \
-             WHERE account_id = ? AND remaining_units > 0 \
+             WHERE account_id = ? AND metric = 'CREDITS' AND remaining_units > 0 \
                AND valid_from <= UTC_TIMESTAMP(6) \
                AND (valid_until IS NULL OR valid_until > UTC_TIMESTAMP(6)) \
              GROUP BY metric",
@@ -113,11 +136,21 @@ impl Entitlement {
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
-        let mut balances = BTreeMap::from([(STT_METRIC.to_owned(), 0), (LLM_METRIC.to_owned(), 0)]);
+        let mut balances = BTreeMap::from([(CREDIT_METRIC.to_owned(), 0)]);
         for row in rows {
             balances.insert(row.try_get("metric")?, row.try_get("units")?);
         }
         Ok(balances)
+    }
+
+    pub async fn byok_unlocked(&self, account_id: &str) -> Result<bool, AppError> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT byok_unlocked_at IS NOT NULL FROM accounts WHERE id = ?",
+        )
+        .bind(account_id)
+        .fetch_one(&self.pool)
+        .await?
+            != 0)
     }
 
     pub async fn account_is_active(&self, account_id: &str) -> Result<bool, AppError> {
@@ -146,7 +179,7 @@ impl Entitlement {
     }
 
     async fn reserve_once(&self, input: &ReserveInput) -> Result<ReserveOutcome, AppError> {
-        if input.units <= 0 {
+        if input.units <= 0 || input.metric != CREDIT_METRIC {
             return Err(AppError::BadRequest("Reservation units must be positive."));
         }
         let now = Utc::now().naive_utc();
@@ -652,11 +685,7 @@ impl Entitlement {
         valid_until: Option<DateTime<Utc>>,
         operator: &str,
     ) -> Result<String, AppError> {
-        if !matches!(metric, STT_METRIC | LLM_METRIC)
-            || units <= 0
-            || reason.is_empty()
-            || reason.len() > 512
-        {
+        if metric != CREDIT_METRIC || units <= 0 || reason.is_empty() || reason.len() > 512 {
             return Err(AppError::BadRequest("Invalid quota adjustment."));
         }
         let bucket_id = Uuid::new_v4().to_string();
@@ -927,6 +956,18 @@ mod tests {
         assert!(!super::retryable_mysql(&sqlx::Error::RowNotFound));
         pool.close().await;
         Ok(())
+    }
+
+    #[test]
+    fn credits_preserve_subcredit_usage_and_reject_overflow() {
+        assert_eq!(super::llm_credit_units(1).unwrap(), 60);
+        assert_eq!(
+            super::llm_credit_units(1_000).unwrap(),
+            super::CREDIT_UNIT_SCALE
+        );
+        assert_eq!(super::llm_credit_units(0).unwrap(), 0);
+        assert!(super::llm_credit_units(-1).is_err());
+        assert!(super::llm_credit_units(i64::MAX).is_err());
     }
 
     #[test]

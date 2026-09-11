@@ -8,7 +8,7 @@ import {
 } from './llm'
 import { useAppStore } from '../stores/useAppStore'
 import { loadApiKeys } from './keyStore'
-import { hostedFetch, registerHostedConnection } from './hostedAuth'
+import { hostedFetch, registerHostedConnection, requireAppAccess, refreshHostedEntitlements } from './hostedAuth'
 
 export interface RealtimeSttConfig {
   source: 'system' | 'microphone'
@@ -42,7 +42,7 @@ function isTauriRuntime(): boolean {
 function nativeProvider(): 'deepgram' | 'gemini' | 'hosted' | 'apple' | null {
   if (!isTauriRuntime()) return null
   const settings = useAppStore.getState().settings
-  const configured = settings?.aiAccessMode === 'hosted' ? 'hosted' : settings?.sttProvider
+  const configured = settings?.sttProvider === 'apple' ? 'apple' : settings?.aiAccessMode === 'hosted' ? 'hosted' : settings?.sttProvider
   if (configured === 'hosted' || configured === 'gemini' || configured === 'apple' || configured === 'deepgram') {
     return configured
   }
@@ -119,6 +119,7 @@ export async function startRealtimeStt(
   handlers: RealtimeSttHandlers,
 ): Promise<RealtimeSttHandle> {
   const provider = nativeProvider()
+  await requireAppAccess(provider === 'deepgram' || provider === 'gemini')
   if (!provider) {
     let socket: WebSocket | null = await startDeepgramStream(
       handlers.onTranscript, handlers.onError, config.sampleRate,
@@ -167,14 +168,14 @@ export async function startRealtimeStt(
           const late = await pending?.catch(() => null)
           if (late && late.generation !== active?.generation) await nativeStop(late)
         } finally {
-          if (provider === 'hosted') releaseHostedInterview(config.captureId)
+          if (provider === 'hosted') { releaseHostedInterview(config.captureId); void refreshHostedEntitlements().catch(() => {}) }
         }
       }
     })()
     return stopping
   }
   const cancel = () => { void stop().catch((error) => handlers.onError?.(error)) }
-  if (provider === 'hosted') unregister = registerHostedConnection(stop)
+  unregister = registerHostedConnection(stop)
   config.signal?.addEventListener('abort', cancel, { once: true })
   if (config.signal?.aborted) cancel()
   const forget = (unlisten: UnlistenFn) => { if (stopped) unlisten(); else unlisteners.push(unlisten) }

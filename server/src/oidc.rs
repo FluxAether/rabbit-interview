@@ -1209,6 +1209,13 @@ async fn complete_password_action(
     if !matches!(account_update, Ok(ref result) if result.rows_affected() == 1) {
         return auth_error(StatusCode::BAD_REQUEST, "INVALID_OR_EXPIRED_LINK", false);
     }
+    if kind == "INVITE"
+        && crate::entitlement::grant_signup_credits(&mut tx, &account_id)
+            .await
+            .is_err()
+    {
+        return auth_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", true);
+    }
     if sqlx::query(
         "UPDATE oidc_action_tokens SET used_at = UTC_TIMESTAMP(6) \
              WHERE account_id = ? AND used_at IS NULL",
@@ -1562,7 +1569,13 @@ async fn subscription_context(
         Ok(value) => value,
         Err(_) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", true),
     };
+    let byok_unlocked = match state.entitlement().byok_unlocked(&identity.id).await {
+        Ok(value) => value,
+        Err(_) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", true),
+    };
     let body = SubscriptionContext {
+        byok_unlocked,
+        credit_unit_scale: crate::entitlement::CREDIT_UNIT_SCALE,
         email: identity.email,
         status: identity.status,
         balances,
@@ -1574,19 +1587,6 @@ async fn subscription_context(
             .payments()
             .map(|payments| payments.products())
             .unwrap_or_default(),
-        subscription: match state.payments() {
-            Some(payments) => match payments.subscription(&identity.id).await {
-                Ok(value) => value,
-                Err(_) => {
-                    return auth_error(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "INTERNAL_ERROR",
-                        true,
-                    )
-                }
-            },
-            None => None,
-        },
     };
     (jar, auth_response(body)).into_response()
 }

@@ -169,9 +169,9 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     assert_eq!(catalog.0, StatusCode::OK);
     let catalog: Value = serde_json::from_slice(&catalog.1)?;
     assert_eq!(catalog["payments_enabled"], false);
-    assert_eq!(catalog["products"][0]["code"], "PRO_MONTH");
+    assert_eq!(catalog["products"][0]["code"], "CREDITS_2900");
     assert_eq!(catalog["products"][0]["price_minor"], 8900);
-    assert_eq!(catalog["products"][1]["code"], "PRO_QUARTER");
+    assert_eq!(catalog["products"][1]["code"], "CREDITS_11000");
     assert_eq!(catalog["products"][1]["price_minor"], 19900);
 
     let unauthenticated_subscription = send(
@@ -194,7 +194,7 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     let subscription: Value = serde_json::from_slice(&signed_in_subscription.1)?;
     assert_eq!(subscription["email"], email);
     assert_eq!(subscription["status"], "ACTIVE");
-    assert_eq!(subscription["balances"]["STT_AUDIO_MS"], 0);
+    assert_eq!(subscription["balances"]["CREDITS"], 0);
     assert_eq!(subscription["payments_enabled"], false);
 
     let security = send_cookie(&app, Method::GET, "/account/security/context", &cookie, None).await?;
@@ -253,7 +253,7 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
         &app,
         &format!("/internal/accounts/{account_id}/quota-adjustments"),
         serde_json::json!({
-            "metric": "STT_AUDIO_MS",
+            "metric": "CREDITS",
             "units": 3_600_000,
             "reason": "pilot grant"
         }),
@@ -272,7 +272,7 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     .await?;
     assert_eq!(refreshed.0, StatusCode::OK);
     let refreshed: Value = serde_json::from_slice(&refreshed.1)?;
-    assert_eq!(refreshed["balances"]["STT_AUDIO_MS"], 3_600_000);
+    assert_eq!(refreshed["balances"]["CREDITS"], 3_600_000);
 
     let refresh_form = form(&[
         ("grant_type", "refresh_token"),
@@ -484,7 +484,17 @@ async fn password_actions_validate_before_consumption_and_preserve_hashes() -> a
             ("confirm_password", "another valid password"),
         ]))).await?;
         assert_eq!(replay.0, StatusCode::BAD_REQUEST);
-        assert_eq!(state.auth().identity_by_id(&account).await?.password_hash, identity.password_hash);
+        assert_eq!(
+            state.auth().identity_by_id(&account).await?.password_hash,
+            identity.password_hash
+        );
+        let (count, units, days): (i64, i64, Option<i64>) = sqlx::query_as("SELECT COUNT(*), CAST(COALESCE(SUM(remaining_units), 0) AS SIGNED), MAX(TIMESTAMPDIFF(DAY, created_at, valid_until)) FROM quota_buckets WHERE account_id = ? AND source_ref = 'signup-v1'")
+            .bind(&account).fetch_one(state.auth().pool()).await?;
+        assert_eq!(count, i64::from(kind == "INVITE"));
+        assert_eq!(units, if kind == "INVITE" { 100 * 60_000 } else { 0 });
+        if kind == "INVITE" {
+            assert_eq!(days, Some(30));
+        }
     }
     state.auth().pool().close().await;
     Ok(())

@@ -27,10 +27,12 @@ use uuid::Uuid;
 
 use crate::{
     config::Config,
-    entitlement::{hash_json, insert_idempotency, load_idempotency, lock_account},
+    entitlement::{
+        hash_json, insert_idempotency, load_idempotency, lock_account, CREDIT_UNIT_SCALE,
+    },
     error::AppError,
     oidc::load_browser_session,
-    protocol::{PaymentProduct, SubscriptionSummary},
+    protocol::PaymentProduct,
     AppState,
 };
 
@@ -43,27 +45,31 @@ struct Product {
     code: &'static str,
     subject: &'static str,
     price_minor: i64,
-    duration_days: i64,
-    stt_ms: i64,
-    llm_units: i64,
+    kind: &'static str,
+    credit_units: i64,
 }
 
-const PRODUCTS: [Product; 2] = [
+const PRODUCTS: [Product; 3] = [
     Product {
-        code: "PRO_MONTH",
-        subject: "OnCue Pro - 30 days",
+        code: "CREDITS_2900",
+        subject: "OnCue - 2900 credits",
         price_minor: 8_900,
-        duration_days: 30,
-        stt_ms: 54_000_000,
-        llm_units: 2_000_000,
+        kind: "CREDITS",
+        credit_units: 2_900 * CREDIT_UNIT_SCALE,
     },
     Product {
-        code: "PRO_QUARTER",
-        subject: "OnCue Pro - 90 days",
+        code: "CREDITS_11000",
+        subject: "OnCue - 11000 credits",
         price_minor: 19_900,
-        duration_days: 90,
-        stt_ms: 180_000_000,
-        llm_units: 8_000_000,
+        kind: "CREDITS",
+        credit_units: 11_000 * CREDIT_UNIT_SCALE,
+    },
+    Product {
+        code: "BYOK_LIFETIME",
+        subject: "OnCue - Lifetime BYOK",
+        price_minor: 700,
+        kind: "BYOK",
+        credit_units: 0,
     },
 ];
 
@@ -121,7 +127,6 @@ pub struct PaymentOrderResponse {
     pub checkout_url: Option<String>,
     pub expires_at: String,
     pub paid_at: Option<String>,
-    pub paid_through: Option<String>,
 }
 
 struct OrderRow {
@@ -133,9 +138,8 @@ struct OrderRow {
     provider_trade_no: Option<String>,
     amount_minor: i64,
     currency: String,
-    duration_days: i64,
-    stt_units: i64,
-    llm_units: i64,
+    product_kind: String,
+    credit_units: i64,
     status: String,
     expires_at: NaiveDateTime,
     paid_at: Option<NaiveDateTime>,
@@ -163,9 +167,9 @@ fn catalog_products() -> Vec<PaymentProduct> {
             code: product.code,
             price_minor: product.price_minor,
             currency: CURRENCY,
-            duration_days: product.duration_days,
-            stt_ms: product.stt_ms,
-            llm_units: product.llm_units,
+            kind: product.kind,
+            credit_units: product.credit_units,
+            credit_unit_scale: CREDIT_UNIT_SCALE,
         })
         .collect()
 }
@@ -198,45 +202,31 @@ impl PaymentService {
         catalog_products()
     }
 
-    pub async fn subscription(
-        &self,
-        account_id: &str,
-    ) -> Result<Option<SubscriptionSummary>, AppError> {
-        let row = sqlx::query(
-            "SELECT product_code, starts_at, ends_at FROM subscriptions \
-             WHERE account_id = ? AND ends_at > UTC_TIMESTAMP(6) \
-             ORDER BY ends_at DESC LIMIT 1",
-        )
-        .bind(account_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        row.map(|row| {
-            let starts_at: NaiveDateTime = row.try_get("starts_at")?;
-            let ends_at: NaiveDateTime = row.try_get("ends_at")?;
-            Ok(SubscriptionSummary {
-                product_code: row.try_get("product_code")?,
-                starts_at: timestamp(starts_at),
-                paid_through: timestamp(ends_at),
-            })
-        })
-        .transpose()
-        .map_err(AppError::Database)
-    }
-
     async fn create(
         &self,
         account_id: &str,
         request: &CreateOrderRequest,
         idempotency_key: &str,
     ) -> Result<PaymentOrderResponse, AppError> {
-        let product = product(&request.product_code)
-            .ok_or(AppError::BadRequest("Unknown subscription product."))?;
+        let product =
+            product(&request.product_code).ok_or(AppError::BadRequest("Unknown product."))?;
         let request_hash = hash_json(request)?;
         let now = Utc::now();
         let expires_at = now + ChronoDuration::minutes(ORDER_TTL_MINUTES);
         let mut tx = self.pool.begin().await?;
         if lock_account(&mut tx, account_id).await? != "ACTIVE" {
             return Err(AppError::AccountSuspended);
+        }
+        if product.kind == "BYOK" {
+            let unlocked: i64 = sqlx::query_scalar(
+                "SELECT byok_unlocked_at IS NOT NULL FROM accounts WHERE id = ?",
+            )
+            .bind(account_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if unlocked != 0 {
+                return Err(AppError::ByokAlreadyUnlocked);
+            }
         }
         if let Some((operation, stored_hash, response)) =
             load_idempotency(&mut tx, account_id, idempotency_key).await?
@@ -245,6 +235,36 @@ impl PaymentService {
                 return Err(AppError::IdempotencyConflict);
             }
             return serde_json::from_value(response).map_err(|_| AppError::Internal);
+        }
+        if product.kind == "BYOK" {
+            // The account lock serializes checkout across tabs and idempotency keys.
+            let pending = sqlx::query(
+                "SELECT id, merchant_order_no, account_id, product_code, channel, provider_trade_no, \
+                 amount_minor, currency, product_kind, credit_units, status, expires_at, paid_at \
+                 FROM payment_orders WHERE account_id = ? AND product_kind = 'BYOK' \
+                 AND status = 'PENDING' AND expires_at > UTC_TIMESTAMP(6) ORDER BY created_at DESC LIMIT 1",
+            ).bind(account_id).fetch_optional(&mut *tx).await?;
+            if let Some(row) = pending {
+                let mut response = payment_order_response(&row)?;
+                response.checkout_url = Some(self.provider.checkout_url(&CheckoutOrder {
+                    merchant_order_no: &response.merchant_order_no,
+                    subject: product.subject,
+                    amount_minor: row.try_get("amount_minor")?,
+                })?);
+                let response_json =
+                    serde_json::to_value(&response).map_err(|_| AppError::Internal)?;
+                insert_idempotency(
+                    &mut tx,
+                    account_id,
+                    idempotency_key,
+                    "payment_order",
+                    &request_hash,
+                    &response_json,
+                )
+                .await?;
+                tx.commit().await?;
+                return Ok(response);
+            }
         }
 
         let id = Uuid::new_v4().to_string();
@@ -256,17 +276,16 @@ impl PaymentService {
         })?;
         sqlx::query(
             "INSERT INTO payment_orders \
-             (id, merchant_order_no, account_id, product_code, channel, amount_minor, currency, duration_days, stt_units, llm_units, expires_at) \
-             VALUES (?, ?, ?, ?, 'ALIPAY', ?, 'CNY', ?, ?, ?, ?)",
+             (id, merchant_order_no, account_id, product_code, channel, amount_minor, currency, product_kind, credit_units, expires_at) \
+             VALUES (?, ?, ?, ?, 'ALIPAY', ?, 'CNY', ?, ?, ?)",
         )
         .bind(&id)
         .bind(&merchant_order_no)
         .bind(account_id)
         .bind(product.code)
         .bind(product.price_minor)
-        .bind(product.duration_days)
-        .bind(product.stt_ms)
-        .bind(product.llm_units)
+        .bind(product.kind)
+        .bind(product.credit_units)
         .bind(expires_at.naive_utc())
         .execute(&mut *tx)
         .await?;
@@ -277,7 +296,6 @@ impl PaymentService {
             checkout_url: Some(checkout_url),
             expires_at: timestamp(expires_at.naive_utc()),
             paid_at: None,
-            paid_through: None,
         };
         let response_json = serde_json::to_value(&response).map_err(|_| AppError::Internal)?;
         insert_idempotency(
@@ -301,8 +319,8 @@ impl PaymentService {
         validate_order_no(merchant_order_no)?;
         let row = sqlx::query(
             "SELECT o.id, o.merchant_order_no, o.account_id, o.product_code, o.channel, o.provider_trade_no, \
-                    o.amount_minor, o.currency, o.duration_days, o.stt_units, o.llm_units, o.status, o.expires_at, o.paid_at, s.ends_at \
-             FROM payment_orders o LEFT JOIN subscriptions s ON s.payment_order_id = o.id \
+                    o.amount_minor, o.currency, o.product_kind, o.credit_units, o.status, o.expires_at, o.paid_at \
+             FROM payment_orders o \
              WHERE o.account_id = ? AND o.merchant_order_no = ?",
         )
         .bind(account_id)
@@ -401,9 +419,17 @@ impl PaymentService {
         let payload_hash =
             digest_hex(&serde_json::to_vec(&trade.payload).map_err(|_| AppError::Internal)?);
         let mut tx = self.pool.begin().await?;
+        let account_id: Option<String> =
+            sqlx::query_scalar("SELECT account_id FROM payment_orders WHERE merchant_order_no = ?")
+                .bind(&trade.merchant_order_no)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if let Some(account_id) = account_id {
+            lock_account(&mut tx, &account_id).await?;
+        }
         let row = sqlx::query(
             "SELECT id, merchant_order_no, account_id, product_code, channel, provider_trade_no, \
-                    amount_minor, currency, duration_days, stt_units, llm_units, status, expires_at, paid_at \
+                    amount_minor, currency, product_kind, credit_units, status, expires_at, paid_at \
              FROM payment_orders WHERE merchant_order_no = ? FOR UPDATE",
         )
         .bind(&trade.merchant_order_no)
@@ -469,49 +495,18 @@ impl PaymentService {
                     .trade_no
                     .as_deref()
                     .ok_or(AppError::ProviderProtocol)?;
-                lock_account(&mut tx, &order.account_id).await?;
                 let now = Utc::now().naive_utc();
-                let previous_end = sqlx::query_scalar::<_, Option<NaiveDateTime>>(
-                    "SELECT MAX(ends_at) FROM subscriptions WHERE account_id = ?",
-                )
-                .bind(&order.account_id)
-                .fetch_one(&mut *tx)
-                .await?;
-                let starts_at = previous_end.filter(|value| *value > now).unwrap_or(now);
-                let ends_at = starts_at + ChronoDuration::days(order.duration_days);
-                let subscription_id = Uuid::new_v4().to_string();
-                sqlx::query(
-                    "INSERT INTO subscriptions \
-                     (id, account_id, payment_order_id, product_code, starts_at, ends_at) \
-                     VALUES (?, ?, ?, ?, ?, ?)",
-                )
-                .bind(&subscription_id)
-                .bind(&order.account_id)
-                .bind(&order.id)
-                .bind(&order.product_code)
-                .bind(starts_at)
-                .bind(ends_at)
-                .execute(&mut *tx)
-                .await?;
-                for (metric, units) in [
-                    ("STT_AUDIO_MS", order.stt_units),
-                    ("LLM_TOKEN_UNITS", order.llm_units),
-                ] {
+                if order.product_kind == "BYOK" {
+                    sqlx::query("UPDATE accounts SET byok_unlocked_at = COALESCE(byok_unlocked_at, ?) WHERE id = ?")
+                        .bind(now).bind(&order.account_id).execute(&mut *tx).await?;
+                } else {
                     sqlx::query(
                         "INSERT INTO quota_buckets \
-                         (id, account_id, metric, source_type, source_ref, granted_units, remaining_units, valid_from, valid_until, priority) \
-                         VALUES (?, ?, ?, 'SUBSCRIPTION', ?, ?, ?, ?, ?, 100)",
+                         (id, account_id, metric, source_type, source_ref, granted_units, remaining_units, priority) \
+                         VALUES (?, ?, 'CREDITS', 'ADDON', ?, ?, ?, 100)",
                     )
-                    .bind(Uuid::new_v4().to_string())
-                    .bind(&order.account_id)
-                    .bind(metric)
-                    .bind(&subscription_id)
-                    .bind(units)
-                    .bind(units)
-                    .bind(starts_at)
-                    .bind(ends_at)
-                    .execute(&mut *tx)
-                    .await?;
+                    .bind(Uuid::new_v4().to_string()).bind(&order.account_id).bind(&order.id)
+                    .bind(order.credit_units).bind(order.credit_units).execute(&mut *tx).await?;
                 }
                 sqlx::query(
                     "UPDATE payment_orders SET status = 'PAID', provider_trade_no = ?, paid_at = ? WHERE id = ?",
@@ -668,9 +663,8 @@ fn order_row(row: &MySqlRow) -> Result<OrderRow, AppError> {
         provider_trade_no: row.try_get("provider_trade_no")?,
         amount_minor: row.try_get("amount_minor")?,
         currency: row.try_get("currency")?,
-        duration_days: row.try_get("duration_days")?,
-        stt_units: row.try_get("stt_units")?,
-        llm_units: row.try_get("llm_units")?,
+        product_kind: row.try_get("product_kind")?,
+        credit_units: row.try_get("credit_units")?,
         status: row.try_get("status")?,
         expires_at: row.try_get("expires_at")?,
         paid_at: row.try_get("paid_at")?,
@@ -679,9 +673,6 @@ fn order_row(row: &MySqlRow) -> Result<OrderRow, AppError> {
 
 fn payment_order_response(row: &MySqlRow) -> Result<PaymentOrderResponse, AppError> {
     let order = order_row(row)?;
-    let paid_through = row
-        .try_get::<Option<NaiveDateTime>, _>("ends_at")?
-        .map(timestamp);
     Ok(PaymentOrderResponse {
         merchant_order_no: order.merchant_order_no,
         product_code: order.product_code,
@@ -689,7 +680,6 @@ fn payment_order_response(row: &MySqlRow) -> Result<PaymentOrderResponse, AppErr
         checkout_url: None,
         expires_at: timestamp(order.expires_at),
         paid_at: order.paid_at.map(timestamp),
-        paid_through,
     })
 }
 
@@ -1083,7 +1073,6 @@ mod tests {
         RsaPrivateKey, RsaPublicKey,
     };
     use sha2::Sha256;
-    use sqlx::Row;
     use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
     use url::Url;
 
@@ -1254,93 +1243,142 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires TEST_DATABASE_URL pointing to MySQL 8.4"]
-    async fn paid_orders_grant_once_and_early_renewal_starts_later() -> anyhow::Result<()> {
+    async fn credit_packs_and_byok_grant_once_after_verified_payment() -> anyhow::Result<()> {
+        use crate::entitlement::{Entitlement, CREDIT_METRIC, CREDIT_UNIT_SCALE};
         let pool = crate::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
-        let (alipay, notification_signer) = provider();
+        let (alipay, signer) = provider();
         let service = PaymentService {
             pool: pool.clone(),
             http: reqwest::Client::new(),
             provider: Arc::new(alipay),
         };
-        let account_id = uuid::Uuid::new_v4().to_string();
-        let test_suffix = account_id.replace('-', "");
-        let email = format!("{account_id}@payment.test");
+        let wallet = Entitlement::new(pool.clone());
+        let account = uuid::Uuid::new_v4().to_string();
+        let email = format!("{account}@payment.test");
         sqlx::query(
             "INSERT INTO accounts (id, email, normalized_email, status) VALUES (?, ?, ?, 'ACTIVE')",
         )
-        .bind(&account_id)
+        .bind(&account)
         .bind(&email)
         .bind(&email)
         .execute(&pool)
         .await?;
-
-        let first = service
-            .create(
-                &account_id,
-                &CreateOrderRequest {
-                    product_code: "PRO_MONTH".to_owned(),
-                },
-                &format!("first-{test_suffix}"),
-            )
-            .await?;
-        let first_notification = paid_notification(
-            &first.merchant_order_no,
-            &format!("trade-one-{test_suffix}"),
-            "89.00",
-            &format!("event-one-{test_suffix}"),
-            &notification_signer,
-        );
-        assert!(
-            service
-                .process_notification(first_notification.clone())
-                .await
-        );
-        assert!(service.process_notification(first_notification).await);
-        let first_subscription_count: i64 =
+        let mut expected = 0;
+        for (code, price, credits) in [
+            ("CREDITS_2900", "89.00", 2900),
+            ("CREDITS_11000", "199.00", 11000),
+        ] {
+            let request = CreateOrderRequest {
+                product_code: code.into(),
+            };
+            let key = format!("{account}-{code}");
+            let order = service.create(&account, &request, &key).await?;
+            assert_eq!(
+                service
+                    .create(&account, &request, &key)
+                    .await?
+                    .merchant_order_no,
+                order.merchant_order_no
+            );
+            assert_eq!(wallet.balances(&account).await?[CREDIT_METRIC], expected);
+            let invalid = paid_notification(
+                &order.merchant_order_no,
+                &format!("bad-{key}"),
+                "1.00",
+                &format!("bad-event-{key}"),
+                &signer,
+            );
+            assert!(!service.process_notification(invalid).await);
+            let notice = paid_notification(
+                &order.merchant_order_no,
+                &format!("trade-{key}"),
+                price,
+                &format!("event-{key}"),
+                &signer,
+            );
+            assert!(service.process_notification(notice.clone()).await);
+            assert!(service.process_notification(notice).await);
+            expected += credits * CREDIT_UNIT_SCALE;
+            assert_eq!(wallet.balances(&account).await?[CREDIT_METRIC], expected);
+            assert_eq!(
+                service
+                    .order(&account, &order.merchant_order_no)
+                    .await?
+                    .status,
+                "PAID"
+            );
+        }
+        let expiring: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quota_buckets WHERE account_id = ? AND (valid_until IS NOT NULL OR valid_from > UTC_TIMESTAMP(6))")
+            .bind(&account).fetch_one(&pool).await?;
+        assert_eq!(expiring, 0);
+        let subscriptions: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM subscriptions WHERE account_id = ?")
-                .bind(&account_id)
+                .bind(&account)
                 .fetch_one(&pool)
                 .await?;
-        assert_eq!(first_subscription_count, 1);
+        assert_eq!(subscriptions, 0);
+        let request = CreateOrderRequest {
+            product_code: "BYOK_LIFETIME".into(),
+        };
+        let (one, two) = tokio::join!(
+            service.create(&account, &request, "byok-one"),
+            service.create(&account, &request, "byok-two")
+        );
+        let order = one?;
+        assert_eq!(order.merchant_order_no, two?.merchant_order_no);
+        assert!(!wallet.byok_unlocked(&account).await?);
+        let different = CreateOrderRequest {
+            product_code: "CREDITS_2900".into(),
+        };
+        for key in ["byok-one", "byok-two"] {
+            assert!(matches!(
+                service.create(&account, &different, key).await,
+                Err(crate::error::AppError::IdempotencyConflict)
+            ));
+        }
+        assert!(matches!(
+            service
+                .create(&account, &request, &format!("{account}-CREDITS_2900"))
+                .await,
+            Err(crate::error::AppError::IdempotencyConflict)
+        ));
 
-        let second = service
-            .create(
-                &account_id,
-                &CreateOrderRequest {
-                    product_code: "PRO_QUARTER".to_owned(),
-                },
-                &format!("second-{test_suffix}"),
-            )
-            .await?;
+        let notice = paid_notification(
+            &order.merchant_order_no,
+            &format!("byok-{account}"),
+            "7.00",
+            &format!("byok-event-{account}"),
+            &signer,
+        );
+        assert!(service.process_notification(notice.clone()).await);
+        assert!(service.process_notification(notice).await);
+        assert!(wallet.byok_unlocked(&account).await?);
+        assert_eq!(wallet.balances(&account).await?[CREDIT_METRIC], expected);
+        assert!(matches!(
+            service.create(&account, &request, "byok-again").await,
+            Err(crate::error::AppError::ByokAlreadyUnlocked)
+        ));
+
+        // An outstanding old checkout keeps its original price and grant snapshot.
+        let legacy = format!("RI{}", uuid::Uuid::new_v4().simple());
+        sqlx::query("INSERT INTO payment_orders (id, merchant_order_no, account_id, product_code, channel, amount_minor, currency, duration_days, stt_units, llm_units, credit_units, expires_at) VALUES (?, ?, ?, 'PRO_MONTH', 'ALIPAY', 8900, 'CNY', 30, 54000000, 2000000, ?, UTC_TIMESTAMP(6) + INTERVAL 1 HOUR)")
+            .bind(uuid::Uuid::new_v4().to_string()).bind(&legacy).bind(&account).bind(2900 * CREDIT_UNIT_SCALE).execute(&pool).await?;
         assert!(
             service
                 .process_notification(paid_notification(
-                    &second.merchant_order_no,
-                    &format!("trade-two-{test_suffix}"),
-                    "199.00",
-                    &format!("event-two-{test_suffix}"),
-                    &notification_signer,
+                    &legacy,
+                    &format!("legacy-{account}"),
+                    "89.00",
+                    &format!("legacy-event-{account}"),
+                    &signer
                 ))
                 .await
         );
-
-        let periods = sqlx::query(
-            "SELECT starts_at, ends_at FROM subscriptions WHERE account_id = ? ORDER BY starts_at",
-        )
-        .bind(&account_id)
-        .fetch_all(&pool)
-        .await?;
-        assert_eq!(periods.len(), 2);
-        let first_end: chrono::NaiveDateTime = periods[0].try_get("ends_at")?;
-        let second_start: chrono::NaiveDateTime = periods[1].try_get("starts_at")?;
-        assert_eq!(first_end, second_start);
-        let bucket_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM quota_buckets WHERE account_id = ? AND source_type = 'SUBSCRIPTION'",
-        )
-        .bind(&account_id)
-        .fetch_one(&pool)
-        .await?;
-        assert_eq!(bucket_count, 4);
+        assert_eq!(
+            wallet.balances(&account).await?[CREDIT_METRIC],
+            expected + 2900 * CREDIT_UNIT_SCALE
+        );
+        pool.close().await;
         Ok(())
     }
 }

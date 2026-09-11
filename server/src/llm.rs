@@ -19,7 +19,9 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
-    entitlement::{hash_json, ReserveInput, ReserveOutcome, UsageInput, LLM_METRIC},
+    entitlement::{
+        hash_json, llm_credit_units, ReserveInput, ReserveOutcome, UsageInput, CREDIT_METRIC,
+    },
     error::AppError,
     protocol::LlmAnswerRequest,
     providers::{
@@ -78,8 +80,8 @@ pub async fn create_answer(
             audio_source: None,
             provider: route.provider.to_ascii_uppercase(),
             model: route.model.clone(),
-            metric: LLM_METRIC,
-            units: held_units,
+            metric: CREDIT_METRIC,
+            units: llm_credit_units(held_units)?,
             idempotency_key,
             request_hash: hash_json(&request_hash_view(&request))?,
             response_json: response_stub,
@@ -317,13 +319,29 @@ async fn run_answer(
         output_ascii_chars,
         output_non_ascii_chars,
     );
-    let actual_units = billable_units(
+    let actual_tokens = billable_units(
         &final_usage,
         usage_status,
         &finish_reason,
         estimated_input,
         max_output_tokens,
     );
+    let actual_units = match llm_credit_units(actual_tokens) {
+        Ok(units) => units,
+        Err(_) => {
+            finish_failed(
+                &state,
+                &sender,
+                &request_id,
+                &reservation_id,
+                "invalid_usage",
+                ProviderError::Protocol,
+                &route,
+            )
+            .await;
+            return;
+        }
+    };
     if cancelled {
         finish_reason = "cancelled".to_owned();
     }
@@ -341,7 +359,7 @@ async fn run_answer(
                 output_tokens: final_usage.output_tokens,
                 cache_hit_tokens: 0,
                 reasoning_tokens: final_usage.reasoning_tokens,
-                charged_metric: LLM_METRIC,
+                charged_metric: CREDIT_METRIC,
                 actual_units,
                 pricing_policy_version: state.config().pricing_policy_version.clone(),
                 terminate_reason: finish_reason.clone(),

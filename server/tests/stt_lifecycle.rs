@@ -4,8 +4,8 @@ use std::{io::Read, net::SocketAddr, sync::atomic::Ordering, time::Duration};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::{SinkExt, StreamExt};
 use rabbit_gateway::{
-    AppState, router,
-    entitlement::STT_METRIC,
+    router, AppState,
+    entitlement::CREDIT_METRIC,
     protocol::CreateSttSessionResponse,
     providers::{deepgram::DeepgramClient, gemini_live::GeminiLiveClient, volcengine::VolcengineClient,
         stt::{SttAdapter, SttConnect}},
@@ -253,7 +253,17 @@ impl Gateway {
         sqlx::query("INSERT INTO accounts (id, email, normalized_email, status, password_hash) VALUES (?, ?, ?, 'ACTIVE', ?)")
             .bind(&id).bind(&email).bind(&email).bind(self.state.auth().hash_password("correct horse battery staple").await?)
             .execute(self.state.auth().pool()).await?;
-        self.state.entitlement().grant_adjustment(&id, STT_METRIC, units, "WS regression", None, "integration-test").await?;
+        self.state
+            .entitlement()
+            .grant_adjustment(
+                &id,
+                CREDIT_METRIC,
+                units,
+                "WS regression",
+                None,
+                "integration-test",
+            )
+            .await?;
         let identity = self.state.auth().identity_by_id(&id).await?;
         let token = self.state.auth().issue_token_pair(&identity, "openid", None, chrono::Utc::now(), None)?.access_token;
         Ok((id, token))
@@ -358,15 +368,23 @@ async fn gateway_upgrade_audio_stop_validation_and_admission_cleanup() -> anyhow
         gateway.idle().await?;
         assert_eq!(usage(&gateway.state, &session.session_id).await?, (1, charged));
     }
-    let before = gateway.state.entitlement().balances(&account).await?[STT_METRIC];
-    let permits = gateway.state.concurrency().clone().acquire_many_owned(100).await?;
+    let before = gateway.state.entitlement().balances(&account).await?[CREDIT_METRIC];
+    let permits = gateway
+        .state
+        .concurrency()
+        .clone()
+        .acquire_many_owned(100)
+        .await?;
     let rejected = gateway.create(&token).await?;
     let mut client = connect(&rejected).await?;
     let _ = timeout(Duration::from_secs(8), client.next()).await?;
     drop(client);
     drop(permits);
     gateway.idle().await?;
-    assert_eq!(gateway.state.entitlement().balances(&account).await?[STT_METRIC], before);
+    assert_eq!(
+        gateway.state.entitlement().balances(&account).await?[CREDIT_METRIC],
+        before
+    );
     assert_eq!(usage(&gateway.state, &rejected.session_id).await?.0, 0);
     gateway.stop().await?;
     drop(mock);
@@ -399,7 +417,10 @@ async fn stalled_handshake_deadline_and_shutdown_release_unused_reservations() -
         timeout(Duration::from_secs(2), mock).await???;
         gateway.state.tracker().close();
         gateway.idle().await?;
-        assert_eq!(gateway.state.entitlement().balances(&account).await?[STT_METRIC], 120_000);
+        assert_eq!(
+            gateway.state.entitlement().balances(&account).await?[CREDIT_METRIC],
+            120_000
+        );
         assert_eq!(usage(&gateway.state, &session.session_id).await?.0, 0);
         gateway.stop().await?;
     }
@@ -410,11 +431,17 @@ async fn stalled_handshake_deadline_and_shutdown_release_unused_reservations() -
 #[ignore = "requires isolated TEST_DATABASE_URL; load durations are opt-in environment variables"]
 async fn mixed_load_http_stt_llm_and_passwords() -> anyhow::Result<()> {
     use std::{sync::Arc, time::Instant};
-    use rabbit_gateway::entitlement::LLM_METRIC;
-    let seconds: u64 = std::env::var("GATEWAY_LOAD_SECONDS").unwrap_or_else(|_| "2".into()).parse()?;
-    let levels: Vec<usize> = std::env::var("GATEWAY_LOAD_CONNECTIONS").unwrap_or_else(|_| "2".into())
-        .split(',').map(str::parse).collect::<Result<_, _>>()?;
-    let soak: u64 = std::env::var("GATEWAY_LOAD_SOAK_SECONDS").unwrap_or_else(|_| seconds.to_string()).parse()?;
+    let seconds: u64 = std::env::var("GATEWAY_LOAD_SECONDS")
+        .unwrap_or_else(|_| "2".into())
+        .parse()?;
+    let levels: Vec<usize> = std::env::var("GATEWAY_LOAD_CONNECTIONS")
+        .unwrap_or_else(|_| "2".into())
+        .split(',')
+        .map(str::parse)
+        .collect::<Result<_, _>>()?;
+    let soak: u64 = std::env::var("GATEWAY_LOAD_SOAK_SECONDS")
+        .unwrap_or_else(|_| seconds.to_string())
+        .parse()?;
     assert!(seconds <= 1800 && soak <= 3600 && levels.iter().all(|n| *n > 0 && *n <= 80));
     let upstream = TcpListener::bind("127.0.0.1:0").await?;
     let upstream_url = format!("ws://{}", upstream.local_addr()?);
@@ -481,7 +508,18 @@ async fn mixed_load_http_stt_llm_and_passwords() -> anyhow::Result<()> {
     gateway.state.routing().switch(RouteKind::Llm, "openai", "test", "integration-test").await?;
     gateway.state.start_reaper();
     let (account, _) = gateway.account(1_000_000_000).await?;
-    gateway.state.entitlement().grant_adjustment(&account, LLM_METRIC, 100_000_000, "load fixture", None, "integration-test").await?;
+    gateway
+        .state
+        .entitlement()
+        .grant_adjustment(
+            &account,
+            CREDIT_METRIC,
+            100_000_000,
+            "load fixture",
+            None,
+            "integration-test",
+        )
+        .await?;
     let identity = Arc::new(gateway.state.auth().identity_by_id(&account).await?);
     let http = reqwest::Client::builder().timeout(Duration::from_secs(15)).redirect(reqwest::redirect::Policy::none()).build()?;
     let mut baseline = Vec::new();
@@ -617,13 +655,37 @@ async fn mixed_load_http_stt_llm_and_passwords() -> anyhow::Result<()> {
             while gateway.state.concurrency().available_permits() != 100 || active.load(Ordering::Relaxed) != 0 {
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
-        }).await?;
-        assert_eq!(gateway.state.metrics().stt_active.load(Ordering::Relaxed), 0);
-        assert_eq!(gateway.state.metrics().llm_active.load(Ordering::Relaxed), 0);
-        let invalid: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM quota_reservations WHERE account_id = ? AND state != 'SETTLED'")
+        })
+        .await?;
+        assert_eq!(
+            gateway.state.metrics().stt_active.load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            gateway.state.metrics().llm_active.load(Ordering::Relaxed),
+            0
+        );
+        let invalid: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM quota_reservations WHERE account_id = ? AND state != 'SETTLED'",
+        )
+        .bind(&account)
+        .fetch_one(gateway.state.auth().pool())
+        .await?;
+        assert_eq!(
+            invalid, 0,
+            "load reservations were reclaimed or remained active"
+        );
+        assert!(gateway
+            .state
+            .entitlement()
+            .balances(&account)
+            .await?
+            .values()
+            .all(|n| *n >= 0));
+        let mischarged: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM usage_events WHERE account_id = ? AND (charged_metric <> 'CREDITS' OR charged_units <> received_audio_ms + (input_tokens + output_tokens) * 60)")
             .bind(&account).fetch_one(gateway.state.auth().pool()).await?;
-        assert_eq!(invalid, 0, "load reservations were reclaimed or remained active");
-        assert!(gateway.state.entitlement().balances(&account).await?.values().all(|n| *n >= 0));
+        assert_eq!(mischarged, 0, "STT milliseconds and verified LLM tokens must debit the shared credit wallet at their exact rates");
+
         http_latency.sort_unstable();
         ws_latency.sort_unstable();
         let p99 = http_latency[http_latency.len() * 99 / 100];

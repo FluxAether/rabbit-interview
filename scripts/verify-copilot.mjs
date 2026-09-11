@@ -26,6 +26,13 @@ function source(relativePath) {
 }
 
 function loadTypeScriptModule(relativePath, exports, dependencies = {}) {
+  dependencies = {
+    requireAppAccess: async () => {},
+    accountRequest: (signal) => ({ signal: signal || new AbortController().signal, dispose() {} }),
+    registerHostedConnection: () => () => {},
+    refreshHostedEntitlements: async () => {},
+    ...dependencies,
+  }
   const input = source(relativePath)
   const output = ts.transpileModule(input, {
     compilerOptions: {
@@ -199,9 +206,9 @@ check(
 )
 check(
   settingsStore.includes("export type AiAccessMode = 'byok' | 'hosted'")
-    && settingsStore.includes("aiAccessMode: 'byok'")
+    && settingsStore.includes("aiAccessMode: 'hosted'")
     && settingsStore.includes("HOSTED_STT_MODEL = 'hosted-managed'"),
-  'hosted access is opt-in and preserves BYOK as the default',
+  'new installs default to hosted access',
 )
 check(
   hostedAuth.includes('if (refreshPromise) return refreshPromise')
@@ -498,9 +505,9 @@ await saveAppSettings({ sttProvider: 'gemini', sttModel: 'gemini-3.5-transcribe-
 check(
   JSON.parse(savedSettings).sttProvider === 'gemini'
     && JSON.parse(savedSettings).sttModel === 'gemini-3.5-transcribe-live'
-    && DEFAULT_SETTINGS.sttProvider === 'deepgram'
-    && DEFAULT_SETTINGS.sttModel === 'nova-3',
-  'Google STT selection persists without changing the Deepgram default',
+    && DEFAULT_SETTINGS.sttProvider === 'hosted'
+    && DEFAULT_SETTINGS.sttModel === 'hosted-managed',
+  'Google STT selection persists while new installs use hosted STT',
 )
 storedSettings = JSON.stringify({ sttProvider: 'apple', sttModel: 'not-a-speech-model' })
 const normalizedAppleSettings = await loadAppSettings()
@@ -515,8 +522,8 @@ check(
   normalizedHostedSettings.aiAccessMode === 'hosted'
     && normalizedHostedSettings.sttProvider === 'hosted'
     && normalizedHostedSettings.sttModel === 'hosted-managed'
-    && DEFAULT_SETTINGS.aiAccessMode === 'byok',
-  'hosted settings normalize to the gateway model without changing the BYOK default',
+    && DEFAULT_SETTINGS.aiAccessMode === 'hosted',
+  'hosted settings normalize to the gateway model with hosted access as the new-install default',
 )
 storedSettings = JSON.stringify({ aiAccessMode: 'hosted', sttProvider: 'deepgram', sttModel: 'nova-3' })
 const normalizedHostedAccessSettings = await loadAppSettings()
@@ -547,8 +554,8 @@ const hostedUnavailable = deriveHostedReadiness({
     reachable: false,
     eligible: false,
     status: 'ACTIVE',
-    sttUnits: 0,
-    llmUnits: 0,
+    creditUnits: 0,
+    byokUnlocked: false,
     sttEnabled: true,
     llmEnabled: true,
   },
@@ -560,8 +567,8 @@ const hostedReady = deriveHostedReadiness({
     reachable: true,
     eligible: true,
     status: 'ACTIVE',
-    sttUnits: 60_000,
-    llmUnits: 10_000,
+    creditUnits: 60_000,
+    byokUnlocked: false,
     sttEnabled: true,
     llmEnabled: true,
   },
@@ -573,8 +580,8 @@ const hostedDepleted = deriveHostedReadiness({
     reachable: true,
     eligible: true,
     status: 'ACTIVE',
-    sttUnits: 0,
-    llmUnits: 0,
+    creditUnits: 0,
+    byokUnlocked: false,
     sttEnabled: true,
     llmEnabled: true,
   },
@@ -591,7 +598,7 @@ check(
   hostedDepleted.issues.some((issue) => issue.code === 'hosted-quota-insufficient' && issue.settingsTab === 'ai')
     && hostedDepleted.issues.some((issue) => issue.code === 'hosted-quota-insufficient' && issue.settingsTab === 'stt')
     && !hostedDepleted.canStartCopilot,
-  'hosted readiness blocks depleted LLM and STT quota independently',
+  'hosted readiness blocks both hosted services when shared credits are depleted',
 )
 
 if (sessionState) {

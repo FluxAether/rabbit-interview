@@ -40,7 +40,7 @@ import {
 } from '../lib/settingsStore'
 import type { SettingsTab } from '../lib/readiness'
 import type { Page } from '../lib/navigation'
-import { openHostedSubscription, refreshHostedEntitlements, signInHosted, signOutHosted, useHostedAuth } from '../lib/hostedAuth'
+import { accountRequest, hasAppAccess, requireAppAccess, openHostedSubscription, refreshHostedEntitlements, signInHosted, signOutHosted, useHostedAuth } from '../lib/hostedAuth'
 
 type TabType = SettingsTab
 
@@ -87,6 +87,7 @@ export default function Settings({
   const { settings, copilot, setLanguage: setStoreLanguage } = useAppStore()
   const t = useTranslation()
   const hosted = useHostedAuth()
+  const byokUnlocked = hasAppAccess(hosted) && Boolean(hosted.entitlements?.byok_unlocked)
 
   const [activeTab, setActiveTab] = useState<TabType>(initialTab)
 
@@ -456,6 +457,7 @@ export default function Settings({
   }
 
   const activateProvider = (provider: 'groq' | 'openai' | 'anthropic' | 'gemini', model: string) => {
+    if (!byokUnlocked) return
     setActiveProvider(provider)
     const finalModel = model
     setAiModel(finalModel)
@@ -512,6 +514,7 @@ export default function Settings({
   }
 
   const updateSttConfig = (provider: SttProvider, model: string) => {
+    if ((provider === 'deepgram' || provider === 'gemini') && !byokUnlocked) return
     setSttProvider(provider)
     setSttModel(model)
     if (provider !== 'hosted') byokSttRef.current = { provider, model }
@@ -526,6 +529,7 @@ export default function Settings({
   }
 
   const updateAiAccessMode = (mode: AiAccessMode) => {
+    if (mode === 'byok' && !byokUnlocked) return
     setAiAccessMode(mode)
     if (mode === 'hosted') {
       if (sttProvider !== 'hosted') byokSttRef.current = { provider: sttProvider, model: sttModel }
@@ -586,7 +590,10 @@ export default function Settings({
     }
 
     const start = performance.now()
+    const request = accountRequest(AbortSignal.timeout(12_000))
     try {
+      await requireAppAccess(true)
+      request.signal.throwIfAborted()
       let res: Response | undefined
       if (provider === 'gemini' && useGeminiLive) {
         const { testGeminiLiveConnection } = await import('../lib/llm')
@@ -597,12 +604,12 @@ export default function Settings({
       } else if (provider === 'groq') {
         res = await fetch('https://api.groq.com/openai/v1/models', {
           headers: { Authorization: `Bearer ${targetKey}` },
-          signal: AbortSignal.timeout(12_000),
+          signal: request.signal,
         })
       } else if (provider === 'openai') {
         res = await fetch('https://api.openai.com/v1/models', {
           headers: { Authorization: `Bearer ${targetKey}` },
-          signal: AbortSignal.timeout(12_000),
+          signal: request.signal,
         })
       } else if (provider === 'anthropic') {
         res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -618,11 +625,11 @@ export default function Settings({
             max_tokens: 1,
             messages: [{ role: 'user', content: 'hi' }],
           }),
-          signal: AbortSignal.timeout(12_000),
+          signal: request.signal,
         })
       } else {
         res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${targetKey}`, {
-          signal: AbortSignal.timeout(12_000),
+          signal: request.signal,
         })
       }
 
@@ -664,7 +671,7 @@ export default function Settings({
           message: `${t('settings.test.failed')}: ${e?.message || t('settings.test.networkError')}`,
         },
       }))
-    }
+    } finally { request.dispose() }
   }
 
   const renderKeyInputRow = (
@@ -684,6 +691,7 @@ export default function Settings({
             <input
               type={isVisible ? 'text' : 'password'}
               className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] py-1 pl-3 pr-9 text-xs font-mono text-[var(--text-main)]"
+              disabled={!byokUnlocked}
               aria-label={t('settings.keyLabel')}
               placeholder={isConfigured ? t('settings.keyConfigured') : placeholderName}
               value={keyInputs[provider]}
@@ -722,7 +730,7 @@ export default function Settings({
           <button
             type="button"
             onClick={() => void testConnection(provider, useGeminiLive)}
-            disabled={testResult.loading}
+            disabled={testResult.loading || !byokUnlocked}
             className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)] disabled:opacity-50"
           >
             {testResult.loading ? (
@@ -780,10 +788,10 @@ export default function Settings({
         updateChannel: 'Stable',
         stealthEnabled: true,
         aiModel: 'groq-llama-3.1',
-        aiAccessMode: 'byok',
+        aiAccessMode: 'hosted',
         language: DEFAULT_LANGUAGE,
-        sttProvider: 'deepgram',
-        sttModel: 'nova-3',
+        sttProvider: 'hosted',
+        sttModel: HOSTED_STT_MODEL,
         sttLanguage: 'zh-CN',
       })
       setKeyStatus({ groq: false, openai: false, anthropic: false, gemini: false, deepgram: false })
@@ -1107,6 +1115,7 @@ export default function Settings({
                         <button
                           key={mode}
                           type="button"
+                          disabled={mode === 'byok' && !byokUnlocked}
                           onClick={() => updateAiAccessMode(mode)}
                           className={`rounded px-3 py-1 text-xs font-medium ${aiAccessMode === mode ? 'bg-[var(--action)] text-[var(--action-text)]' : 'text-[var(--text-muted)]'}`}
                         >
@@ -1115,12 +1124,12 @@ export default function Settings({
                       ))}
                     </div>
                   </div>
+                  <p className="mb-3 text-xs text-[var(--text-muted)]">{t(byokUnlocked ? 'account.byokUnlocked' : 'account.byokLocked')}</p>
                   <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
                     <div className="text-[var(--text-muted)]">
                       {hosted.status === 'signed-in' && hosted.entitlements
                         ? t('settings.hosted.quota', {
-                            minutes: (hosted.entitlements.balances.STT_AUDIO_MS / 60_000).toFixed(1),
-                            tokens: hosted.entitlements.balances.LLM_TOKEN_UNITS.toLocaleString(),
+                            credits: (hosted.entitlements.balances.CREDITS / hosted.entitlements.credit_unit_scale).toLocaleString(language, { maximumFractionDigits: 4 }),
                           })
                         : hosted.error || t(`settings.hosted.status.${hosted.status}`)}
                     </div>
@@ -1165,7 +1174,7 @@ export default function Settings({
                       ) : (
                         <button
                           onClick={() => activateProvider('gemini', geminiModel)}
-                          disabled={aiAccessMode === 'hosted'}
+                          disabled={aiAccessMode === 'hosted' || !byokUnlocked}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t("settings.useProvider", { name: "Gemini" })}
@@ -1214,7 +1223,7 @@ export default function Settings({
                       ) : (
                         <button
                           onClick={() => activateProvider('groq', groqModel)}
-                          disabled={aiAccessMode === 'hosted'}
+                          disabled={aiAccessMode === 'hosted' || !byokUnlocked}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t("settings.useProvider", { name: "Groq" })}
@@ -1262,7 +1271,7 @@ export default function Settings({
                       ) : (
                         <button
                           onClick={() => activateProvider('openai', openaiModel)}
-                          disabled={aiAccessMode === 'hosted'}
+                          disabled={aiAccessMode === 'hosted' || !byokUnlocked}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t("settings.useProvider", { name: "OpenAI" })}
@@ -1310,7 +1319,7 @@ export default function Settings({
                       ) : (
                         <button
                           onClick={() => activateProvider('anthropic', anthropicModel)}
-                          disabled={aiAccessMode === 'hosted'}
+                          disabled={aiAccessMode === 'hosted' || !byokUnlocked}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t("settings.useProvider", { name: "Claude" })}
@@ -1394,7 +1403,7 @@ export default function Settings({
                         <button
                           type="button"
                           onClick={() => updateSttConfig('gemini', GEMINI_LIVE_TRANSCRIBE_MODEL)}
-                          disabled={aiAccessMode === 'hosted'}
+                          disabled={aiAccessMode === 'hosted' || !byokUnlocked}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t('settings.useProvider', { name: 'Google AI Studio' })}
@@ -1408,7 +1417,7 @@ export default function Settings({
                         <select
                           value={sttProvider === 'gemini' ? sttModel : GEMINI_LIVE_TRANSCRIBE_MODEL}
                           onChange={(e) => updateSttConfig('gemini', e.target.value)}
-                          disabled={aiAccessMode === 'hosted'}
+                          disabled={aiAccessMode === 'hosted' || !byokUnlocked}
                           className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm disabled:opacity-50"
                         >
                           <option value={GEMINI_LIVE_TRANSCRIBE_MODEL}>{GEMINI_LIVE_TRANSCRIBE_MODEL}</option>
@@ -1442,7 +1451,7 @@ export default function Settings({
                         <button
                           type="button"
                           onClick={() => updateSttConfig('deepgram', 'nova-3')}
-                          disabled={aiAccessMode === 'hosted'}
+                          disabled={aiAccessMode === 'hosted' || !byokUnlocked}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {t('settings.useProvider', { name: 'Deepgram' })}
@@ -1456,7 +1465,7 @@ export default function Settings({
                         <select
                           value={sttProvider === 'deepgram' ? sttModel : 'nova-3'}
                           onChange={(e) => updateSttConfig('deepgram', e.target.value)}
-                          disabled={aiAccessMode === 'hosted'}
+                          disabled={aiAccessMode === 'hosted' || !byokUnlocked}
                           className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm disabled:opacity-50"
                         >
                           <option value="nova-3">nova-3 (Recommended - multilingual)</option>
@@ -1492,7 +1501,7 @@ export default function Settings({
                       ) : (
                         <button
                           type="button"
-                          disabled={aiAccessMode === 'hosted' || !appleStt.available || sttLanguage === 'multi'}
+                          disabled={!appleStt.available || sttLanguage === 'multi'}
                           onClick={() => updateSttConfig('apple', APPLE_STT_MODEL)}
                           className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         >

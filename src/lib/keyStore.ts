@@ -7,6 +7,7 @@ import {
   saveSecret,
 } from './db';
 import { decryptSecret, encryptSecret } from './secretCrypto';
+import { requireAppAccess } from './hostedAuth';
 
 export type LlmProviderKey = 'GROQ_API_KEY' | 'OPENAI_API_KEY' | 'ANTHROPIC_API_KEY' | 'GEMINI_API_KEY';
 export type SttProviderKey = 'DEEPGRAM_API_KEY';
@@ -42,8 +43,9 @@ async function deleteFromKeychain(key: ApiKeyName): Promise<void> {
 }
 
 export async function setApiKey(key: ApiKeyName, value: string): Promise<void> {
-  await ensureMigrated();
   const trimmed = value.trim();
+  if (trimmed) await requireAppAccess(true);
+  await ensureMigrated();
   if (!trimmed) {
     await deleteSecret(key);
     await deleteFromKeychain(key);

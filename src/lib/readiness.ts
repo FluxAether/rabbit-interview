@@ -18,6 +18,7 @@ export type ReadinessIssueCode =
   | 'hosted-not-eligible'
   | 'hosted-quota-insufficient'
   | 'hosted-unavailable'
+  | 'byok-locked'
 
 export interface AudioCapabilitiesLike {
   system_audio_available: boolean
@@ -40,8 +41,8 @@ export interface ReadinessInput {
     reachable: boolean
     eligible: boolean
     status?: string
-    sttUnits: number
-    llmUnits: number
+    creditUnits: number
+    byokUnlocked: boolean
     sttEnabled: boolean
     llmEnabled: boolean
   } | null
@@ -80,9 +81,9 @@ export function sttRequiresCloudKey(provider: SttProvider): boolean {
 
 export function deriveReadiness(input: ReadinessInput): ReadinessState {
   const llmProvider = resolveLlmProvider(input.settings?.aiModel, input.settings?.aiAccessMode)
-  const sttProvider = input.settings?.aiAccessMode === 'hosted' || input.settings?.sttProvider === 'hosted'
+  const sttProvider = input.settings?.sttProvider === 'apple' ? 'apple' : input.settings?.aiAccessMode === 'hosted' || input.settings?.sttProvider === 'hosted'
     ? 'hosted'
-    : input.settings?.sttProvider === 'gemini' || input.settings?.sttProvider === 'apple'
+    : input.settings?.sttProvider === 'gemini'
       ? input.settings.sttProvider
       : 'deepgram'
   const issues: ReadinessIssue[] = []
@@ -97,8 +98,7 @@ export function deriveReadiness(input: ReadinessInput): ReadinessState {
     }
   }
 
-  const hostedRequired = llmProvider === 'hosted' || sttProvider === 'hosted'
-  if (hostedRequired) {
+  {
     if (input.hosted?.reachable === false) {
       issues.push({ code: 'hosted-unavailable', settingsTab: 'ai', blocking: true })
     } else if (!input.hosted?.authenticated) {
@@ -108,8 +108,12 @@ export function deriveReadiness(input: ReadinessInput): ReadinessState {
     }
   }
 
+  if ((llmProvider !== 'hosted' || sttRequiresCloudKey(sttProvider)) && !input.hosted?.byokUnlocked) {
+    issues.push({ code: 'byok-locked', settingsTab: 'ai', blocking: true })
+  }
+
   if (llmProvider === 'hosted') {
-    if (input.hosted?.authenticated && (!input.hosted.llmEnabled || input.hosted.llmUnits <= 0)) {
+    if (input.hosted?.authenticated && (!input.hosted.llmEnabled || input.hosted.creditUnits <= 0)) {
       issues.push({ code: 'hosted-quota-insufficient', settingsTab: 'ai', blocking: true })
     }
   } else {
@@ -122,7 +126,7 @@ export function deriveReadiness(input: ReadinessInput): ReadinessState {
   }
 
   if (sttProvider === 'hosted') {
-    if (input.hosted?.authenticated && (!input.hosted.sttEnabled || input.hosted.sttUnits <= 0)) {
+    if (input.hosted?.authenticated && (!input.hosted.sttEnabled || input.hosted.creditUnits <= 0)) {
       issues.push({ code: 'hosted-quota-insufficient', settingsTab: 'stt', blocking: true })
     }
   } else if (sttProvider === 'apple') {
@@ -158,7 +162,7 @@ export function deriveReadiness(input: ReadinessInput): ReadinessState {
   }
 
   const blocking = issues.filter((issue) => issue.blocking)
-  const unconfigured = blocking.some((issue) => issue.code.startsWith('missing-') || issue.code === 'apple-stt-unavailable' || issue.code === 'hosted-auth-required' || issue.code === 'hosted-not-eligible' || issue.code === 'hosted-quota-insufficient')
+  const unconfigured = blocking.some((issue) => issue.code.startsWith('missing-') || issue.code === 'apple-stt-unavailable' || issue.code === 'byok-locked' || issue.code === 'hosted-auth-required' || issue.code === 'hosted-not-eligible' || issue.code === 'hosted-quota-insufficient')
   let status: ReadinessStatus
   if (input.testing) status = 'testing'
   else if (blocking.length > 0) status = unconfigured ? 'unconfigured' : 'error'

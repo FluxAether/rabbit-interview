@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
-import { ArrowLeft, Check, Cpu, KeyRound, Mic, ShieldCheck, Sparkles } from 'lucide-react'
+import { ArrowLeft, Check, KeyRound, ShieldCheck } from 'lucide-react'
 import { authCopy, type AuthLang } from '../locales/authContent'
+import { FALLBACK_PRODUCTS, formatCredits, formatYuan, gateway, isPaymentProduct, type PaymentProduct } from '../lib/catalog'
 
 type Interaction =
   | { step: 'login'; csrf: string }
@@ -12,43 +13,34 @@ type PublicContext = { binding: string; csrf: string }
 type TokenContext = { csrf: string }
 type SecurityContext = { email: string; totp_enabled: boolean; csrf: string }
 type TotpSetup = { qr_base64: string; secret: string; csrf: string }
-type PaymentProduct = {
-  code: 'PRO_MONTH' | 'PRO_QUARTER'
-  price_minor: number
-  currency: 'CNY'
-  duration_days: number
-  stt_ms: number
-  llm_units: number
-}
 type PaymentOrder = {
   merchant_order_no: string
-  product_code: PaymentProduct['code']
+  product_code: string
   status: 'PENDING' | 'PAID' | 'CLOSED'
   checkout_url: string | null
   expires_at: string
   paid_at: string | null
-  paid_through: string | null
 }
 type SubscriptionContext = {
   email: string
   status: string
-  balances: { STT_AUDIO_MS: number; LLM_TOKEN_UNITS: number }
+  balances: { CREDITS: number }
+  credit_unit_scale: number
+  byok_unlocked: boolean
   hosted_stt_enabled: boolean
   hosted_llm_enabled: boolean
   payments_enabled: boolean
   csrf: string
   products: PaymentProduct[]
-  subscription: null | {
-    product_code: PaymentProduct['code']
-    starts_at: string
-    paid_through: string
-  }
+
 }
 type AccountLookup = {
   account_id: string
   email: string
   status: string
-  balances: { STT_AUDIO_MS: number; LLM_TOKEN_UNITS: number }
+  balances: { CREDITS: number }
+  credit_unit_scale: number
+  byok_unlocked: boolean
 }
 type RoutingKind = 'stt' | 'llm'
 type RouteState = {
@@ -73,11 +65,6 @@ type T = (typeof authCopy)[AuthLang]
 const inputClass = 'mt-2 h-11 w-full rounded-xl border border-white/15 bg-black/20 px-3.5 text-sm text-ink placeholder:text-mute/60 focus:border-white/35 focus:outline-none'
 const primaryButton = 'inline-flex h-11 items-center justify-center rounded-xl bg-ink px-5 text-sm font-semibold text-canvas disabled:cursor-not-allowed disabled:opacity-50'
 const secondaryButton = 'inline-flex h-11 items-center justify-center rounded-xl border border-white/15 bg-white/[0.04] px-5 text-sm font-medium text-ink disabled:cursor-not-allowed disabled:opacity-50'
-
-const env = (import.meta as ImportMeta & {
-  readonly env?: { readonly VITE_HOSTED_GATEWAY_URL?: string; readonly DEV?: boolean }
-}).env
-const gateway = (env?.DEV ? (typeof window === 'undefined' ? '' : window.location.origin) : (env?.VITE_HOSTED_GATEWAY_URL?.trim() || (typeof window === 'undefined' ? '' : window.location.origin))).replace(/\/$/, '')
 
 let cachedFragment: URLSearchParams | undefined
 
@@ -692,82 +679,16 @@ function SecurityPage({ t }: { t: T }) {
   )
 }
 
-function formatMinutes(ms: number | undefined): string {
-  return (Math.max(0, Number(ms) || 0) / 60_000).toFixed(1)
-}
-
-function formatUnits(units: number | undefined): string {
-  return Math.max(0, Number(units) || 0).toLocaleString()
-}
-
-function formatDate(value: string | undefined, lang: string): string {
-  if (!value) return '-'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString(lang)
-}
-
-function addDays(date: Date, days: number): Date {
-  const next = new Date(date.getTime())
-  next.setUTCDate(next.getUTCDate() + days)
-  return next
-}
-
-function fillTemplate(template: string, values: Record<string, string>): string {
-  return template.replace(/\{(start|end)\}/g, (token, key: string) => values[key] || token)
-}
-
-function periodPreview(
-  product: PaymentProduct,
-  paidThrough: string | undefined,
-  lang: string,
-): { start: string; end: string; renewing: boolean } {
-  const now = new Date()
-  const currentEnd = paidThrough ? new Date(paidThrough) : null
-  const renewing = Boolean(currentEnd && !Number.isNaN(currentEnd.getTime()) && currentEnd.getTime() > now.getTime())
-  const start = renewing && currentEnd ? currentEnd : now
-  return {
-    start: formatDate(start.toISOString(), lang),
-    end: formatDate(addDays(start, product.duration_days).toISOString(), lang),
-    renewing,
-  }
-}
-
-function paidOrderCopy(order: PaymentOrder, products: PaymentProduct[], lang: string, t: T): string {
-  const product = products.find((item) => item.code === order.product_code)
-  const end = order.paid_through ? new Date(order.paid_through) : null
-  if (!product || !end || Number.isNaN(end.getTime())) return t.subscribe.paymentPaid
-  const start = addDays(end, -product.duration_days)
-  const copy = start.getTime() > Date.now() ? t.subscribe.paymentRenewed : t.subscribe.paymentPaid
-  return fillTemplate(copy, {
-    start: formatDate(start.toISOString(), lang),
-    end: formatDate(end.toISOString(), lang),
-  })
-}
-
-const DEFAULT_PRODUCTS: PaymentProduct[] = [
-  {
-    code: 'PRO_MONTH',
-    price_minor: 8_900,
-    currency: 'CNY',
-    duration_days: 30,
-    stt_ms: 54_000_000,
-    llm_units: 2_000_000,
-  },
-  {
-    code: 'PRO_QUARTER',
-    price_minor: 19_900,
-    currency: 'CNY',
-    duration_days: 90,
-    stt_ms: 180_000_000,
-    llm_units: 8_000_000,
-  },
-]
-
 let inFlightSubscription: Promise<SubscriptionContext> | null = null
 
 function fetchSubscriptionContext(path: string): Promise<SubscriptionContext> {
   if (!inFlightSubscription) {
-    inFlightSubscription = jsonApi<SubscriptionContext>(path).finally(() => {
+    inFlightSubscription = jsonApi<SubscriptionContext>(path).then(context => {
+      if (context.credit_unit_scale !== 60_000 || !Number.isSafeInteger(context.balances?.CREDITS)
+        || context.balances.CREDITS < 0 || typeof context.byok_unlocked !== 'boolean'
+        || !Array.isArray(context.products) || !context.products.every(isPaymentProduct)) throw new Error('GATEWAY_UNREACHABLE')
+      return context
+    }).finally(() => {
       inFlightSubscription = null
     })
   }
@@ -813,7 +734,7 @@ function SubscribePage({ t }: { t: T }) {
           if (active) setOrder(refreshed)
         }
         if (active && refreshed.status === 'PAID') {
-          setContext(await jsonApi<SubscriptionContext>('/account/subscription/context'))
+          setContext(await fetchSubscriptionContext('/account/subscription/context'))
         }
       })
       .catch((reason: unknown) => {
@@ -850,207 +771,79 @@ function SubscribePage({ t }: { t: T }) {
     }
   }
 
-  const planName = (code: PaymentProduct['code']) => code === 'PRO_QUARTER'
-    ? t.subscribe.quarterPlan
-    : t.subscribe.monthPlan
-
-  const renderPlanCard = (product: PaymentProduct, preview?: { start: string; end: string; renewing: boolean }) => {
-    const isQuarter = product.code === 'PRO_QUARTER'
-    const price = (product.price_minor / 100).toFixed(0)
-    const dailyPrice = (product.price_minor / 100 / product.duration_days).toFixed(1)
-    const action = preview
-      ? (isQuarter
-          ? (preview.renewing ? t.subscribe.renewQuarter : t.subscribe.buyQuarter)
-          : (preview.renewing ? t.subscribe.renewMonth : t.subscribe.buyMonth))
-      : (isQuarter ? t.subscribe.buyQuarter : t.subscribe.buyMonth)
-
-    return (
-      <section
-        key={product.code}
-        className={`relative flex flex-col justify-between rounded-2xl border p-6 transition-all duration-200 ${
-          isQuarter
-            ? 'border-emerald-500/30 bg-gradient-to-b from-emerald-950/15 via-white/[0.03] to-white/[0.015] shadow-lg shadow-emerald-950/20 ring-1 ring-emerald-500/20'
-            : 'border-white/10 bg-white/[0.025] hover:border-white/15'
-        }`}
-      >
-        {isQuarter ? (
-          <div className="absolute -top-3 right-6 inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300 backdrop-blur-md">
-            <Sparkles className="h-3 w-3" aria-hidden="true" />
-            <span>{t.htmlLang === 'en' ? 'Most Popular' : '超值推荐'}</span>
-          </div>
-        ) : null}
-
-        <div>
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-base font-semibold text-ink">{planName(product.code)}</h2>
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-xs text-mute">
-              {product.duration_days} {t.subscribe.days}
-            </span>
-          </div>
-
-          <div className="mt-4 flex items-baseline gap-1.5">
-            <span className="text-3xl font-bold tracking-tight text-ink">¥{price}</span>
-            <span className="text-xs text-mute">/ {product.duration_days} {t.subscribe.days} (约 ¥{dailyPrice}/天)</span>
-          </div>
-
-          <div className="mt-6 space-y-3 border-t border-white/10 pt-5 text-xs">
-            <div className="flex items-center gap-2.5 text-ink/90">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-emerald-400">
-                <Mic className="h-3.5 w-3.5" aria-hidden="true" />
-              </div>
-              <span>
-                <strong className="font-semibold text-ink">{formatMinutes(product.stt_ms)}</strong> {t.subscribe.sttMinutes}
-              </span>
-            </div>
-            <div className="flex items-center gap-2.5 text-ink/90">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-purple-400">
-                <Cpu className="h-3.5 w-3.5" aria-hidden="true" />
-              </div>
-              <span>
-                <strong className="font-semibold text-ink">{formatUnits(product.llm_units)}</strong> {t.subscribe.llmUnits}
-              </span>
-            </div>
-            <div className="flex items-center gap-2.5 text-ink/90">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/[0.05] text-blue-400">
-                <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-              </div>
-              <span className="text-mute">{t.subscribe.oneTimeNote}</span>
-            </div>
-          </div>
-
-          {preview ? (
-            <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-xs text-mute">
-              <p className="font-medium text-ink">{t.subscribe.renewLabel}</p>
-              <p className="mt-1 leading-relaxed">
-                {fillTemplate(preview.renewing ? t.subscribe.renewPreview : t.subscribe.buyPreview, {
-                  start: preview.start,
-                  end: preview.end,
-                })}
-              </p>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="mt-6">
-          {context && context.payments_enabled ? (
-            <button
-              type="button"
-              className={`${isQuarter ? primaryButton : secondaryButton} w-full shadow-sm`}
-              disabled={Boolean(busyProduct)}
-              onClick={() => void buy(product.code)}
-            >
-              {busyProduct === product.code ? t.subscribe.redirecting : action}
-            </button>
-          ) : (
-            <a
-              href={authHref('/auth/register')}
-              className={`${isQuarter ? primaryButton : secondaryButton} w-full shadow-sm`}
-            >
-              {t.login.register}
-            </a>
-          )}
-          <p className="mt-2 text-center text-[11px] text-mute">
-            {preview?.renewing ? t.subscribe.renewNote : t.subscribe.paymentsNote}
-          </p>
-        </div>
-      </section>
-    )
+  const refreshOrder = async () => {
+    if (!context || !order) return
+    setBusyProduct(order.product_code)
+    setError('')
+    try {
+      const next = await jsonApi<PaymentOrder>(`/account/payment-orders/${order.merchant_order_no}/refresh`, {
+        json: {}, headers: { 'X-CSRF-Token': context.csrf },
+      })
+      setOrder(next)
+      if (next.status === 'PAID') setContext(await fetchSubscriptionContext('/account/subscription/context'))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'INTERNAL_ERROR')
+    } finally {
+      setBusyProduct('')
+    }
   }
 
   return (
-    <div className="space-y-7">
-      <div>
-        <Intro title={t.subscribe.title} body={t.subscribe.subtitle} />
-      </div>
-
+    <div className="space-y-6">
+      <Intro title={context ? t.subscribe.signedInTitle : t.subscribe.guestTitle} body={t.subscribe.subtitle} />
       {error ? <ErrorMessage>{errorText(t, new Error(error))}</ErrorMessage> : null}
-
-      {loading ? <Loading t={t} /> : context ? (
-        <div className="space-y-6">
-          <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-xs text-mute">{t.subscribe.signedIn}</p>
-                <p className="mt-0.5 break-all text-sm font-semibold text-ink">{context.email}</p>
-              </div>
-              {context.subscription ? (
-                <div className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-300">
-                  {planName(context.subscription.product_code)} · {t.subscribe.paidThrough} {formatDate(context.subscription.paid_through, t.htmlLang)}
-                </div>
-              ) : null}
+      {loading ? <p role="status" className="text-sm text-mute">{t.loading}</p> : null}
+      {context ? (
+        <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
+          <p className="text-xs text-mute">{t.subscribe.signedIn}</p>
+          <p className="mt-1 break-all font-medium">{context.email}</p>
+          <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div>
+              <dt className="text-xs text-mute">{t.subscribe.credits}</dt>
+              <dd className="mt-1 text-2xl font-semibold">{formatCredits(context.balances.CREDITS, context.credit_unit_scale, t.htmlLang)}</dd>
             </div>
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-black/20 p-3">
-                <Mic className="h-4 w-4 text-emerald-400" aria-hidden="true" />
-                <div>
-                  <p className="text-[11px] text-mute">{t.subscribe.stt}</p>
-                  <p className="text-sm font-semibold text-ink">{formatMinutes(context.balances.STT_AUDIO_MS)}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-black/20 p-3">
-                <Cpu className="h-4 w-4 text-purple-400" aria-hidden="true" />
-                <div>
-                  <p className="text-[11px] text-mute">{t.subscribe.llm}</p>
-                  <p className="text-sm font-semibold text-ink">{formatUnits(context.balances.LLM_TOKEN_UNITS)}</p>
-                </div>
-              </div>
+            <div>
+              <dt className="text-xs text-mute">{t.subscribe.byokTitle}</dt>
+              <dd className="mt-1 font-medium">{context.byok_unlocked ? t.subscribe.byokUnlocked : t.subscribe.byokLocked}</dd>
             </div>
-          </section>
-
-          {order ? (
-            <p className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3 text-sm">
-              {order.status === 'PAID'
-                ? paidOrderCopy(order, context.products, t.htmlLang, t)
-                : order.status === 'CLOSED'
-                  ? t.subscribe.paymentClosed
-                  : t.subscribe.paymentPending}
-            </p>
-          ) : null}
-
-          {context.payments_enabled ? (
-            <div className="grid gap-5 sm:grid-cols-2">
-              {context.products.map((product) => {
-                const preview = periodPreview(product, context.subscription?.paid_through, t.htmlLang)
-                return renderPlanCard(product, preview)
-              })}
-            </div>
-          ) : (
-            <p className="text-xs text-mute">{t.subscribe.paymentsOff}</p>
-          )}
+          </dl>
+        </section>
+      ) : <p className="text-sm text-mute">{t.subscribe.signedOut}</p>}
+      {order ? (
+        <div role="status" className="space-y-3 rounded-xl border border-white/10 px-4 py-3 text-sm">
+          <p>{order.status === 'PAID' ? t.subscribe.paymentPaid : order.status === 'CLOSED' ? t.subscribe.paymentClosed : t.subscribe.paymentPending}</p>
+          <p className="break-all text-xs text-mute">{t.subscribe.orderNo}: {order.merchant_order_no}</p>
+          {order.status === 'PENDING' ? <button className={secondaryButton} disabled={Boolean(busyProduct)} onClick={() => void refreshOrder()}>{t.subscribe.checkPayment}</button> : null}
         </div>
-      ) : (
-        <div className="space-y-6">
-          <div className="grid gap-5 sm:grid-cols-2">
-            {DEFAULT_PRODUCTS.map((product) => renderPlanCard(product))}
-          </div>
-          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 text-center">
-            <p className="text-sm text-mute">{t.subscribe.signedOut}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Info & Policy Features */}
-      <div className="grid gap-4 border-t border-white/10 pt-6 text-xs sm:grid-cols-3">
-        <div className="rounded-xl border border-white/5 bg-white/[0.015] p-3.5">
-          <h3 className="font-semibold text-ink">{t.subscribe.hostedTitle}</h3>
-          <p className="mt-1.5 leading-relaxed text-mute">{t.subscribe.hostedBody}</p>
-        </div>
-        <div className="rounded-xl border border-white/5 bg-white/[0.015] p-3.5">
-          <h3 className="font-semibold text-ink">{t.subscribe.byokTitle}</h3>
-          <p className="mt-1.5 leading-relaxed text-mute">{t.subscribe.byokBody}</p>
-        </div>
-        <div className="rounded-xl border border-white/5 bg-white/[0.015] p-3.5">
-          <h3 className="font-semibold text-ink">{t.subscribe.grantTitle}</h3>
-          <p className="mt-1.5 leading-relaxed text-mute">{t.subscribe.grantBody}</p>
-        </div>
+      ) : null}
+      {context && !context.payments_enabled ? <p className="text-sm text-mute">{t.subscribe.paymentsOff}</p> : null}
+      <div className="grid gap-5 sm:grid-cols-3">
+        {(context?.products || FALLBACK_PRODUCTS).map((product) => {
+          const byok = product.kind === 'BYOK'
+          const unlocked = byok && context?.byok_unlocked
+          return (
+            <section key={product.code} className="flex flex-col rounded-2xl border border-white/15 bg-white/[0.025] p-5">
+              <p className="text-xs text-emerald-300">{byok ? t.subscribe.lifetime : t.subscribe.permanent}</p>
+              <h2 className="mt-3 text-lg font-semibold">{byok ? t.subscribe.byokTitle : `${formatCredits(product.credit_units, product.credit_unit_scale, t.htmlLang)} ${t.subscribe.creditLabel}`}</h2>
+              <p className="mt-4 text-3xl font-semibold">{formatYuan(product.price_minor)}</p>
+              <p className="mt-4 flex-1 text-sm leading-relaxed text-mute">{byok ? t.subscribe.byokBody : t.subscribe.hostedBody}</p>
+              <p className="my-4 flex gap-2 text-xs text-mute"><Check className="h-4 w-4 shrink-0" />{byok ? t.subscribe.noCredits : t.subscribe.availableNow}</p>
+              {context ? (
+                <button className={primaryButton} disabled={Boolean(busyProduct) || unlocked || !context.payments_enabled || context.status !== 'ACTIVE'} onClick={() => void buy(product.code)}>
+                  {unlocked ? t.subscribe.byokUnlocked : busyProduct === product.code ? t.subscribe.redirecting : t.subscribe.buy}
+                </button>
+              ) : <a href={authHref('/auth/login')} className={secondaryButton}>{t.subscribe.openToBuy}</a>}
+            </section>
+          )
+        })}
       </div>
-
+      <p className="text-xs text-mute">{t.subscribe.paymentsNote}</p>
+      <section className="rounded-xl border border-white/10 p-4 text-sm">
+        <h2 className="font-medium">{t.subscribe.grantTitle}</h2>
+        <p className="mt-2 leading-relaxed text-mute">{t.subscribe.grantBody}</p>
+      </section>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
-        <a className={secondaryButton} href="/">
-          <ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />
-          {t.backHome}
-        </a>
+        <a className={secondaryButton} href="/"><ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />{t.backHome}</a>
         <a className={secondaryButton} href={authHref('/auth/register')}>{t.login.register}</a>
       </div>
     </div>
@@ -1062,7 +855,7 @@ function AdminPage({ t }: { t: T }) {
   const [actor, setActor] = useState('')
   const [email, setEmail] = useState('')
   const [account, setAccount] = useState<AccountLookup | null>(null)
-  const [sttMinutes, setSttMinutes] = useState('')
+  const [creditAmount, setCreditAmount] = useState('')
   const [reason, setReason] = useState('')
   const [validUntil, setValidUntil] = useState('')
   const [error, setError] = useState('')
@@ -1197,8 +990,8 @@ function AdminPage({ t }: { t: T }) {
     event.preventDefault()
     setErrorScope('general')
     if (!account) return
-    const minutes = Number(sttMinutes)
-    if (!Number.isFinite(minutes) || minutes <= 0 || !reason.trim()) {
+    const units = Math.round(Number(creditAmount) * account.credit_unit_scale)
+    if (!Number.isSafeInteger(units) || units <= 0 || !reason.trim()) {
       setError('INVALID_REQUEST')
       return
     }
@@ -1217,8 +1010,8 @@ function AdminPage({ t }: { t: T }) {
     try {
       await jsonApi(`/internal/accounts/${account.account_id}/quota-adjustments`, {
         json: {
-          metric: 'STT_AUDIO_MS',
-          units: Math.round(minutes * 60_000),
+          metric: 'CREDITS',
+          units,
           reason: reason.trim(),
           ...(expires ? { valid_until: expires } : {}),
         },
@@ -1229,7 +1022,7 @@ function AdminPage({ t }: { t: T }) {
         headers: headers(),
       }))
       setNotice(t.admin.granted)
-      setSttMinutes('')
+      setCreditAmount('')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'INTERNAL_ERROR')
     } finally {
@@ -1279,15 +1072,17 @@ function AdminPage({ t }: { t: T }) {
             <p className="mt-1">{account.status}</p>
             <dl className="mt-4 text-sm">
               <div>
-                <dt className="text-mute">{t.subscribe.stt}</dt>
-                <dd className="mt-1 font-medium">{formatMinutes(account.balances.STT_AUDIO_MS)}</dd>
+                <dt className="text-mute">{t.subscribe.credits}</dt>
+                <dd className="mt-1 font-medium">{formatCredits(account.balances.CREDITS, account.credit_unit_scale, t.htmlLang)}</dd>
+                <dt className="mt-3 text-mute">{t.subscribe.byokTitle}</dt>
+                <dd className="mt-1 font-medium">{account.byok_unlocked ? t.subscribe.byokUnlocked : t.subscribe.byokLocked}</dd>
               </div>
             </dl>
           </div>
           <form className="mt-7 space-y-5" onSubmit={grant} aria-busy={busy}>
             <label className="block text-sm font-medium">
-              {t.admin.sttMinutes}
-              <input className={inputClass} inputMode="decimal" value={sttMinutes} onChange={(event) => setSttMinutes(event.target.value)} />
+              {t.admin.credits}
+              <input className={inputClass} inputMode="decimal" value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} />
             </label>
             <label className="block text-sm font-medium">
               {t.admin.reason}

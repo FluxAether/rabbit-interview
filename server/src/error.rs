@@ -24,6 +24,8 @@ pub enum AppError {
     NotFound,
     #[error("request is already active or complete")]
     AlreadyExists,
+    #[error("BYOK is already unlocked")]
+    ByokAlreadyUnlocked,
     #[error("provider unavailable")]
     ProviderUnavailable,
     #[error("provider protocol error")]
@@ -86,6 +88,12 @@ impl IntoResponse for AppError {
                 StatusCode::CONFLICT,
                 "REQUEST_ALREADY_EXISTS",
                 "This request has already been created.",
+                false,
+            ),
+            Self::ByokAlreadyUnlocked => (
+                StatusCode::CONFLICT,
+                "BYOK_ALREADY_UNLOCKED",
+                "BYOK is already unlocked for this account.",
                 false,
             ),
             Self::NotFound => (

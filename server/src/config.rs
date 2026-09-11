@@ -164,7 +164,7 @@ impl Config {
             max_stt_session: Duration::from_secs(parse("MAX_STT_SESSION_SECONDS", "3600")?),
             global_concurrency_limit: parse("GLOBAL_CONCURRENCY_LIMIT", "100")?,
             pricing_policy_version: env::var("PRICING_POLICY_VERSION")
-                .unwrap_or_else(|_| "2026-08-source-duration-v1".to_owned()),
+                .unwrap_or_else(|_| "2026-09-credits-v1".to_owned()),
         })
     }
 

@@ -45,7 +45,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   updateChannel: 'Stable',
   language: 'zh-CN',
   aiModel: 'groq-llama-3.1',
-  aiAccessMode: 'byok',
+  aiAccessMode: 'hosted',
   stealthEnabled: true,
   aiModels: {
     groq: 'llama-3.1-8b-instant',
@@ -53,8 +53,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     anthropic: 'claude-haiku-4-5',
     gemini: 'gemini-3.6-flash',
   },
-  sttProvider: 'deepgram',
-  sttModel: 'nova-3',
+  sttProvider: 'hosted',
+  sttModel: HOSTED_STT_MODEL,
   sttLanguage: 'zh-CN',
   useSystemAudio: true,
   useMicWithSystem: false,
@@ -82,9 +82,9 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
   if (aiModel.startsWith('gemini') && !['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.8-flash'].includes(aiModel)) {
     aiModel = 'gemini-3.6-flash';
   }
-  const aiAccessMode: AiAccessMode = saved?.aiAccessMode === 'hosted' ? 'hosted' : 'byok';
+  const aiAccessMode: AiAccessMode = !saved || saved.aiAccessMode === 'hosted' ? 'hosted' : 'byok';
   const savedSttProvider = saved?.sttProvider as string | undefined;
-  const sttProvider: SttProvider = aiAccessMode === 'hosted' || savedSttProvider === 'hosted'
+  const sttProvider: SttProvider = savedSttProvider === 'apple' ? 'apple' : aiAccessMode === 'hosted' || savedSttProvider === 'hosted'
     ? 'hosted'
     : savedSttProvider === 'gemini'
     ? 'gemini'
@@ -100,10 +100,10 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
     : sttProvider === 'apple'
       ? APPLE_STT_MODEL
       : savedSttProvider !== undefined && savedSttProvider !== 'deepgram'
-        ? DEFAULT_SETTINGS.sttModel
+        ? 'nova-3'
         : saved?.sttModel === 'nova-2'
           ? 'nova-3'
-          : (saved?.sttModel || DEFAULT_SETTINGS.sttModel);
+          : (saved?.sttModel || 'nova-3');
   const copilotFontSize: CopilotFontSize =
     saved?.copilotFontSize === 'sm' || saved?.copilotFontSize === 'base' || saved?.copilotFontSize === 'lg'
       ? saved.copilotFontSize

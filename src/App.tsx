@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { Clock, FileText, LayoutDashboard, MessageSquareText, Mic, PanelLeftClose, PanelLeftOpen, Settings as SettingsIcon } from 'lucide-react'
 import CopilotPanel from './components/CopilotPanel'
+import AccountGate from './components/AccountGate'
 import Dashboard from './pages/Dashboard'
 import History from './pages/History'
 import MockInterview from './pages/MockInterview'
@@ -29,7 +30,7 @@ import { loadAppSettings, type AppSettings } from './lib/settingsStore'
 import { deriveReadiness, type SettingsTab } from './lib/readiness'
 import type { Page, SettingsIntent } from './lib/navigation'
 import { getApiKey } from './lib/keyStore'
-import { initializeHostedAuth, useHostedAuth } from './lib/hostedAuth'
+import { useHostedAuth } from './lib/hostedAuth'
 import { encryptSecret } from './lib/secretCrypto'
 import { loadResumeWorkspace, persistResumeWorkspace } from './lib/resumeWorkspaceStore'
 import { selectResumeWorkspace, useAppStore } from './stores/useAppStore'
@@ -168,6 +169,10 @@ function Sidebar({
 }
 
 export default function App() {
+  return <AccountGate floating={window.location.hash === '#copilot-floating'}><AppContent /></AccountGate>
+}
+
+function AppContent() {
   const floating = window.location.hash === '#copilot-floating'
   const settings = useAppStore((state) => state.settings)
   const hosted = useHostedAuth()
@@ -180,9 +185,6 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 960px)').matches)
   const [userCollapsed, setUserCollapsed] = useState(false)
   const [windowStatus, setWindowStatus] = useState<CopilotWindowStatus | null>(null)
-  useEffect(() => {
-    if (!floating) void initializeHostedAuth()
-  }, [floating])
   useEffect(() => {
     if (floating) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -375,8 +377,8 @@ export default function App() {
             reachable: hosted.status !== 'error',
             eligible: Boolean(hosted.entitlements?.eligible),
             status: hosted.entitlements?.status,
-            sttUnits: hosted.entitlements?.balances.STT_AUDIO_MS || 0,
-            llmUnits: hosted.entitlements?.balances.LLM_TOKEN_UNITS || 0,
+            creditUnits: hosted.entitlements?.balances.CREDITS || 0,
+            byokUnlocked: Boolean(hosted.entitlements?.byok_unlocked),
             sttEnabled: Boolean(hosted.entitlements?.hosted_stt_enabled),
             llmEnabled: Boolean(hosted.entitlements?.hosted_llm_enabled),
           },

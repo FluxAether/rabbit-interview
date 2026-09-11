@@ -18,7 +18,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    entitlement::{hash_json, ReserveInput, ReserveOutcome, UsageInput, STT_METRIC},
+    entitlement::{hash_json, ReserveInput, ReserveOutcome, UsageInput, CREDIT_METRIC},
     error::AppError,
     protocol::{CreateSttSession, CreateSttSessionResponse},
     providers::{
@@ -94,7 +94,7 @@ pub async fn create_session(
             audio_source: Some(source),
             provider: route.provider.to_ascii_uppercase(),
             model: route.model.clone(),
-            metric: STT_METRIC,
+            metric: CREDIT_METRIC,
             units: state.config().initial_stt_hold_ms,
             idempotency_key,
             request_hash,
@@ -429,17 +429,29 @@ async fn proxy_stt(
     drop(provider_tx);
     drop(client_rx);
     let accepted_ms = received_samples * 1000 / 16_000;
-    let settle_result = timed("settlement", STT_IO_TIMEOUT, state.entitlement().settle(
-        &claim.reservation_id,
-        UsageInput {
-            event_key: "final".to_owned(), usage_status,
-            received_audio_ms: accepted_ms, forwarded_audio_ms: accepted_ms,
-            provider_audio_ms: Some(accepted_ms), input_tokens: 0, output_tokens: 0,
-            cache_hit_tokens: 0, reasoning_tokens: 0, charged_metric: STT_METRIC,
-            actual_units: accepted_ms, pricing_policy_version: state.config().pricing_policy_version.clone(),
-            terminate_reason: terminate_reason.to_owned(),
-        },
-    )).await;
+    let settle_result = timed(
+        "settlement",
+        STT_IO_TIMEOUT,
+        state.entitlement().settle(
+            &claim.reservation_id,
+            UsageInput {
+                event_key: "final".to_owned(),
+                usage_status,
+                received_audio_ms: accepted_ms,
+                forwarded_audio_ms: accepted_ms,
+                provider_audio_ms: Some(accepted_ms),
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_hit_tokens: 0,
+                reasoning_tokens: 0,
+                charged_metric: CREDIT_METRIC,
+                actual_units: accepted_ms,
+                pricing_policy_version: state.config().pricing_policy_version.clone(),
+                terminate_reason: terminate_reason.to_owned(),
+            },
+        ),
+    )
+    .await;
     tracing::info!(session_id = %claim.session_id, provider = %claim.route.provider, terminate_reason,
         accepted_audio_ms = accepted_ms, usage_status, settle_outcome = if settle_result.is_ok() { "settled" } else { "failed_or_unknown" },
         "STT session finished");

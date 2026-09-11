@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use chrono::{Duration as ChronoDuration, Utc};
 use rabbit_gateway::{
     entitlement::{
-        hash_json, Entitlement, ReserveInput, ReserveOutcome, UsageInput, LLM_METRIC, STT_METRIC,
+        hash_json, Entitlement, ReserveInput, ReserveOutcome, UsageInput, CREDIT_METRIC,
     },
     error::AppError,
 };
@@ -15,15 +15,41 @@ use uuid::Uuid;
 async fn active_stt(entitlement: &Entitlement) -> anyhow::Result<ReserveInput> {
     let account = Uuid::new_v4().to_string();
     let email = format!("{account}@example.test");
-    sqlx::query("INSERT INTO accounts (id, email, normalized_email, status) VALUES (?, ?, ?, 'ACTIVE')")
-        .bind(&account).bind(&email).bind(&email).execute(entitlement.pool()).await?;
-    entitlement.grant_adjustment(&account, STT_METRIC, 120_000, "lease regression", None, "integration-test").await?;
+    sqlx::query(
+        "INSERT INTO accounts (id, email, normalized_email, status) VALUES (?, ?, ?, 'ACTIVE')",
+    )
+    .bind(&account)
+    .bind(&email)
+    .bind(&email)
+    .execute(entitlement.pool())
+    .await?;
+    entitlement
+        .grant_adjustment(
+            &account,
+            CREDIT_METRIC,
+            120_000,
+            "lease regression",
+            None,
+            "integration-test",
+        )
+        .await?;
     let input = ReserveInput {
-        account_id: account, session_id: Uuid::new_v4().to_string(), reservation_id: Uuid::new_v4().to_string(),
-        client_request_id: Uuid::new_v4().to_string(), interview_id: None, kind: "STT", audio_source: Some("SYSTEM".into()),
-        provider: "DEEPGRAM".into(), model: "integration-test".into(), metric: STT_METRIC, units: 60_000,
-        idempotency_key: Uuid::new_v4().to_string(), request_hash: hash_json(&json!({"test":true}))?,
-        response_json: json!({"test":true}), pricing_policy_version: "integration-v1".into(), lease_ttl: Duration::from_secs(120),
+        account_id: account,
+        session_id: Uuid::new_v4().to_string(),
+        reservation_id: Uuid::new_v4().to_string(),
+        client_request_id: Uuid::new_v4().to_string(),
+        interview_id: None,
+        kind: "STT",
+        audio_source: Some("SYSTEM".into()),
+        provider: "DEEPGRAM".into(),
+        model: "integration-test".into(),
+        metric: CREDIT_METRIC,
+        units: 60_000,
+        idempotency_key: Uuid::new_v4().to_string(),
+        request_hash: hash_json(&json!({"test":true}))?,
+        response_json: json!({"test":true}),
+        pricing_policy_version: "integration-v1".into(),
+        lease_ttl: Duration::from_secs(120),
     };
     entitlement.reserve(input.clone()).await?;
     entitlement.mark_active(&input.session_id, None).await?;
@@ -38,11 +64,25 @@ async fn renewed_leases_survive_stale_candidates_and_terminal_sessions_stay_term
     let input = active_stt(&entitlement).await?;
     sqlx::query("UPDATE quota_reservations SET expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?")
         .bind(&input.reservation_id).execute(&pool).await?;
-    let candidate: String = sqlx::query_scalar("SELECT id FROM quota_reservations WHERE id = ? AND expires_at <= UTC_TIMESTAMP(6)")
-        .bind(&input.reservation_id).fetch_one(&pool).await?;
-    assert!(entitlement.touch_lease(&input.session_id, Duration::from_secs(120)).await?);
-    entitlement.release(&candidate, "lease_expired", true).await?;
-    assert_eq!(entitlement.balances(&input.account_id).await?[STT_METRIC], 60_000, "stale candidate refunded a renewed reservation");
+    let candidate: String = sqlx::query_scalar(
+        "SELECT id FROM quota_reservations WHERE id = ? AND expires_at <= UTC_TIMESTAMP(6)",
+    )
+    .bind(&input.reservation_id)
+    .fetch_one(&pool)
+    .await?;
+    assert!(
+        entitlement
+            .touch_lease(&input.session_id, Duration::from_secs(120))
+            .await?
+    );
+    entitlement
+        .release(&candidate, "lease_expired", true)
+        .await?;
+    assert_eq!(
+        entitlement.balances(&input.account_id).await?[CREDIT_METRIC],
+        60_000,
+        "stale candidate refunded a renewed reservation"
+    );
     assert_eq!(entitlement.reap_expired().await?, 0);
     assert_eq!(sqlx::query_scalar::<_, String>("SELECT state FROM ai_sessions WHERE id = ?").bind(&input.session_id).fetch_one(&pool).await?, "ACTIVE");
 
@@ -53,13 +93,29 @@ async fn renewed_leases_survive_stale_candidates_and_terminal_sessions_stay_term
     assert!(!entitlement.touch_lease(&input.session_id, Duration::from_secs(120)).await?);
     assert!(entitlement.mark_active(&input.session_id, None).await.is_err());
     entitlement.release(&candidate, "repeat", false).await?;
-    assert_eq!(entitlement.balances(&input.account_id).await?[STT_METRIC], 120_000);
-    assert_eq!(sqlx::query_scalar::<_, String>("SELECT state FROM ai_sessions WHERE id = ?").bind(&input.session_id).fetch_one(&pool).await?, "ABANDONED");
+    assert_eq!(
+        entitlement.balances(&input.account_id).await?[CREDIT_METRIC],
+        120_000
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT state FROM ai_sessions WHERE id = ?")
+            .bind(&input.session_id)
+            .fetch_one(&pool)
+            .await?,
+        "ABANDONED"
+    );
 
     let manual = active_stt(&entitlement).await?;
-    entitlement.release(&manual.reservation_id, "connect_failed", false).await?;
-    entitlement.release(&manual.reservation_id, "repeat", false).await?;
-    assert_eq!(entitlement.balances(&manual.account_id).await?[STT_METRIC], 120_000);
+    entitlement
+        .release(&manual.reservation_id, "connect_failed", false)
+        .await?;
+    entitlement
+        .release(&manual.reservation_id, "repeat", false)
+        .await?;
+    assert_eq!(
+        entitlement.balances(&manual.account_id).await?[CREDIT_METRIC],
+        120_000
+    );
     pool.close().await;
     Ok(())
 }
@@ -93,9 +149,20 @@ async fn lock_timeout_retries_the_transaction_without_duplicate_top_up() -> anyh
         Ok::<_, anyhow::Error>(())
     }).await??;
     guard.rollback().await?;
-    assert_eq!(tokio::time::timeout(Duration::from_secs(3), task).await??? , 120_000);
-    assert_eq!(entitlement.top_up(&input.reservation_id, 60_000, "retry-top-up").await?, 120_000);
-    assert_eq!(entitlement.balances(&input.account_id).await?[STT_METRIC], 0);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), task).await???,
+        120_000
+    );
+    assert_eq!(
+        entitlement
+            .top_up(&input.reservation_id, 60_000, "retry-top-up")
+            .await?,
+        120_000
+    );
+    assert_eq!(
+        entitlement.balances(&input.account_id).await?[CREDIT_METRIC],
+        0
+    );
     let blocked = active_stt(&entitlement).await?;
     let mut guard = pool.begin().await?;
     sqlx::query("SELECT id FROM accounts WHERE id = ? FOR UPDATE").bind(&blocked.account_id).fetch_one(&mut *guard).await?;
@@ -117,7 +184,10 @@ async fn lock_timeout_retries_the_transaction_without_duplicate_top_up() -> anyh
     assert_eq!(attempts.len(), 3, "retry count must remain bounded");
     assert!(matches!(task.await?, Err(AppError::Database(_))));
     guard.rollback().await?;
-    assert_eq!(entitlement.balances(&blocked.account_id).await?[STT_METRIC], 60_000);
+    assert_eq!(
+        entitlement.balances(&blocked.account_id).await?[CREDIT_METRIC],
+        60_000
+    );
     worker_pool.close().await;
     pool.close().await;
     Ok(())
@@ -139,14 +209,36 @@ async fn concurrent_settle_release_and_reap_have_only_one_financial_effect() -> 
             tasks.spawn(async move {
                 gate.wait().await;
                 match operation {
-                    0 => { entitlement.settle(&input.reservation_id, UsageInput {
-                        event_key: "final".into(), usage_status: "FINAL", received_audio_ms: 20_000,
-                        forwarded_audio_ms: 20_000, provider_audio_ms: Some(20_000), input_tokens: 0,
-                        output_tokens: 0, cache_hit_tokens: 0, reasoning_tokens: 0, charged_metric: STT_METRIC,
-                        actual_units: 20_000, pricing_policy_version: "integration-v1".into(), terminate_reason: "user_stop".into(),
-                    }).await?; }
-                    1 => entitlement.release(&input.reservation_id, "lease_expired", true).await?,
-                    _ => { entitlement.reap_expired().await?; }
+                    0 => {
+                        entitlement
+                            .settle(
+                                &input.reservation_id,
+                                UsageInput {
+                                    event_key: "final".into(),
+                                    usage_status: "FINAL",
+                                    received_audio_ms: 20_000,
+                                    forwarded_audio_ms: 20_000,
+                                    provider_audio_ms: Some(20_000),
+                                    input_tokens: 0,
+                                    output_tokens: 0,
+                                    cache_hit_tokens: 0,
+                                    reasoning_tokens: 0,
+                                    charged_metric: CREDIT_METRIC,
+                                    actual_units: 20_000,
+                                    pricing_policy_version: "integration-v1".into(),
+                                    terminate_reason: "user_stop".into(),
+                                },
+                            )
+                            .await?;
+                    }
+                    1 => {
+                        entitlement
+                            .release(&input.reservation_id, "lease_expired", true)
+                            .await?
+                    }
+                    _ => {
+                        entitlement.reap_expired().await?;
+                    }
                 }
                 Ok::<_, AppError>(())
             });
@@ -160,9 +252,19 @@ async fn concurrent_settle_release_and_reap_have_only_one_financial_effect() -> 
             .bind(&input.session_id).fetch_one(&pool).await?;
         assert!(count <= 1);
         assert!(charged == 0 || charged == 20_000);
-        assert_eq!(entitlement.balances(&input.account_id).await?[STT_METRIC], 120_000 - charged);
-        assert!(!entitlement.touch_lease(&input.session_id, Duration::from_secs(120)).await?);
-        assert!(entitlement.mark_active(&input.session_id, None).await.is_err());
+        assert_eq!(
+            entitlement.balances(&input.account_id).await?[CREDIT_METRIC],
+            120_000 - charged
+        );
+        assert!(
+            !entitlement
+                .touch_lease(&input.session_id, Duration::from_secs(120))
+                .await?
+        );
+        assert!(entitlement
+            .mark_active(&input.session_id, None)
+            .await
+            .is_err());
         let (reservation, session): (String, String) = sqlx::query_as("SELECT r.state, s.state FROM quota_reservations r JOIN ai_sessions s ON s.id = r.session_id WHERE r.id = ?")
             .bind(&input.reservation_id).fetch_one(&pool).await?;
         assert_eq!((reservation.as_str(), session.as_str()), if count == 1 { ("SETTLED", "ENDED") } else { ("EXPIRED", "ABANDONED") });
@@ -189,8 +291,10 @@ async fn additional_holds_top_up_stt_and_settle_llm_without_double_charging() ->
     .execute(&pool)
     .await?;
 
-    for (kind, metric, actual_units) in [("STT", STT_METRIC, 75_000), ("LLM", LLM_METRIC, 135_000)]
-    {
+    for (kind, metric, actual_units) in [
+        ("STT", CREDIT_METRIC, 75_000),
+        ("LLM", CREDIT_METRIC, 135_000),
+    ] {
         for (units, days) in [(90_000, 1), (180_000, 2)] {
             entitlement
                 .grant_adjustment(
@@ -285,6 +389,11 @@ async fn additional_holds_top_up_stt_and_settle_llm_without_double_charging() ->
                 .fetch_one(&pool)
                 .await?;
         assert_eq!(events, 1);
+        // Retire the remainder so the next provider tests its own bucket ordering.
+        sqlx::query("UPDATE quota_buckets SET remaining_units = 0 WHERE account_id = ?")
+            .bind(&account_id)
+            .execute(&pool)
+            .await?;
     }
     pool.close().await;
     Ok(())
@@ -348,7 +457,7 @@ async fn concurrent_reservations_never_overspend_and_use_earliest_expiry() -> an
         )
         .bind(id)
         .bind(&account.id)
-        .bind(LLM_METRIC)
+        .bind(CREDIT_METRIC)
         .bind(format!("{source_ref}-{}", Uuid::new_v4()))
         .bind(units)
         .bind(units)
@@ -357,11 +466,11 @@ async fn concurrent_reservations_never_overspend_and_use_earliest_expiry() -> an
         .await?;
     }
 
-    assert_eq!(entitlement.balances(&account.id).await?[LLM_METRIC], 655);
+    assert_eq!(entitlement.balances(&account.id).await?[CREDIT_METRIC], 655);
 
     let barrier = Arc::new(Barrier::new(100));
     let mut tasks = JoinSet::new();
-    for _ in 0..100 {
+    for i in 0..100 {
         let entitlement = entitlement.clone();
         let account_id = account.id.clone();
         let barrier = barrier.clone();
@@ -375,11 +484,11 @@ async fn concurrent_reservations_never_overspend_and_use_earliest_expiry() -> an
                     reservation_id: Uuid::new_v4().to_string(),
                     client_request_id: client_request_id.clone(),
                     interview_id: None,
-                    kind: "LLM",
+                    kind: if i % 2 == 0 { "LLM" } else { "STT" },
                     audio_source: None,
                     provider: "GEMINI".to_owned(),
                     model: "gemini-3.7-flash".to_owned(),
-                    metric: LLM_METRIC,
+                    metric: CREDIT_METRIC,
                     units: 10,
                     idempotency_key: Uuid::new_v4().to_string(),
                     request_hash: hash_json(&json!({ "request_id": &client_request_id }))?,

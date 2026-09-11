@@ -48,6 +48,8 @@ pub struct EntitlementResponse {
     pub eligible: bool,
     pub status: String,
     pub balances: BTreeMap<String, i64>,
+    pub credit_unit_scale: i64,
+    pub byok_unlocked: bool,
     pub hosted_stt_enabled: bool,
     pub hosted_llm_enabled: bool,
     pub payments_enabled: bool,
@@ -73,6 +75,8 @@ pub struct AccountLookupResponse {
     pub email: String,
     pub status: String,
     pub balances: BTreeMap<String, i64>,
+    pub credit_unit_scale: i64,
+    pub byok_unlocked: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -80,12 +84,13 @@ pub struct SubscriptionContext {
     pub email: String,
     pub status: String,
     pub balances: BTreeMap<String, i64>,
+    pub credit_unit_scale: i64,
+    pub byok_unlocked: bool,
     pub hosted_stt_enabled: bool,
     pub hosted_llm_enabled: bool,
     pub payments_enabled: bool,
     pub csrf: String,
     pub products: Vec<PaymentProduct>,
-    pub subscription: Option<SubscriptionSummary>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -100,14 +105,7 @@ pub struct PaymentProduct {
     pub code: &'static str,
     pub price_minor: i64,
     pub currency: &'static str,
-    pub duration_days: i64,
-    pub stt_ms: i64,
-    pub llm_units: i64,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct SubscriptionSummary {
-    pub product_code: String,
-    pub starts_at: String,
-    pub paid_through: String,
+    pub kind: &'static str,
+    pub credit_units: i64,
+    pub credit_unit_scale: i64,
 }

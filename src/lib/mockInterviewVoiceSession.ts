@@ -1,3 +1,4 @@
+import { requireAppAccess } from './hostedAuth'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { SupportedLanguage } from '../i18n/types'
@@ -209,6 +210,7 @@ export class MockInterviewVoiceSession {
     })
 
     try {
+      await requireAppAccess()
       if (!(await tryRequestMicrophone())) {
         throw new Error('Microphone permission is required for voice answers.')
       }

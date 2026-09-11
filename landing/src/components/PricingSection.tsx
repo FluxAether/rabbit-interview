@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Check, Zap } from 'lucide-react'
-import { FALLBACK_PRODUCTS, fetchCatalog, formatDailyYuan, formatYuan, sttMinutes, type PaymentProduct } from '../lib/catalog'
+import { FALLBACK_PRODUCTS, fetchCatalog, formatCredits, formatYuan, type PaymentProduct } from '../lib/catalog'
 import type { Copy } from '../locales/content'
 
 export default function PricingSection({ t }: { t: Copy }) {
@@ -15,8 +15,9 @@ export default function PricingSection({ t }: { t: Copy }) {
     return () => { active = false }
   }, [])
 
-  const month = products.find((item) => item.code === 'PRO_MONTH') || FALLBACK_PRODUCTS[0]
-  const quarter = products.find((item) => item.code === 'PRO_QUARTER') || FALLBACK_PRODUCTS[1]
+  const small = products.find((item) => item.code === 'CREDITS_2900') || FALLBACK_PRODUCTS[0]
+  const large = products.find((item) => item.code === 'CREDITS_11000') || FALLBACK_PRODUCTS[1]
+  const byok = products.find((item) => item.code === 'BYOK_LIFETIME') || FALLBACK_PRODUCTS[2]
 
   return (
     <section id="pricing" className="border-t border-white/5 px-5 py-20 lg:py-28">
@@ -45,7 +46,7 @@ export default function PricingSection({ t }: { t: Copy }) {
               </div>
               <h3 className="mt-3 text-xl font-semibold text-ink">{p.byokTitle}</h3>
               <div className="mt-4 font-mono text-3xl font-semibold tracking-tight text-ink">
-                {p.byokPrice}
+                {formatYuan(byok.price_minor)}
               </div>
               <p className="mt-3 text-sm leading-relaxed text-mute">{p.byokDesc}</p>
               <div className="my-6 border-t border-white/5" />
@@ -55,7 +56,7 @@ export default function PricingSection({ t }: { t: Copy }) {
                 <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.byokFeature3}</span></li>
               </ul>
             </div>
-            <a href="#download" className="mt-8 inline-flex h-11 items-center justify-center rounded-xl border border-white/15 bg-white/[0.03] text-sm font-medium text-ink transition-colors hover:border-white/25 hover:bg-white/[0.06]">
+            <a href="/subscribe?plan=BYOK_LIFETIME" className="mt-8 inline-flex h-11 items-center justify-center rounded-xl border border-white/15 bg-white/[0.03] text-sm font-medium text-ink transition-colors hover:border-white/25 hover:bg-white/[0.06]">
               {p.byokCta}
             </a>
           </div>
@@ -73,19 +74,19 @@ export default function PricingSection({ t }: { t: Copy }) {
               </div>
               <h3 className="mt-3 text-xl font-semibold text-ink">{p.hostedTitle}</h3>
               <div className="mt-4 space-y-2 font-mono text-ink">
-                <div className="text-3xl font-semibold tracking-tight">{formatYuan(quarter.price_minor)}</div>
-                <p className="text-sm text-mute">{p.quarterLabel} · {formatDailyYuan(quarter.price_minor, quarter.duration_days, t.htmlLang)}{p.perDay}</p>
-                <p className="text-sm text-mute">{p.monthLabel} {formatYuan(month.price_minor)} · {formatDailyYuan(month.price_minor, month.duration_days, t.htmlLang)}{p.perDay}</p>
+                <div className="text-3xl font-semibold tracking-tight">{formatYuan(large.price_minor)}</div>
+                <p className="text-sm text-mute">{formatCredits(large.credit_units, large.credit_unit_scale, t.htmlLang)} {p.credits}</p>
+                <p className="text-sm text-mute">{formatYuan(small.price_minor)} · {formatCredits(small.credit_units, small.credit_unit_scale, t.htmlLang)} {p.credits}</p>
               </div>
               <p className="mt-3 text-sm leading-relaxed text-mute">{p.hostedDesc}</p>
               <div className="my-6 border-t border-white/5" />
               <ul className="space-y-3 text-sm text-ink/90">
-                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.hostedFeature1.replace('{minutes}', String(sttMinutes(quarter.stt_ms)))}</span></li>
+                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.hostedFeature1}</span></li>
                 <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.hostedFeature2}</span></li>
                 <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.hostedFeature3}</span></li>
               </ul>
             </div>
-            <a href="/subscribe?plan=PRO_QUARTER" className="mt-8 inline-flex h-11 items-center justify-center rounded-xl bg-ink text-sm font-medium text-canvas transition-opacity hover:opacity-90">
+            <a href="/subscribe?plan=CREDITS_11000" className="mt-8 inline-flex h-11 items-center justify-center rounded-xl bg-ink text-sm font-medium text-canvas transition-opacity hover:opacity-90">
               {p.hostedCta}
             </a>
           </div>

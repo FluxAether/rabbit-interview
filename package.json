@@ -19,6 +19,7 @@
     "sign:mac": "echo 'Run: xcrun notarytool submit --keychain-profile \"AC_PASSWORD\" --wait dist/OnCue.app.tar.gz'",
     "package": "tauri build",
     "verify:copilot": "node scripts/verify-copilot.mjs",
+    "verify:account": "node scripts/verify-account-access.mjs",
     "verify:mock": "node scripts/verify-mock-interview.mjs",
     "verify:resume": "node scripts/verify-resume-optimizer.mjs",
     "verify:theme": "node scripts/verify-theme.mjs",

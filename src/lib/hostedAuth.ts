@@ -17,7 +17,9 @@ export interface HostedEntitlements {
   account_id: string
   eligible: boolean
   status: string
-  balances: Record<'STT_AUDIO_MS' | 'LLM_TOKEN_UNITS', number>
+  balances: Record<'CREDITS', number>
+  credit_unit_scale: number
+  byok_unlocked: boolean
   hosted_stt_enabled: boolean
   hosted_llm_enabled: boolean
   payments_enabled: boolean
@@ -75,11 +77,15 @@ interface IdTokenClaims {
   at_hash?: string
 }
 
-let snapshot: HostedAuthSnapshot = { status: 'signed-out', entitlements: null, error: null }
+let snapshot: HostedAuthSnapshot = { status: 'restoring', entitlements: null, error: null }
+let authGeneration = 0
+let entitlementsPromise: Promise<HostedEntitlements> | null = null
 let accessToken = ''
 let idToken = ''
 let accessTokenExpiresAt = 0
 let refreshPromise: Promise<boolean> | null = null
+let logoutPromise: Promise<void> | null = null
+let callbackExchange: Promise<void> | null = null
 let initialization: Promise<void> | null = null
 let callbackListener: Promise<() => void> | null = null
 let pendingLogin: PendingLogin | null = null
@@ -124,7 +130,7 @@ async function getDiscovery(): Promise<OidcDiscovery> {
   if (discoveryPromise) return discoveryPromise
   discoveryPromise = (async () => {
     const base = gatewayBase()
-    const response = await fetch(`${base}/.well-known/openid-configuration`, { cache: 'no-store' })
+    const response = await fetch(`${base}/.well-known/openid-configuration`, { cache: 'no-store', signal: AbortSignal.timeout(15_000) })
     if (!response.ok) throw new Error('Unable to load hosted sign-in configuration.')
     const discovery = await response.json() as OidcDiscovery
     if (discovery.issuer !== base || !discovery.code_challenge_methods_supported?.includes('S256')) {
@@ -151,13 +157,42 @@ async function getDiscovery(): Promise<OidcDiscovery> {
 }
 
 function publish(next: HostedAuthSnapshot) {
+  const wasAuthorized = hasAppAccess(snapshot)
   snapshot = next
+  if (wasAuthorized && !hasAppAccess(next)) {
+    const closing = [...activeConnections]
+    activeConnections.clear()
+    void Promise.allSettled(closing.map((close) => Promise.resolve().then(close)))
+  }
   subscribers.forEach((subscriber) => subscriber())
 }
 
 function subscribe(subscriber: () => void) {
   subscribers.add(subscriber)
   return () => subscribers.delete(subscriber)
+}
+
+export function hasAppAccess(auth: HostedAuthSnapshot): boolean {
+  return auth.status === 'signed-in' && auth.entitlements?.status === 'ACTIVE' && auth.entitlements.eligible === true
+}
+
+export async function requireAppAccess(byok = false): Promise<void> {
+  if (!hasAppAccess(snapshot)) throw new Error('Sign-in is required.')
+  if (accessTokenExpiresAt <= Date.now() + 30_000) await refreshHostedEntitlements()
+  if (!hasAppAccess(snapshot)) throw new Error('Sign-in is required.')
+  if (byok && !snapshot.entitlements?.byok_unlocked) throw new Error('BYOK requires the ¥7 lifetime unlock.')
+}
+
+export function accountRequest(signal?: AbortSignal) {
+  const controller = new AbortController()
+  const cancel = () => controller.abort()
+  const unregister = registerHostedConnection(cancel)
+  signal?.addEventListener('abort', cancel, { once: true })
+  if (signal?.aborted) cancel()
+  return {
+    signal: controller.signal,
+    dispose() { unregister(); signal?.removeEventListener('abort', cancel) },
+  }
 }
 
 export function getHostedAuthSnapshot(): HostedAuthSnapshot {
@@ -170,22 +205,28 @@ export function useHostedAuth(): HostedAuthSnapshot {
 
 export function initializeHostedAuth(): Promise<void> {
   if (initialization) return initialization
+  const generation = authGeneration
   initialization = (async () => {
+    await logoutPromise
     await ensureCallbackListener()
+    if (generation !== authGeneration) return
     publish({ status: 'restoring', entitlements: null, error: null })
     const restored = await refreshAccessToken()
+    if (generation !== authGeneration) return
     if (!restored) {
       publish({ status: 'signed-out', entitlements: null, error: null })
       return
     }
     await refreshHostedEntitlements()
   })().catch((error) => {
-    publish({ status: 'error', entitlements: null, error: normalizeError(error) })
-  })
+    if (generation === authGeneration) publish({ status: 'error', entitlements: null, error: normalizeError(error) })
+  }).finally(() => { initialization = null })
   return initialization
 }
 
 export async function signInHosted(): Promise<void> {
+  await logoutPromise
+  await initialization
   await ensureCallbackListener()
   if (pendingLogin) throw new Error('A sign-in attempt is already active.')
   const discovery = await getDiscovery()
@@ -229,10 +270,25 @@ export async function signInHosted(): Promise<void> {
   return completion
 }
 
-export async function signOutHosted(): Promise<void> {
+export function signOutHosted(): Promise<void> {
+  if (logoutPromise) return logoutPromise
+  logoutPromise = performSignOut().finally(() => { logoutPromise = null })
+  return logoutPromise
+}
+
+async function performSignOut(): Promise<void> {
+  authGeneration += 1
+  const pending = pendingLogin
+  pendingLogin = null
+  if (pending) {
+    window.clearTimeout(pending.timeout)
+    pending.reject(new DOMException('Signed out', 'AbortError'))
+  }
   const closing = [...activeConnections]
   activeConnections.clear()
+  publish({ status: 'signed-out', entitlements: null, error: null })
   await Promise.allSettled(closing.map((close) => Promise.resolve().then(close)))
+  await Promise.allSettled([refreshPromise, callbackExchange, entitlementsPromise])
   const refreshToken = await loadStoredRefreshToken()
   const logoutIdToken = idToken
   const discovery = await getDiscovery().catch(() => null)
@@ -241,6 +297,7 @@ export async function signOutHosted(): Promise<void> {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formBody({ token: refreshToken, token_type_hint: 'refresh_token', client_id: OIDC_CLIENT_ID }),
+      signal: AbortSignal.timeout(15_000),
     }).catch(() => {})
   }
   accessToken = ''
@@ -264,6 +321,7 @@ export function registerHostedConnection(close: () => void | Promise<void>): () 
 }
 
 export async function hostedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const generation = authGeneration
   if (!accessToken || accessTokenExpiresAt <= Date.now() + 30_000) {
     if (!(await refreshAccessToken())) throw new Error('Hosted sign-in is required.')
   }
@@ -274,20 +332,36 @@ export async function hostedFetch(path: string, init: RequestInit = {}): Promise
   }
   let response = await request()
   if (response.status === 401 && await refreshAccessToken(true)) response = await request()
+  if (response.status === 401 && generation === authGeneration) {
+    await clearLocalTokens()
+    publish({ status: 'signed-out', entitlements: null, error: 'Sign-in is required.' })
+  }
   return response
 }
 
-export async function refreshHostedEntitlements(): Promise<HostedEntitlements> {
-  try {
-    const response = await hostedFetch('/v1/me/entitlements', { cache: 'no-store' })
-    if (!response.ok) throw new Error(await safeError(response, 'Unable to load hosted quota.'))
-    const entitlements = await response.json() as HostedEntitlements
-    publish({ status: 'signed-in', entitlements, error: null })
-    return entitlements
-  } catch (error) {
-    publish({ status: 'error', entitlements: snapshot.entitlements, error: normalizeError(error) })
-    throw error
-  }
+export function refreshHostedEntitlements(): Promise<HostedEntitlements> {
+  if (logoutPromise) return Promise.reject(new DOMException('Signed out', 'AbortError'))
+  if (entitlementsPromise) return entitlementsPromise
+  const generation = authGeneration
+  entitlementsPromise = (async () => {
+    try {
+      const response = await hostedFetch('/v1/me/entitlements', { cache: 'no-store', signal: AbortSignal.timeout(15_000) })
+      if (!response.ok) throw new Error(await safeError(response, 'Unable to load credits.'))
+      const entitlements = await response.json() as HostedEntitlements
+      if (generation !== authGeneration) throw new DOMException('Account changed', 'AbortError')
+      if (!entitlements.account_id || !Number.isSafeInteger(entitlements.balances?.CREDITS)
+        || entitlements.balances.CREDITS < 0 || entitlements.credit_unit_scale !== 60_000
+        || typeof entitlements.byok_unlocked !== 'boolean') throw new Error('Update the gateway to use credit billing.')
+      publish({ status: 'signed-in', entitlements, error: null })
+      return entitlements
+    } catch (error) {
+      if (generation === authGeneration) {
+        publish({ status: hasAppAccess(snapshot) && accessTokenExpiresAt > Date.now() ? 'signed-in' : 'error', entitlements: snapshot.entitlements, error: normalizeError(error) })
+      }
+      throw error
+    }
+  })().finally(() => { entitlementsPromise = null })
+  return entitlementsPromise
 }
 
 function isSafePublicHttpUrl(url: URL, allowSearch = false): boolean {
@@ -336,7 +410,14 @@ async function ensureCallbackListener(): Promise<void> {
   await callbackListener
 }
 
-async function handleCallback(rawUrl: string) {
+function handleCallback(rawUrl: string): Promise<void> {
+  if (callbackExchange) return callbackExchange
+  callbackExchange = completeCallback(rawUrl).finally(() => { callbackExchange = null })
+  return callbackExchange
+}
+
+async function completeCallback(rawUrl: string) {
+  const generation = authGeneration
   const url = new URL(rawUrl)
   if (url.protocol !== 'rabbitinterview:' || url.hostname !== 'auth') return
   if (url.pathname === '/logout') {
@@ -362,13 +443,15 @@ async function handleCallback(rawUrl: string) {
         code_verifier: pending.verifier,
         redirect_uri: OIDC_REDIRECT_URI,
       }),
+      signal: AbortSignal.timeout(15_000),
     })
     if (!response.ok) throw new Error(await safeError(response, 'Unable to complete sign-in.'))
-    await applyToken(await response.json() as TokenResponse, pending.discovery, pending.nonce)
+    await applyToken(await response.json() as TokenResponse, pending.discovery, generation, pending.nonce)
+    if (generation !== authGeneration) return
     await refreshHostedEntitlements()
     pending.resolve()
   } catch (error) {
-    publish({ status: 'error', entitlements: null, error: normalizeError(error) })
+    if (generation === authGeneration) publish({ status: 'error', entitlements: null, error: normalizeError(error) })
     pending.reject(error instanceof Error ? error : new Error(String(error)))
   } finally {
     window.clearTimeout(pending.timeout)
@@ -377,8 +460,10 @@ async function handleCallback(rawUrl: string) {
 }
 
 async function refreshAccessToken(force = false): Promise<boolean> {
+  if (logoutPromise) return false
   if (!force && accessToken && accessTokenExpiresAt > Date.now() + 30_000) return true
   if (refreshPromise) return refreshPromise
+  const generation = authGeneration
   refreshPromise = (async () => {
     const refreshToken = await loadStoredRefreshToken()
     if (!refreshToken) return false
@@ -387,24 +472,29 @@ async function refreshAccessToken(force = false): Promise<boolean> {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formBody({ grant_type: 'refresh_token', client_id: OIDC_CLIENT_ID, refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(15_000),
     })
+    if (generation !== authGeneration) return false
     if (!response.ok) {
+      if (response.status !== 400 && response.status !== 401) throw new Error('Unable to restore sign-in. Retry when connected.')
       await clearLocalTokens()
+      publish({ status: 'signed-out', entitlements: null, error: null })
       return false
     }
-    await applyToken(await response.json() as TokenResponse, discovery)
-    return true
+    await applyToken(await response.json() as TokenResponse, discovery, generation)
+    return generation === authGeneration
   })().finally(() => {
     refreshPromise = null
   })
   return refreshPromise
 }
 
-async function applyToken(token: TokenResponse, discovery: OidcDiscovery, expectedNonce?: string) {
+async function applyToken(token: TokenResponse, discovery: OidcDiscovery, generation: number, expectedNonce?: string) {
   if (!token.access_token || !token.id_token || token.token_type.toLowerCase() !== 'bearer') {
     throw new Error('Hosted authentication returned an invalid token response.')
   }
   await validateIdToken(token.id_token, token.access_token, discovery, expectedNonce)
+  if (generation !== authGeneration) throw new DOMException('Account changed', 'AbortError')
   if (token.refresh_token) {
     await invoke('save_secure_secret', { key: REFRESH_TOKEN_KEY, value: token.refresh_token }).catch(() => {})
     await saveSecret(REFRESH_TOKEN_KEY, encryptSecret(token.refresh_token)).catch(() => {})
@@ -420,7 +510,7 @@ async function validateIdToken(idTokenValue: string, accessTokenValue: string, d
   const header = JSON.parse(base64UrlText(parts[0])) as { alg?: string; kid?: string }
   const claims = JSON.parse(base64UrlText(parts[1])) as IdTokenClaims
   if (header.alg !== 'RS256' || !header.kid) throw new Error('Hosted authentication used an unsupported ID token signature.')
-  const jwksResponse = await fetch(discovery.jwks_uri, { cache: 'no-store' })
+  const jwksResponse = await fetch(discovery.jwks_uri, { cache: 'no-store', signal: AbortSignal.timeout(15_000) })
   if (!jwksResponse.ok) throw new Error('Unable to load hosted signing keys.')
   const jwks = await jwksResponse.json() as { keys?: OidcJwk[] }
   const jwk = jwks.keys?.find((key) => key.kid === header.kid && key.kty === 'RSA' && key.use === 'sig')

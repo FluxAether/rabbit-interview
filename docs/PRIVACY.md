@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-05
 
-OnCue is a local-first desktop app. BYOK and Apple speech recognition work without a Rabbit account. The optional hosted mode uses a Rabbit account and gateway for authentication and metered STT and LLM access.
+OnCue is a local-first desktop app. A Rabbit account and online sign-in at startup are required. Hosted STT and LLM share a credit balance. Using custom provider API keys requires a separate ¥7 lifetime account unlock; Apple on-device recognition does not consume credits. Purchased credits do not expire; the one-time 100-credit registration gift expires after 30 days.
 
 ## What stays on this device
 

@@ -1,3 +1,4 @@
+import { requireAppAccess } from './hostedAuth'
 import { invoke } from '@tauri-apps/api/core'
 import { emit, emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
@@ -691,6 +692,7 @@ class CopilotSessionHost {
     )
 
     try {
+      await requireAppAccess(useAppStore.getState().settings?.aiAccessMode !== 'hosted')
       const [settings, capabilities] = await Promise.all([
         loadAppSettings(),
         invoke<AudioCapabilities>('get_audio_capabilities'),
@@ -1124,8 +1126,7 @@ class CopilotSessionHost {
       const acquired: RealtimeSttHandle[] = []
       try {
         // Apple starts the complete source set on its first call. Subsequent calls attach.
-        const apple = useAppStore.getState().settings?.aiAccessMode !== 'hosted'
-          && useAppStore.getState().settings?.sttProvider === 'apple'
+        const apple = useAppStore.getState().settings?.sttProvider === 'apple'
         const open = async (source: CopilotAudioSource) => {
           controller.signal.throwIfAborted()
           this.clearUtteranceTimers(this.transcripts[source])

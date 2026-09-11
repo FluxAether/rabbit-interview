@@ -314,6 +314,8 @@ async fn entitlements(
     let account = state.authenticated_account(&headers).await?;
     let balances = state.entitlement().balances(&account.id).await?;
     Ok(Json(EntitlementResponse {
+        byok_unlocked: state.entitlement().byok_unlocked(&account.id).await?,
+        credit_unit_scale: entitlement::CREDIT_UNIT_SCALE,
         account_id: account.id,
         eligible: account.status == "ACTIVE",
         status: account.status,
@@ -361,6 +363,8 @@ async fn lookup_account(
         .ok_or(AppError::NotFound)?;
     let balances = state.entitlement().balances(&identity.id).await?;
     Ok(Json(AccountLookupResponse {
+        byok_unlocked: state.entitlement().byok_unlocked(&identity.id).await?,
+        credit_unit_scale: entitlement::CREDIT_UNIT_SCALE,
         account_id: identity.id,
         email: identity.email,
         status: identity.status,

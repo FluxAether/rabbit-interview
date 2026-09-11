@@ -1,3 +1,4 @@
+import { accountRequest, requireAppAccess, registerHostedConnection, refreshHostedEntitlements } from './hostedAuth';
 // Real LLM + STT integration hooks using SQLite-backed encrypted key storage
 import { loadApiKeys, getLlmApiKey } from './keyStore';
 import { useAppStore } from '../stores/useAppStore';
@@ -240,9 +241,13 @@ export async function generateSuggestionsStream(
   requestType: SuggestionRequestType = 'interviewer-question',
   options: SuggestionStreamOptions = {},
 ): Promise<LlmStreamResult> {
+  const request = accountRequest(signal);
+  signal = request.signal;
   try {
+    await requireAppAccess(useAppStore.getState().settings?.aiAccessMode !== 'hosted');
+    signal.throwIfAborted();
     if (useAppStore.getState().settings?.aiAccessMode === 'hosted') {
-      return generateHostedSuggestionsStream(question, context, handlers, signal, requestType, options);
+      return await generateHostedSuggestionsStream(question, context, handlers, signal, requestType, options);
     }
     const { provider, model, apiKey } = await resolveConfiguredProvider();
     const isFollowUp = requestType === 'follow-up';
@@ -277,7 +282,7 @@ export async function generateSuggestionsStream(
           messages: [{ role: 'user', content: prompt }],
         }),
       });
-      return consumeSse(
+      return await consumeSse(
         response,
         (payload) => ({
           delta: payload.type === 'content_block_delta' && payload.delta?.type === 'text_delta'
@@ -305,7 +310,7 @@ export async function generateSuggestionsStream(
           }),
         },
       );
-      return consumeSse(
+      return await consumeSse(
         response,
         (payload) => {
           const candidate = payload?.candidates?.[0];
@@ -336,7 +341,7 @@ export async function generateSuggestionsStream(
           : { max_tokens: tokenBudget, temperature: 0.6 }),
       }),
     });
-    return consumeSse(
+    return await consumeSse(
       response,
       (payload) => {
         const choice = payload?.choices?.[0];
@@ -353,6 +358,8 @@ export async function generateSuggestionsStream(
     const normalized = error instanceof Error ? error : new Error(String(error));
     if (normalized.name !== 'AbortError') handlers.onError?.(normalized);
     throw normalized;
+  } finally {
+    request.dispose();
   }
 }
 
@@ -406,6 +413,7 @@ async function generateHostedSuggestionsStream(
     );
   } finally {
     signal?.removeEventListener('abort', cancel);
+    void refreshHostedEntitlements().catch(() => {});
   }
 }
 
@@ -485,6 +493,7 @@ export interface DeepgramStream extends WebSocket {
   __geminiUtteranceEndTimer?: ReturnType<typeof globalThis.setTimeout> | null;
   __geminiRotating?: boolean;
   __hostedUnregister?: (() => void) | null;
+  __accountUnregister?: (() => void) | null;
   __hostedSessionEnded?: boolean;
 }
 
@@ -844,6 +853,7 @@ async function openGeminiLiveSocket(
 
   const { settings } = useAppStore.getState();
   const configuredModel = sttModel || (settings?.sttModel as string);
+  await requireAppAccess(true);
   const ws = new WebSocket(`${GEMINI_LIVE_ENDPOINT}?key=${encodeURIComponent(key)}`) as DeepgramStream;
   ws.__sttProvider = 'gemini';
   ws.__deepgramOptions = { ...options };
@@ -859,6 +869,7 @@ async function openGeminiLiveSocket(
   ws.__geminiUtteranceEnded = false;
   attachGeminiHandlers(ws);
 
+  const unregister = registerHostedConnection(() => closeDeepgramStream(ws));
   return new Promise<WebSocket>((resolve, reject) => {
     let settled = false;
     const timeout = globalThis.setTimeout(() => {
@@ -883,7 +894,7 @@ async function openGeminiLiveSocket(
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
       reject(error);
     };
-  });
+  }).finally(unregister);
 }
 
 async function openDeepgramSocket(
@@ -917,6 +928,7 @@ async function openDeepgramSocket(
   const utteranceEndMs = options.utteranceEndMs ?? 1000;
   const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true&utterance_end_ms=${utteranceEndMs}&vad_events=true${language}&endpointing=${endpointing}`;
 
+  await requireAppAccess(true);
   const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]) as DeepgramStream;
   ws.binaryType = 'arraybuffer';
   ws.__sttProvider = 'deepgram';
@@ -926,6 +938,7 @@ async function openDeepgramSocket(
   ws.__deepgramOnError = onError;
   attachDeepgramHandlers(ws);
 
+  const unregister = registerHostedConnection(() => closeDeepgramStream(ws));
   return new Promise<WebSocket>((resolve, reject) => {
     let opened = false;
     const timeout = globalThis.setTimeout(() => {
@@ -960,7 +973,7 @@ async function openDeepgramSocket(
       previousOnClose?.call(ws, event);
       if (!opened) reject(new Error(isReconnect ? 'Deepgram reconnect closed before it was ready' : 'Deepgram connection closed before it was ready'));
     };
-  });
+  }).finally(unregister);
 }
 
 
@@ -1030,12 +1043,14 @@ async function openAppleSttSocket(
 }
 
 export async function ensureAppleSttSources(sources: string[], language?: string): Promise<void> {
+  await requireAppAccess();
   const settings = useAppStore.getState().settings;
   const resolvedLanguage = language || (settings?.sttLanguage as string) || 'zh-CN';
   await invoke('start_apple_stt', { sources, language: resolvedLanguage });
 }
 
 export async function testAppleSttConnection(language = 'zh-CN'): Promise<void> {
+  await requireAppAccess();
   await invoke('test_apple_stt', { language });
 }
 
@@ -1239,26 +1254,39 @@ export async function startDeepgramStream(
   options: DeepgramStreamOptions = {},
 ): Promise<WebSocket> {
   const settings = useAppStore.getState().settings;
-  const configured = settings?.aiAccessMode === 'hosted' ? 'hosted' : settings?.sttProvider;
+  const configured = settings?.sttProvider === 'apple' ? 'apple' : settings?.aiAccessMode === 'hosted' ? 'hosted' : settings?.sttProvider;
   const provider = configured === 'hosted' ? 'hosted' : configured === 'gemini' ? 'gemini' : configured === 'apple' ? 'apple' : 'deepgram';
-  const ws = await (provider === 'hosted'
-    ? openHostedSttSocket(sampleRate, onTranscript, onError, options)
-    : provider === 'gemini'
-      ? openGeminiLiveSocket(onTranscript, onError, false, undefined, options)
-      : provider === 'apple'
-        ? openAppleSttSocket(onTranscript, onError, options)
-        : openDeepgramSocket(sampleRate, onTranscript, onError, false, undefined, options)) as DeepgramStream;
-  ws.__deepgramManaged = true;
-  ws.__deepgramClosedByClient = false;
-  ws.__deepgramReconnectAttempt = 0;
-  ws.__deepgramReplaceSocket = (next) => {
-    onSocketChange?.(next);
-  };
-  onSocketChange?.(ws);
-  return ws;
+  await requireAppAccess(provider === 'gemini' || provider === 'deepgram');
+  let current: DeepgramStream | null = null;
+  let closed = false;
+  const unregister = registerHostedConnection(() => { closed = true; closeDeepgramStream(current); });
+  try {
+    const ws = await (provider === 'hosted'
+      ? openHostedSttSocket(sampleRate, onTranscript, onError, options)
+      : provider === 'gemini'
+        ? openGeminiLiveSocket(onTranscript, onError, false, undefined, options)
+        : provider === 'apple'
+          ? openAppleSttSocket(onTranscript, onError, options)
+          : openDeepgramSocket(sampleRate, onTranscript, onError, false, undefined, options)) as DeepgramStream;
+    current = ws;
+    if (closed) { closeDeepgramStream(ws); throw new DOMException('Signed out', 'AbortError'); }
+    ws.__accountUnregister = unregister;
+    ws.__deepgramManaged = true;
+    ws.__deepgramClosedByClient = false;
+    ws.__deepgramReconnectAttempt = 0;
+    ws.__deepgramReplaceSocket = (next) => {
+      current = next;
+      (next as DeepgramStream).__accountUnregister = unregister;
+      if (closed) { closeDeepgramStream(next); return; }
+      onSocketChange?.(next);
+    };
+    onSocketChange?.(ws);
+    return ws;
+  } catch (error) { unregister(); throw error; }
 }
 
 export async function testDeepgramConnection(apiKey: string): Promise<void> {
+  await requireAppAccess(true);
   const ws = await openDeepgramSocket(16_000, () => {}, undefined, false, apiKey);
   closeDeepgramStream(ws);
 }
@@ -1268,6 +1296,7 @@ export async function testGeminiLiveConnection(
   inputLanguage = 'multi',
   appLanguage = 'en-US',
 ): Promise<void> {
+  await requireAppAccess(true);
   const ws = await openGeminiLiveSocket(
     () => {},
     undefined,
@@ -1322,71 +1351,79 @@ export async function generateStructuredJson<T>(
     thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high'
   } = {},
 ): Promise<T> {
-  if (useAppStore.getState().settings?.aiAccessMode === 'hosted') {
-    return generateHostedStructuredJson<T>(system, prompt, signal, options.maxOutputTokens ?? 2_400);
-  }
-  const { provider, model, apiKey } = await resolveConfiguredProvider(options.allowProviderFallback !== false);
-  if (!apiKey) throw new Error('No LLM API key is configured. Add a provider key in Settings and retry.');
-  const maxOutputTokens = options.maxOutputTokens ?? 2_400;
-
-  let response: Response;
-  if (provider === 'anthropic') {
-    response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', signal,
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model, max_tokens: maxOutputTokens, system, messages: [{ role: 'user', content: prompt }] }),
-    });
-  } else if (provider === 'gemini') {
-    const generationConfig: Record<string, unknown> = {
-      maxOutputTokens,
-      responseMimeType: 'application/json',
-    };
-    if (model.startsWith('gemini-3')) {
-      generationConfig.thinkingConfig = { thinkingLevel: options.thinkingLevel ?? 'low' };
-    } else {
-      generationConfig.temperature = 0.3;
-    }
-    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST', signal,
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ parts: [{ text: prompt }] }], generationConfig }),
-    });
-  } else {
-    const url = provider === 'groq' ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-    response = await fetch(url, {
-      method: 'POST', signal,
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], temperature: 0.3, ...(provider === 'openai' ? { max_completion_tokens: maxOutputTokens, response_format: { type: 'json_object' } } : { max_tokens: maxOutputTokens, response_format: { type: 'json_object' } }) }),
-    });
-  }
-
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.error?.message || `${provider} error ${response.status}`);
-  const finishReason = provider === 'anthropic'
-    ? data?.stop_reason
-    : provider === 'gemini'
-      ? data?.candidates?.[0]?.finishReason
-      : data?.choices?.[0]?.finish_reason;
-  const text = provider === 'anthropic'
-    ? (data?.content || []).filter((block: any) => block?.type === 'text').map((block: any) => block.text).join('\n')
-    : provider === 'gemini'
-      ? data?.candidates?.[0]?.content?.parts?.filter((part: any) => !part.thought).map((part: any) => part.text || '').join('')
-      : data?.choices?.[0]?.message?.content;
-  const truncated = ['length', 'max_tokens', 'max-tokens'].includes(String(finishReason || '').toLowerCase());
-  if (!text) {
-    if (truncated) {
-      throw new Error('llm-output-truncated');
-    }
-    throw new Error('The LLM returned an empty response.');
-  }
-  const cleaned = String(text).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const request = accountRequest(signal);
+  signal = request.signal;
   try {
-    return JSON.parse(cleaned) as T;
-  } catch {
-    if (truncated) {
-      throw new Error('llm-output-truncated');
+    await requireAppAccess(useAppStore.getState().settings?.aiAccessMode !== 'hosted');
+    signal.throwIfAborted();
+    if (useAppStore.getState().settings?.aiAccessMode === 'hosted') {
+      return await generateHostedStructuredJson<T>(system, prompt, signal, options.maxOutputTokens ?? 2_400);
     }
-    throw new Error('The LLM returned invalid JSON. Please retry.');
+    const { provider, model, apiKey } = await resolveConfiguredProvider(options.allowProviderFallback !== false);
+    if (!apiKey) throw new Error('No LLM API key is configured. Add a provider key in Settings and retry.');
+    const maxOutputTokens = options.maxOutputTokens ?? 2_400;
+
+    let response: Response;
+    if (provider === 'anthropic') {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST', signal,
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({ model, max_tokens: maxOutputTokens, system, messages: [{ role: 'user', content: prompt }] }),
+      });
+    } else if (provider === 'gemini') {
+      const generationConfig: Record<string, unknown> = {
+        maxOutputTokens,
+        responseMimeType: 'application/json',
+      };
+      if (model.startsWith('gemini-3')) {
+        generationConfig.thinkingConfig = { thinkingLevel: options.thinkingLevel ?? 'low' };
+      } else {
+        generationConfig.temperature = 0.3;
+      }
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST', signal,
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ parts: [{ text: prompt }] }], generationConfig }),
+      });
+    } else {
+      const url = provider === 'groq' ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
+      response = await fetch(url, {
+        method: 'POST', signal,
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], temperature: 0.3, ...(provider === 'openai' ? { max_completion_tokens: maxOutputTokens, response_format: { type: 'json_object' } } : { max_tokens: maxOutputTokens, response_format: { type: 'json_object' } }) }),
+      });
+    }
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data?.error?.message || `${provider} error ${response.status}`);
+    const finishReason = provider === 'anthropic'
+      ? data?.stop_reason
+      : provider === 'gemini'
+        ? data?.candidates?.[0]?.finishReason
+        : data?.choices?.[0]?.finish_reason;
+    const text = provider === 'anthropic'
+      ? (data?.content || []).filter((block: any) => block?.type === 'text').map((block: any) => block.text).join('\n')
+      : provider === 'gemini'
+        ? data?.candidates?.[0]?.content?.parts?.filter((part: any) => !part.thought).map((part: any) => part.text || '').join('')
+        : data?.choices?.[0]?.message?.content;
+    const truncated = ['length', 'max_tokens', 'max-tokens'].includes(String(finishReason || '').toLowerCase());
+    if (!text) {
+      if (truncated) {
+        throw new Error('llm-output-truncated');
+      }
+      throw new Error('The LLM returned an empty response.');
+    }
+    const cleaned = String(text).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    try {
+      return JSON.parse(cleaned) as T;
+    } catch {
+      if (truncated) {
+        throw new Error('llm-output-truncated');
+      }
+      throw new Error('The LLM returned invalid JSON. Please retry.');
+    }
+  } finally {
+    request.dispose();
   }
 }
 
@@ -1448,6 +1485,7 @@ async function generateHostedStructuredJson<T>(
     }
   } finally {
     signal?.removeEventListener('abort', cancel);
+    void refreshHostedEntitlements().catch(() => {});
   }
 }
 
@@ -1455,6 +1493,8 @@ async function generateHostedStructuredJson<T>(
 export function closeDeepgramStream(ws: WebSocket | null) {
   if (!ws) return;
   const managed = ws as DeepgramStream;
+  managed.__accountUnregister?.();
+  managed.__accountUnregister = null;
   managed.__deepgramClosedByClient = true;
   managed.__deepgramManaged = false;
   clearDeepgramTimers(managed);
