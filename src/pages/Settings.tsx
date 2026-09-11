@@ -1143,6 +1143,55 @@ export default function Settings({
                 </div>
 
                 <div className="space-y-4">
+                  {/* Google Gemini */}
+                  <div
+                    className={`rounded-md border p-4 transition-colors ${
+                      activeProvider === 'gemini'
+                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
+                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">Google Gemini</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                          Multimodal
+                        </span>
+                      </div>
+                      {activeProvider === 'gemini' ? (
+                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
+                          {t('settings.active')}
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => activateProvider('gemini', geminiModel)}
+                          disabled={aiAccessMode === 'hosted'}
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {t("settings.useProvider", { name: "Gemini" })}
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
+                        <select
+                          value={geminiModel}
+                          onChange={(e) => updateProviderModel('gemini', e.target.value)}
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
+                        >
+                          <option value="gemini-3.8-flash">Gemini 3.8 Flash</option>
+                          <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
+                          <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                          <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                        </select>
+                      </div>
+
+                      {renderKeyInputRow('gemini', 'GEMINI_API_KEY (Google AI Studio)')}
+                    </div>
+                  </div>
+
                   {/* Groq */}
                   <div
                     className={`rounded-md border p-4 transition-colors ${
@@ -1286,55 +1335,6 @@ export default function Settings({
                       {renderKeyInputRow('anthropic', 'ANTHROPIC_API_KEY')}
                     </div>
                   </div>
-
-                  {/* Google Gemini */}
-                  <div
-                    className={`rounded-md border p-4 transition-colors ${
-                      activeProvider === 'gemini'
-                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
-                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">Google Gemini</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
-                          Multimodal
-                        </span>
-                      </div>
-                      {activeProvider === 'gemini' ? (
-                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
-                          {t('settings.active')}
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => activateProvider('gemini', geminiModel)}
-                          disabled={aiAccessMode === 'hosted'}
-                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {t("settings.useProvider", { name: "Gemini" })}
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="space-y-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
-                        <select
-                          value={geminiModel}
-                          onChange={(e) => updateProviderModel('gemini', e.target.value)}
-                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm"
-                        >
-                          <option value="gemini-3.8-flash">Gemini 3.8 Flash</option>
-                          <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
-                          <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
-                          <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-                        </select>
-                      </div>
-
-                      {renderKeyInputRow('gemini', 'GEMINI_API_KEY (Google AI Studio)')}
-                    </div>
-                  </div>
                 </div>
 
                 <div className="mt-4 text-[11px] text-[var(--text-muted)]">{t('settings.apiKeys.help')}</div>
@@ -1369,6 +1369,54 @@ export default function Settings({
                           {t('settings.useProvider', { name: t('settings.hosted.sttTitle') })}
                         </button>
                       )}
+                    </div>
+                  </div>
+
+                  <div
+                    className={`rounded-md border p-4 transition-colors ${
+                      sttProvider === 'gemini'
+                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
+                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">Google AI Studio</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                          {t('settings.stt.sourceOnly')}
+                        </span>
+                      </div>
+                      {sttProvider === 'gemini' ? (
+                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
+                          {t('settings.active')}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => updateSttConfig('gemini', GEMINI_LIVE_TRANSCRIBE_MODEL)}
+                          disabled={aiAccessMode === 'hosted'}
+                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {t('settings.useProvider', { name: 'Google AI Studio' })}
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
+                        <select
+                          value={sttProvider === 'gemini' ? sttModel : GEMINI_LIVE_TRANSCRIBE_MODEL}
+                          onChange={(e) => updateSttConfig('gemini', e.target.value)}
+                          disabled={aiAccessMode === 'hosted'}
+                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm disabled:opacity-50"
+                        >
+                          <option value={GEMINI_LIVE_TRANSCRIBE_MODEL}>{GEMINI_LIVE_TRANSCRIBE_MODEL}</option>
+                          <option value={GEMINI_LIVE_TRANSLATE_MODEL}>{GEMINI_LIVE_TRANSLATE_MODEL}</option>
+                        </select>
+                      </div>
+
+                      {renderKeyInputRow('gemini', 'GEMINI_API_KEY (Google AI Studio)', true)}
                     </div>
                   </div>
 
@@ -1420,54 +1468,6 @@ export default function Settings({
                       </div>
 
                       {renderKeyInputRow('deepgram', 'DEEPGRAM_API_KEY')}
-                    </div>
-                  </div>
-
-                  <div
-                    className={`rounded-md border p-4 transition-colors ${
-                      sttProvider === 'gemini'
-                        ? 'border-[var(--text-muted)] bg-[var(--bg-subtle)]'
-                        : 'border-[var(--border-color)] hover:bg-[var(--bg-hover)]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">Google AI Studio</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
-                          {t('settings.stt.sourceOnly')}
-                        </span>
-                      </div>
-                      {sttProvider === 'gemini' ? (
-                        <span className="rounded-full bg-[var(--action)] px-2 py-0.5 text-[10px] font-medium text-[var(--action-text)]">
-                          {t('settings.active')}
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => updateSttConfig('gemini', GEMINI_LIVE_TRANSCRIBE_MODEL)}
-                          disabled={aiAccessMode === 'hosted'}
-                          className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {t('settings.useProvider', { name: 'Google AI Studio' })}
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="space-y-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="w-12 text-xs font-medium text-[var(--text-muted)]">{t('settings.modelLabel')}</span>
-                        <select
-                          value={sttProvider === 'gemini' ? sttModel : GEMINI_LIVE_TRANSCRIBE_MODEL}
-                          onChange={(e) => updateSttConfig('gemini', e.target.value)}
-                          disabled={aiAccessMode === 'hosted'}
-                          className="flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-surface)] px-3 py-1 text-sm disabled:opacity-50"
-                        >
-                          <option value={GEMINI_LIVE_TRANSCRIBE_MODEL}>{GEMINI_LIVE_TRANSCRIBE_MODEL}</option>
-                          <option value={GEMINI_LIVE_TRANSLATE_MODEL}>{GEMINI_LIVE_TRANSLATE_MODEL}</option>
-                        </select>
-                      </div>
-
-                      {renderKeyInputRow('gemini', 'GEMINI_API_KEY (Google AI Studio)', true)}
                     </div>
                   </div>
 
