@@ -2,6 +2,46 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum MetricKind {
+    #[serde(rename = "CREDITS")]
+    Credits,
+}
+
+impl MetricKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Credits => "CREDITS",
+        }
+    }
+}
+
+impl Default for MetricKind {
+    fn default() -> Self {
+        Self::Credits
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum ProductCode {
+    #[serde(rename = "CREDITS_2900")]
+    Credits2900,
+    #[serde(rename = "CREDITS_11000")]
+    Credits11000,
+    #[serde(rename = "BYOK_LIFETIME")]
+    ByokLifetime,
+}
+
+impl ProductCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Credits2900 => "CREDITS_2900",
+            Self::Credits11000 => "CREDITS_11000",
+            Self::ByokLifetime => "BYOK_LIFETIME",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AudioFormat {
     pub encoding: String,
@@ -58,7 +98,8 @@ pub struct EntitlementResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct AdjustmentRequest {
-    pub metric: String,
+    #[serde(default)]
+    pub metric: MetricKind,
     pub units: i64,
     pub reason: String,
     pub valid_until: Option<String>,
@@ -102,7 +143,7 @@ pub struct PortalSessionResponse {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PaymentProduct {
-    pub code: &'static str,
+    pub code: ProductCode,
     pub price_minor: i64,
     pub currency: &'static str,
     pub kind: &'static str,

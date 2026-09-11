@@ -1,3 +1,7 @@
+import { formatCreditsDisplay } from './credits'
+
+export const CREDIT_UNIT_SCALE = 60_000
+
 export type PaymentProduct = {
   code: 'CREDITS_2900' | 'CREDITS_11000' | 'BYOK_LIFETIME'
   price_minor: number
@@ -13,16 +17,16 @@ export const FALLBACK_PRODUCTS: PaymentProduct[] = [
     price_minor: 8_900,
     currency: 'CNY',
     kind: 'CREDITS',
-    credit_units: 2_900 * 60_000,
-    credit_unit_scale: 60_000,
+    credit_units: 2_900 * CREDIT_UNIT_SCALE,
+    credit_unit_scale: CREDIT_UNIT_SCALE,
   },
   {
     code: 'CREDITS_11000',
     price_minor: 19_900,
     currency: 'CNY',
     kind: 'CREDITS',
-    credit_units: 11_000 * 60_000,
-    credit_unit_scale: 60_000,
+    credit_units: 11_000 * CREDIT_UNIT_SCALE,
+    credit_unit_scale: CREDIT_UNIT_SCALE,
   },
   {
     code: 'BYOK_LIFETIME',
@@ -30,14 +34,14 @@ export const FALLBACK_PRODUCTS: PaymentProduct[] = [
     currency: 'CNY',
     kind: 'BYOK',
     credit_units: 0,
-    credit_unit_scale: 60_000,
+    credit_unit_scale: CREDIT_UNIT_SCALE,
   },
 ]
 
 export function isPaymentProduct(value: unknown): value is PaymentProduct {
   const product = value as PaymentProduct | null
   return Boolean(product && FALLBACK_PRODUCTS.some(item => item.code === product.code && item.kind === product.kind)
-    && product.currency === 'CNY' && product.credit_unit_scale === 60_000
+    && product.currency === 'CNY' && product.credit_unit_scale === CREDIT_UNIT_SCALE
     && Number.isSafeInteger(product.price_minor) && product.price_minor > 0
     && Number.isSafeInteger(product.credit_units)
     && (product.kind === 'BYOK' ? product.credit_units === 0 : product.credit_units > 0))
@@ -50,8 +54,9 @@ const env = (import.meta as ImportMeta & {
 export const gateway = (env?.DEV ? (typeof window === 'undefined' ? '' : window.location.origin) : (env?.VITE_HOSTED_GATEWAY_URL?.trim() || (typeof window === 'undefined' ? '' : window.location.origin))).replace(/\/$/, '')
 
 export function formatCredits(units: number, scale: number, lang: string): string {
-  return (units / scale).toLocaleString(lang, { maximumFractionDigits: 4 })
+  return formatCreditsDisplay(units, scale, lang)
 }
+
 
 export function formatYuan(priceMinor: number): string {
   return '¥' + Math.round(priceMinor / 100)

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 
 function load(file, names, dependencies = {}) {
-  dependencies = { requireAppAccess: async () => {}, refreshHostedEntitlements: async () => {}, ...dependencies }
+  dependencies = { requireAppAccess: async () => {}, withAppAccessCheck: async (action) => action(), refreshHostedEntitlements: async () => {}, ...dependencies }
   const js = ts.transpileModule(readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText.replace(/^import[\s\S]*?from ['"][^'"]+['"];?\s*$/gm, '').replace(/^export /gm, '')

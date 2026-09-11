@@ -1,4 +1,4 @@
-import { requireAppAccess } from './hostedAuth'
+import { withAppAccessCheck } from './hostedAuth'
 import { invoke } from '@tauri-apps/api/core'
 import { emit, emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
@@ -692,11 +692,10 @@ class CopilotSessionHost {
     )
 
     try {
-      await requireAppAccess(useAppStore.getState().settings?.aiAccessMode !== 'hosted')
-      const [settings, capabilities] = await Promise.all([
+      const [settings, capabilities] = await withAppAccessCheck(() => Promise.all([
         loadAppSettings(),
         invoke<AudioCapabilities>('get_audio_capabilities'),
-      ])
+      ]), useAppStore.getState().settings?.aiAccessMode !== 'hosted')
       if (!this.isCurrent(sessionId)) return
 
       const systemRequested = config.useSystemAudio ?? settings.useSystemAudio ?? true

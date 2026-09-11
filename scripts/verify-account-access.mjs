@@ -27,7 +27,7 @@ const secrets = new Map([['OPENAI_API_KEY', 'preserved-test-key']])
 let entitlements = { account_id: 'test-account', status: 'ACTIVE', eligible: true, balances: { CREDITS: 0 }, credit_unit_scale: 60000, byok_unlocked: false, hosted_stt_enabled: true, hosted_llm_enabled: true }
 let intercept = () => null
 const requests = []
-const auth = load('src/lib/hostedAuth.ts', ['initializeHostedAuth', 'refreshHostedEntitlements', 'getHostedAuthSnapshot', 'hasAppAccess', 'requireAppAccess', 'accountRequest', 'registerHostedConnection', 'signOutHosted', 'expire'], {
+const auth = load('src/lib/hostedAuth.ts', ['initializeHostedAuth', 'refreshHostedEntitlements', 'getHostedAuthSnapshot', 'hasAppAccess', 'requireAppAccess', 'withAppAccessCheck', 'accountRequest', 'registerHostedConnection', 'signOutHosted', 'expire'], {
   window: { setTimeout, clearTimeout },
   invoke: async (name, { key, value }) => {
     if (name === 'load_secure_secret') return secrets.get(key) || null

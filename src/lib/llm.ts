@@ -1,4 +1,4 @@
-import { accountRequest, requireAppAccess, registerHostedConnection, refreshHostedEntitlements } from './hostedAuth';
+import { accountRequest, registerHostedConnection, refreshHostedEntitlements, withAppAccessCheck } from './hostedAuth';
 // Real LLM + STT integration hooks using SQLite-backed encrypted key storage
 import { loadApiKeys, getLlmApiKey } from './keyStore';
 import { useAppStore } from '../stores/useAppStore';
@@ -109,27 +109,29 @@ async function resolveConfiguredProvider(allowProviderFallback = true): Promise<
   model: string;
   apiKey: string;
 }> {
-  const aiModel: string = useAppStore.getState().settings?.aiModel || 'groq-llama-3.1';
-  let { provider, model } = resolveProviderAndModel(aiModel);
-  let apiKey = await getLlmApiKey(provider);
-  if (!apiKey && allowProviderFallback) {
-    const candidates: Array<'gemini' | 'groq' | 'openai' | 'anthropic'> = ['gemini', 'groq', 'openai', 'anthropic'];
-    for (const candidate of candidates) {
-      const candidateKey = await getLlmApiKey(candidate);
-      if (!candidateKey) continue;
-      provider = candidate;
-      apiKey = candidateKey;
-      model = candidate === 'gemini'
-        ? DEFAULT_GEMINI_MODEL
-        : candidate === 'openai'
-          ? 'gpt-5.6-luna'
-          : candidate === 'anthropic'
-            ? 'claude-haiku-4-5'
-            : 'llama-3.1-8b-instant';
-      break;
+  return withAppAccessCheck(async () => {
+    const aiModel: string = useAppStore.getState().settings?.aiModel || 'groq-llama-3.1';
+    let { provider, model } = resolveProviderAndModel(aiModel);
+    let apiKey = await getLlmApiKey(provider);
+    if (!apiKey && allowProviderFallback) {
+      const candidates: Array<'gemini' | 'groq' | 'openai' | 'anthropic'> = ['gemini', 'groq', 'openai', 'anthropic'];
+      for (const candidate of candidates) {
+        const candidateKey = await getLlmApiKey(candidate);
+        if (!candidateKey) continue;
+        provider = candidate;
+        apiKey = candidateKey;
+        model = candidate === 'gemini'
+          ? DEFAULT_GEMINI_MODEL
+          : candidate === 'openai'
+            ? 'gpt-5.6-luna'
+            : candidate === 'anthropic'
+              ? 'claude-haiku-4-5'
+              : 'llama-3.1-8b-instant';
+        break;
+      }
     }
-  }
-  return { provider, model, apiKey };
+    return { provider, model, apiKey };
+  }, true);
 }
 
 interface ParsedStreamEvent {
@@ -244,12 +246,14 @@ export async function generateSuggestionsStream(
   const request = accountRequest(signal);
   signal = request.signal;
   try {
-    await requireAppAccess(useAppStore.getState().settings?.aiAccessMode !== 'hosted');
-    signal.throwIfAborted();
     if (useAppStore.getState().settings?.aiAccessMode === 'hosted') {
-      return await generateHostedSuggestionsStream(question, context, handlers, signal, requestType, options);
+      return await withAppAccessCheck(async () => {
+        signal.throwIfAborted();
+        return await generateHostedSuggestionsStream(question, context, handlers, signal, requestType, options);
+      });
     }
     const { provider, model, apiKey } = await resolveConfiguredProvider();
+    signal.throwIfAborted();
     const isFollowUp = requestType === 'follow-up';
     const basePrompt = isFollowUp
       ? `Respond in the same language as the user. Apply the request to recent interview turns when relevant.\nUser follow-up: ${question}\nRelevant resume, job and recent interview turns: ${context || 'none'}`
@@ -853,8 +857,9 @@ async function openGeminiLiveSocket(
 
   const { settings } = useAppStore.getState();
   const configuredModel = sttModel || (settings?.sttModel as string);
-  await requireAppAccess(true);
-  const ws = new WebSocket(`${GEMINI_LIVE_ENDPOINT}?key=${encodeURIComponent(key)}`) as DeepgramStream;
+  const ws = await withAppAccessCheck(async () => (
+    new WebSocket(`${GEMINI_LIVE_ENDPOINT}?key=${encodeURIComponent(key)}`) as DeepgramStream
+  ), true);
   ws.__sttProvider = 'gemini';
   ws.__deepgramOptions = { ...options };
   ws.__deepgramOnTranscript = onTranscript;
@@ -928,8 +933,9 @@ async function openDeepgramSocket(
   const utteranceEndMs = options.utteranceEndMs ?? 1000;
   const wsUrl = `wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=${sampleRate}&channels=1&model=${encodeURIComponent(model)}&interim_results=true&smart_format=true&punctuate=true&utterance_end_ms=${utteranceEndMs}&vad_events=true${language}&endpointing=${endpointing}`;
 
-  await requireAppAccess(true);
-  const ws = new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]) as DeepgramStream;
+  const ws = await withAppAccessCheck(async () => (
+    new WebSocket(wsUrl, ['token', DEEPGRAM_API_KEY]) as DeepgramStream
+  ), true);
   ws.binaryType = 'arraybuffer';
   ws.__sttProvider = 'deepgram';
   ws.__deepgramSampleRate = sampleRate;
@@ -1016,7 +1022,9 @@ async function openAppleSttSocket(
     throw new Error('Apple on-device STT does not support multilingual auto-detect');
   }
 
-  const ws = new AppleSttSocket() as unknown as AppleSttStream;
+  const ws = await withAppAccessCheck(async () => (
+    new AppleSttSocket() as unknown as AppleSttStream
+  ));
   ws.__sttProvider = 'apple';
   ws.__deepgramOptions = { ...options };
   ws.__deepgramOnTranscript = onTranscript;
@@ -1043,15 +1051,13 @@ async function openAppleSttSocket(
 }
 
 export async function ensureAppleSttSources(sources: string[], language?: string): Promise<void> {
-  await requireAppAccess();
   const settings = useAppStore.getState().settings;
   const resolvedLanguage = language || (settings?.sttLanguage as string) || 'zh-CN';
-  await invoke('start_apple_stt', { sources, language: resolvedLanguage });
+  await withAppAccessCheck(() => invoke('start_apple_stt', { sources, language: resolvedLanguage }));
 }
 
 export async function testAppleSttConnection(language = 'zh-CN'): Promise<void> {
-  await requireAppAccess();
-  await invoke('test_apple_stt', { language });
+  await withAppAccessCheck(() => invoke('test_apple_stt', { language }));
 }
 
 let hostedInterviewId: string | null = null;
@@ -1124,7 +1130,7 @@ async function openHostedSttSocket(
   hostedInterviewId = interviewId;
   const clientRequestId = crypto.randomUUID();
   const { hostedFetch, registerHostedConnection } = await import('./hostedAuth');
-  const response = await hostedFetch('/v1/stt/sessions', {
+  const response = await withAppAccessCheck(() => hostedFetch('/v1/stt/sessions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Idempotency-Key': clientRequestId },
     body: JSON.stringify({
@@ -1134,7 +1140,7 @@ async function openHostedSttSocket(
       language,
       audio: { encoding: 'pcm_s16le', sample_rate: 16_000, channels: 1 },
     }),
-  });
+  }));
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { message?: string; code?: string } | null;
     throw new Error(body?.message || body?.code || `Hosted STT failed with ${response.status}`);
@@ -1256,7 +1262,6 @@ export async function startDeepgramStream(
   const settings = useAppStore.getState().settings;
   const configured = settings?.sttProvider === 'apple' ? 'apple' : settings?.aiAccessMode === 'hosted' ? 'hosted' : settings?.sttProvider;
   const provider = configured === 'hosted' ? 'hosted' : configured === 'gemini' ? 'gemini' : configured === 'apple' ? 'apple' : 'deepgram';
-  await requireAppAccess(provider === 'gemini' || provider === 'deepgram');
   let current: DeepgramStream | null = null;
   let closed = false;
   const unregister = registerHostedConnection(() => { closed = true; closeDeepgramStream(current); });
@@ -1286,7 +1291,6 @@ export async function startDeepgramStream(
 }
 
 export async function testDeepgramConnection(apiKey: string): Promise<void> {
-  await requireAppAccess(true);
   const ws = await openDeepgramSocket(16_000, () => {}, undefined, false, apiKey);
   closeDeepgramStream(ws);
 }
@@ -1296,7 +1300,6 @@ export async function testGeminiLiveConnection(
   inputLanguage = 'multi',
   appLanguage = 'en-US',
 ): Promise<void> {
-  await requireAppAccess(true);
   const ws = await openGeminiLiveSocket(
     () => {},
     undefined,
@@ -1354,12 +1357,14 @@ export async function generateStructuredJson<T>(
   const request = accountRequest(signal);
   signal = request.signal;
   try {
-    await requireAppAccess(useAppStore.getState().settings?.aiAccessMode !== 'hosted');
-    signal.throwIfAborted();
     if (useAppStore.getState().settings?.aiAccessMode === 'hosted') {
-      return await generateHostedStructuredJson<T>(system, prompt, signal, options.maxOutputTokens ?? 2_400);
+      return await withAppAccessCheck(async () => {
+        signal.throwIfAborted();
+        return await generateHostedStructuredJson<T>(system, prompt, signal, options.maxOutputTokens ?? 2_400);
+      });
     }
     const { provider, model, apiKey } = await resolveConfiguredProvider(options.allowProviderFallback !== false);
+    signal.throwIfAborted();
     if (!apiKey) throw new Error('No LLM API key is configured. Add a provider key in Settings and retry.');
     const maxOutputTokens = options.maxOutputTokens ?? 2_400;
 

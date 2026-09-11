@@ -28,6 +28,7 @@ function source(relativePath) {
 function loadTypeScriptModule(relativePath, exports, dependencies = {}) {
   dependencies = {
     requireAppAccess: async () => {},
+    withAppAccessCheck: async (action) => action(),
     accountRequest: (signal) => ({ signal: signal || new AbortController().signal, dispose() {} }),
     registerHostedConnection: () => () => {},
     refreshHostedEntitlements: async () => {},

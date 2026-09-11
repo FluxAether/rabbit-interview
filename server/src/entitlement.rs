@@ -7,9 +7,9 @@ use sqlx::{MySql, MySqlPool, Row, Transaction};
 use tokio::time::sleep;
 use uuid::Uuid;
 
-use crate::error::AppError;
+use crate::{error::AppError, protocol::MetricKind};
 
-pub const CREDIT_METRIC: &str = "CREDITS";
+pub const CREDIT_METRIC: &str = MetricKind::Credits.as_str();
 pub const CREDIT_UNIT_SCALE: i64 = 60_000;
 pub const SIGNUP_CREDIT_UNITS: i64 = 100 * CREDIT_UNIT_SCALE;
 
@@ -179,7 +179,7 @@ impl Entitlement {
     }
 
     async fn reserve_once(&self, input: &ReserveInput) -> Result<ReserveOutcome, AppError> {
-        if input.units <= 0 || input.metric != CREDIT_METRIC {
+        if input.units <= 0 {
             return Err(AppError::BadRequest("Reservation units must be positive."));
         }
         let now = Utc::now().naive_utc();
@@ -685,7 +685,7 @@ impl Entitlement {
         valid_until: Option<DateTime<Utc>>,
         operator: &str,
     ) -> Result<String, AppError> {
-        if metric != CREDIT_METRIC || units <= 0 || reason.is_empty() || reason.len() > 512 {
+        if units <= 0 || reason.is_empty() || reason.len() > 512 {
             return Err(AppError::BadRequest("Invalid quota adjustment."));
         }
         let bucket_id = Uuid::new_v4().to_string();

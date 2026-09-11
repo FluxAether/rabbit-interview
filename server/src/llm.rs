@@ -19,9 +19,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
-    entitlement::{
-        hash_json, llm_credit_units, ReserveInput, ReserveOutcome, UsageInput, CREDIT_METRIC,
-    },
+    entitlement::{hash_json, llm_credit_units, ReserveInput, ReserveOutcome, UsageInput, CREDIT_METRIC},
     error::AppError,
     protocol::LlmAnswerRequest,
     providers::{

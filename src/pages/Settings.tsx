@@ -38,9 +38,10 @@ import {
   type SttLanguage,
   type SttProvider,
 } from '../lib/settingsStore'
+import { formatCreditsDisplay } from '../lib/credits'
 import type { SettingsTab } from '../lib/readiness'
 import type { Page } from '../lib/navigation'
-import { accountRequest, hasAppAccess, requireAppAccess, openHostedSubscription, refreshHostedEntitlements, signInHosted, signOutHosted, useHostedAuth } from '../lib/hostedAuth'
+import { accountRequest, hasAppAccess, openHostedSubscription, refreshHostedEntitlements, signInHosted, signOutHosted, useHostedAuth, withAppAccessCheck } from '../lib/hostedAuth'
 
 type TabType = SettingsTab
 
@@ -590,9 +591,8 @@ export default function Settings({
     }
 
     const start = performance.now()
-    const request = accountRequest(AbortSignal.timeout(12_000))
+    const request = await withAppAccessCheck(async () => accountRequest(AbortSignal.timeout(12_000)), true)
     try {
-      await requireAppAccess(true)
       request.signal.throwIfAborted()
       let res: Response | undefined
       if (provider === 'gemini' && useGeminiLive) {
@@ -1129,7 +1129,7 @@ export default function Settings({
                     <div className="text-[var(--text-muted)]">
                       {hosted.status === 'signed-in' && hosted.entitlements
                         ? t('settings.hosted.quota', {
-                            credits: (hosted.entitlements.balances.CREDITS / hosted.entitlements.credit_unit_scale).toLocaleString(language, { maximumFractionDigits: 4 }),
+                            credits: formatCreditsDisplay(hosted.entitlements.balances.CREDITS, hosted.entitlements.credit_unit_scale, language),
                           })
                         : hosted.error || t(`settings.hosted.status.${hosted.status}`)}
                     </div>

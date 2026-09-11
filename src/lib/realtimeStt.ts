@@ -8,7 +8,7 @@ import {
 } from './llm'
 import { useAppStore } from '../stores/useAppStore'
 import { loadApiKeys } from './keyStore'
-import { hostedFetch, registerHostedConnection, requireAppAccess, refreshHostedEntitlements } from './hostedAuth'
+import { hostedFetch, registerHostedConnection, refreshHostedEntitlements, withAppAccessCheck } from './hostedAuth'
 
 export interface RealtimeSttConfig {
   source: 'system' | 'microphone'
@@ -119,7 +119,7 @@ export async function startRealtimeStt(
   handlers: RealtimeSttHandlers,
 ): Promise<RealtimeSttHandle> {
   const provider = nativeProvider()
-  await requireAppAccess(provider === 'deepgram' || provider === 'gemini')
+  return withAppAccessCheck(async () => {
   if (!provider) {
     let socket: WebSocket | null = await startDeepgramStream(
       handlers.onTranscript, handlers.onError, config.sampleRate,
@@ -248,4 +248,5 @@ export async function startRealtimeStt(
       }
     },
   }
+  }, provider === 'deepgram' || provider === 'gemini')
 }

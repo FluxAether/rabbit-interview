@@ -6,6 +6,7 @@ import { DEFAULT_LANGUAGE } from '../i18n/types'
 import { useAppStore } from '../stores/useAppStore'
 import { deleteSecret, loadSecret, saveSecret } from './db'
 import { decryptSecret, encryptSecret } from './secretCrypto'
+export const CREDIT_UNIT_SCALE = 60_000
 
 const REFRESH_TOKEN_KEY = 'HOSTED_REFRESH_TOKEN'
 const OIDC_CLIENT_ID = 'rabbit-desktop'
@@ -183,6 +184,14 @@ export async function requireAppAccess(byok = false): Promise<void> {
   if (byok && !snapshot.entitlements?.byok_unlocked) throw new Error('BYOK requires the ¥7 lifetime unlock.')
 }
 
+export async function withAppAccessCheck<T>(
+  action: () => Promise<T>,
+  byok = false,
+): Promise<T> {
+  await requireAppAccess(byok)
+  return await action()
+}
+
 export function accountRequest(signal?: AbortSignal) {
   const controller = new AbortController()
   const cancel = () => controller.abort()
@@ -350,7 +359,7 @@ export function refreshHostedEntitlements(): Promise<HostedEntitlements> {
       const entitlements = await response.json() as HostedEntitlements
       if (generation !== authGeneration) throw new DOMException('Account changed', 'AbortError')
       if (!entitlements.account_id || !Number.isSafeInteger(entitlements.balances?.CREDITS)
-        || entitlements.balances.CREDITS < 0 || entitlements.credit_unit_scale !== 60_000
+        || entitlements.balances.CREDITS < 0 || entitlements.credit_unit_scale !== CREDIT_UNIT_SCALE
         || typeof entitlements.byok_unlocked !== 'boolean') throw new Error('Update the gateway to use credit billing.')
       publish({ status: 'signed-in', entitlements, error: null })
       return entitlements

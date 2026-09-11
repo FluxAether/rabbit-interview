@@ -396,7 +396,7 @@ async fn adjust_quota(
         .entitlement()
         .grant_adjustment(
             &id,
-            &request.metric,
+            request.metric.as_str(),
             request.units,
             &request.reason,
             valid_until,

@@ -2,6 +2,7 @@ import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
 import { ArrowLeft, Check, KeyRound, ShieldCheck } from 'lucide-react'
 import { authCopy, type AuthLang } from '../locales/authContent'
 import { FALLBACK_PRODUCTS, formatCredits, formatYuan, gateway, isPaymentProduct, type PaymentProduct } from '../lib/catalog'
+import { CREDIT_UNIT_SCALE, creditsToUnits } from '../lib/credits'
 
 type Interaction =
   | { step: 'login'; csrf: string }
@@ -684,7 +685,7 @@ let inFlightSubscription: Promise<SubscriptionContext> | null = null
 function fetchSubscriptionContext(path: string): Promise<SubscriptionContext> {
   if (!inFlightSubscription) {
     inFlightSubscription = jsonApi<SubscriptionContext>(path).then(context => {
-      if (context.credit_unit_scale !== 60_000 || !Number.isSafeInteger(context.balances?.CREDITS)
+      if (context.credit_unit_scale !== CREDIT_UNIT_SCALE || !Number.isSafeInteger(context.balances?.CREDITS)
         || context.balances.CREDITS < 0 || typeof context.byok_unlocked !== 'boolean'
         || !Array.isArray(context.products) || !context.products.every(isPaymentProduct)) throw new Error('GATEWAY_UNREACHABLE')
       return context
@@ -699,6 +700,7 @@ function SubscribePage({ t }: { t: T }) {
   const [context, setContext] = useState<SubscriptionContext | null>(null)
   const [order, setOrder] = useState<PaymentOrder | null>(null)
   const [busyProduct, setBusyProduct] = useState('')
+  const [selectedPlan, setSelectedPlan] = useState(() => (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('plan') || '' : ''))
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -821,18 +823,45 @@ function SubscribePage({ t }: { t: T }) {
         {(context?.products || FALLBACK_PRODUCTS).map((product) => {
           const byok = product.kind === 'BYOK'
           const unlocked = byok && context?.byok_unlocked
+          const isSelected = selectedPlan === product.code
           return (
-            <section key={product.code} className="flex flex-col rounded-2xl border border-white/15 bg-white/[0.025] p-5">
-              <p className="text-xs text-emerald-300">{byok ? t.subscribe.lifetime : t.subscribe.permanent}</p>
+            <section
+              key={product.code}
+              onClick={() => setSelectedPlan(product.code)}
+              className={`flex flex-col rounded-2xl border p-5 transition-all cursor-pointer ${
+                isSelected
+                  ? 'border-emerald-400/80 bg-emerald-500/[0.04] ring-1 ring-emerald-400/30'
+                  : 'border-white/15 bg-white/[0.025] hover:border-white/25'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-emerald-300">{byok ? t.subscribe.lifetime : t.subscribe.permanent}</p>
+                {isSelected ? <span className="text-xs font-semibold text-emerald-300">✓</span> : null}
+              </div>
               <h2 className="mt-3 text-lg font-semibold">{byok ? t.subscribe.byokTitle : `${formatCredits(product.credit_units, product.credit_unit_scale, t.htmlLang)} ${t.subscribe.creditLabel}`}</h2>
               <p className="mt-4 text-3xl font-semibold">{formatYuan(product.price_minor)}</p>
               <p className="mt-4 flex-1 text-sm leading-relaxed text-mute">{byok ? t.subscribe.byokBody : t.subscribe.hostedBody}</p>
               <p className="my-4 flex gap-2 text-xs text-mute"><Check className="h-4 w-4 shrink-0" />{byok ? t.subscribe.noCredits : t.subscribe.availableNow}</p>
               {context ? (
-                <button className={primaryButton} disabled={Boolean(busyProduct) || unlocked || !context.payments_enabled || context.status !== 'ACTIVE'} onClick={() => void buy(product.code)}>
+                <button
+                  className={primaryButton}
+                  disabled={Boolean(busyProduct) || unlocked || !context.payments_enabled || context.status !== 'ACTIVE'}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void buy(product.code)
+                  }}
+                >
                   {unlocked ? t.subscribe.byokUnlocked : busyProduct === product.code ? t.subscribe.redirecting : t.subscribe.buy}
                 </button>
-              ) : <a href={authHref('/auth/login')} className={secondaryButton}>{t.subscribe.openToBuy}</a>}
+              ) : (
+                <a
+                  href={authHref('/auth/login')}
+                  className={secondaryButton}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {t.subscribe.openToBuy}
+                </a>
+              )}
             </section>
           )
         })}
@@ -990,7 +1019,7 @@ function AdminPage({ t }: { t: T }) {
     event.preventDefault()
     setErrorScope('general')
     if (!account) return
-    const units = Math.round(Number(creditAmount) * account.credit_unit_scale)
+    const units = creditsToUnits(Number(creditAmount), account.credit_unit_scale)
     if (!Number.isSafeInteger(units) || units <= 0 || !reason.trim()) {
       setError('INVALID_REQUEST')
       return

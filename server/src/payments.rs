@@ -32,7 +32,7 @@ use crate::{
     },
     error::AppError,
     oidc::load_browser_session,
-    protocol::PaymentProduct,
+    protocol::{PaymentProduct, ProductCode},
     AppState,
 };
 
@@ -42,7 +42,7 @@ const ORDER_TTL_MINUTES: i64 = 30;
 
 #[derive(Clone, Copy)]
 struct Product {
-    code: &'static str,
+    code: ProductCode,
     subject: &'static str,
     price_minor: i64,
     kind: &'static str,
@@ -51,21 +51,21 @@ struct Product {
 
 const PRODUCTS: [Product; 3] = [
     Product {
-        code: "CREDITS_2900",
+        code: ProductCode::Credits2900,
         subject: "OnCue - 2900 credits",
         price_minor: 8_900,
         kind: "CREDITS",
         credit_units: 2_900 * CREDIT_UNIT_SCALE,
     },
     Product {
-        code: "CREDITS_11000",
+        code: ProductCode::Credits11000,
         subject: "OnCue - 11000 credits",
         price_minor: 19_900,
         kind: "CREDITS",
         credit_units: 11_000 * CREDIT_UNIT_SCALE,
     },
     Product {
-        code: "BYOK_LIFETIME",
+        code: ProductCode::ByokLifetime,
         subject: "OnCue - Lifetime BYOK",
         price_minor: 700,
         kind: "BYOK",
@@ -217,7 +217,7 @@ impl PaymentService {
         if lock_account(&mut tx, account_id).await? != "ACTIVE" {
             return Err(AppError::AccountSuspended);
         }
-        if product.kind == "BYOK" {
+        if product.code == ProductCode::ByokLifetime {
             let unlocked: i64 = sqlx::query_scalar(
                 "SELECT byok_unlocked_at IS NOT NULL FROM accounts WHERE id = ?",
             )
@@ -236,7 +236,7 @@ impl PaymentService {
             }
             return serde_json::from_value(response).map_err(|_| AppError::Internal);
         }
-        if product.kind == "BYOK" {
+        if product.code == ProductCode::ByokLifetime {
             // The account lock serializes checkout across tabs and idempotency keys.
             let pending = sqlx::query(
                 "SELECT id, merchant_order_no, account_id, product_code, channel, provider_trade_no, \
@@ -282,7 +282,7 @@ impl PaymentService {
         .bind(&id)
         .bind(&merchant_order_no)
         .bind(account_id)
-        .bind(product.code)
+        .bind(product.code.as_str())
         .bind(product.price_minor)
         .bind(product.kind)
         .bind(product.credit_units)
@@ -291,7 +291,7 @@ impl PaymentService {
         .await?;
         let response = PaymentOrderResponse {
             merchant_order_no,
-            product_code: product.code.to_owned(),
+            product_code: product.code.as_str().to_owned(),
             status: "PENDING".to_owned(),
             checkout_url: Some(checkout_url),
             expires_at: timestamp(expires_at.naive_utc()),
@@ -635,7 +635,7 @@ fn required_header<'a>(
 }
 
 fn product(code: &str) -> Option<&'static Product> {
-    PRODUCTS.iter().find(|product| product.code == code)
+    PRODUCTS.iter().find(|product| product.code.as_str() == code)
 }
 
 fn validate_order_no(value: &str) -> Result<(), AppError> {
