@@ -27,6 +27,7 @@ import {
 } from "../lib/resumeWorkspaceStore"
 import { computeResumeDiff, revertResumeDiff, type ResumeDiffBlock } from "../lib/resumeDiff"
 import { useAppStore, selectResumeWorkspace } from "../stores/useAppStore"
+import { isInsufficientBalanceError } from "../lib/credits"
 
 const SAMPLE_RESUME = `Alex Morgan
 Product Designer
@@ -42,6 +43,7 @@ type PageStatus = { kind: "error" | "success" | "warning"; text: string } | null
 
 function resumeAnalysisErrorKey(error: unknown, aborted: boolean): string {
   if (aborted) return "resume.analysisTimeout"
+  if (isInsufficientBalanceError(error)) return "account.insufficientBalance"
   if (!(error instanceof Error)) return "resume.analysisError"
   if (error.message === "resume-text-too-long") return "resume.textTooLong"
   if (error.message === "llm-output-truncated") return "resume.analysisTruncated"

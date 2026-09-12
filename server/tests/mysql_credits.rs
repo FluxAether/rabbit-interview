@@ -1,4 +1,4 @@
-use rabbit_gateway::entitlement::{Entitlement, CREDIT_METRIC};
+use oncue_gateway::entitlement::{Entitlement, CREDIT_METRIC};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -6,7 +6,7 @@ use uuid::Uuid;
 #[ignore = "requires isolated TEST_DATABASE_URL"]
 async fn legacy_balances_convert_once_preserving_gifts_and_releasing_paid_periods(
 ) -> anyhow::Result<()> {
-    let pool = rabbit_gateway::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
+    let pool = oncue_gateway::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
     let account = Uuid::new_v4().to_string();
     let email = format!("{account}@migration.test");
     sqlx::query(

@@ -3,7 +3,7 @@ import { formatCreditsDisplay } from './credits'
 export const CREDIT_UNIT_SCALE = 60_000
 
 export type PaymentProduct = {
-  code: 'CREDITS_2900' | 'CREDITS_11000' | 'BYOK_LIFETIME'
+  code: 'CREDITS_700' | 'CREDITS_2900' | 'CREDITS_3000' | 'CREDITS_11000' | 'PASS_WEEK_7D' | 'BYOK_LIFETIME'
   price_minor: number
   currency: 'CNY'
   kind: 'CREDITS' | 'BYOK'
@@ -13,24 +13,40 @@ export type PaymentProduct = {
 
 export const FALLBACK_PRODUCTS: PaymentProduct[] = [
   {
-    code: 'CREDITS_2900',
-    price_minor: 8_900,
+    code: 'CREDITS_700',
+    price_minor: 1_990,
     currency: 'CNY',
     kind: 'CREDITS',
-    credit_units: 2_900 * CREDIT_UNIT_SCALE,
+    credit_units: 700 * CREDIT_UNIT_SCALE,
+    credit_unit_scale: CREDIT_UNIT_SCALE,
+  },
+  {
+    code: 'CREDITS_3000',
+    price_minor: 7_900,
+    currency: 'CNY',
+    kind: 'CREDITS',
+    credit_units: 3_000 * CREDIT_UNIT_SCALE,
     credit_unit_scale: CREDIT_UNIT_SCALE,
   },
   {
     code: 'CREDITS_11000',
-    price_minor: 19_900,
+    price_minor: 17_900,
     currency: 'CNY',
     kind: 'CREDITS',
     credit_units: 11_000 * CREDIT_UNIT_SCALE,
     credit_unit_scale: CREDIT_UNIT_SCALE,
   },
   {
+    code: 'PASS_WEEK_7D',
+    price_minor: 5_900,
+    currency: 'CNY',
+    kind: 'CREDITS',
+    credit_units: 2_800 * CREDIT_UNIT_SCALE,
+    credit_unit_scale: CREDIT_UNIT_SCALE,
+  },
+  {
     code: 'BYOK_LIFETIME',
-    price_minor: 700,
+    price_minor: 3_900,
     currency: 'CNY',
     kind: 'BYOK',
     credit_units: 0,
@@ -40,7 +56,10 @@ export const FALLBACK_PRODUCTS: PaymentProduct[] = [
 
 export function isPaymentProduct(value: unknown): value is PaymentProduct {
   const product = value as PaymentProduct | null
-  return Boolean(product && FALLBACK_PRODUCTS.some(item => item.code === product.code && item.kind === product.kind)
+  return Boolean(product && (
+    FALLBACK_PRODUCTS.some(item => item.code === product.code && item.kind === product.kind) ||
+    product.code === 'CREDITS_2900'
+  )
     && product.currency === 'CNY' && product.credit_unit_scale === CREDIT_UNIT_SCALE
     && Number.isSafeInteger(product.price_minor) && product.price_minor > 0
     && Number.isSafeInteger(product.credit_units)
@@ -57,9 +76,8 @@ export function formatCredits(units: number, scale: number, lang: string): strin
   return formatCreditsDisplay(units, scale, lang)
 }
 
-
 export function formatYuan(priceMinor: number): string {
-  return '¥' + Math.round(priceMinor / 100)
+  return priceMinor % 100 === 0 ? '¥' + (priceMinor / 100) : '¥' + (priceMinor / 100).toFixed(1)
 }
 
 export async function fetchCatalog(): Promise<{ payments_enabled: boolean; products: PaymentProduct[] }> {

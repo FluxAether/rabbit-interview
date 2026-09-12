@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use rabbit_gateway::{config::Config, AppState};
+use oncue_gateway::{config::Config, AppState};
 use rsa::{pkcs8::{EncodePrivateKey, LineEnding}, rand_core::OsRng, RsaPrivateKey};
 use uuid::Uuid;
 
@@ -119,5 +119,4 @@ fn test_config(
         pricing_policy_version: "integration-v1".to_owned(),
     }
 }
-
 

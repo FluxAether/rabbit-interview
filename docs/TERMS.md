@@ -6,7 +6,7 @@ OnCue is provided as a desktop interview copilot. It is not a guarantee of inter
 
 ## License
 
-The free app may be downloaded and used to configure providers, optimize a resume, run mock interviews, and try Copilot. A 90-day season pass, when activated with a valid local license, removes Rabbit's Copilot time cap. Third-party model and speech API costs remain yours.
+The free app may be downloaded and used to configure providers, optimize a resume, run mock interviews, and try Copilot. A 90-day season pass, when activated with a valid local license, removes OnCue's Copilot time cap. Third-party model and speech API costs remain yours.
 
 ## Acceptable use
 

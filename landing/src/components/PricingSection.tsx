@@ -15,9 +15,10 @@ export default function PricingSection({ t }: { t: Copy }) {
     return () => { active = false }
   }, [])
 
-  const small = products.find((item) => item.code === 'CREDITS_2900') || FALLBACK_PRODUCTS[0]
-  const large = products.find((item) => item.code === 'CREDITS_11000') || FALLBACK_PRODUCTS[1]
-  const byok = products.find((item) => item.code === 'BYOK_LIFETIME') || FALLBACK_PRODUCTS[2]
+  const entry = products.find((item) => item.code === 'CREDITS_700') || FALLBACK_PRODUCTS[0]
+  const standard = products.find((item) => item.code === 'CREDITS_3000' || item.code === 'CREDITS_2900') || FALLBACK_PRODUCTS[1]
+  const volume = products.find((item) => item.code === 'CREDITS_11000') || FALLBACK_PRODUCTS[2]
+  const byok = products.find((item) => item.code === 'BYOK_LIFETIME') || FALLBACK_PRODUCTS[4]
 
   return (
     <section id="pricing" className="border-t border-white/5 px-5 py-20 lg:py-28">
@@ -74,9 +75,11 @@ export default function PricingSection({ t }: { t: Copy }) {
               </div>
               <h3 className="mt-3 text-xl font-semibold text-ink">{p.hostedTitle}</h3>
               <div className="mt-4 space-y-2 font-mono text-ink">
-                <div className="text-3xl font-semibold tracking-tight">{formatYuan(large.price_minor)}</div>
-                <p className="text-sm text-mute">{formatCredits(large.credit_units, large.credit_unit_scale, t.htmlLang)} {p.credits}</p>
-                <p className="text-sm text-mute">{formatYuan(small.price_minor)} · {formatCredits(small.credit_units, small.credit_unit_scale, t.htmlLang)} {p.credits}</p>
+                <div className="text-3xl font-semibold tracking-tight">{formatYuan(standard.price_minor)}</div>
+                <p className="text-sm text-mute">{formatCredits(standard.credit_units, standard.credit_unit_scale, t.htmlLang)} {p.credits}</p>
+                <p className="text-xs text-mute sm:text-sm">
+                  {formatYuan(entry.price_minor)} · {formatCredits(entry.credit_units, entry.credit_unit_scale, t.htmlLang)} {p.credits} | {formatYuan(volume.price_minor)} · {formatCredits(volume.credit_units, volume.credit_unit_scale, t.htmlLang)} {p.credits}
+                </p>
               </div>
               <p className="mt-3 text-sm leading-relaxed text-mute">{p.hostedDesc}</p>
               <div className="my-6 border-t border-white/5" />
@@ -86,7 +89,7 @@ export default function PricingSection({ t }: { t: Copy }) {
                 <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.hostedFeature3}</span></li>
               </ul>
             </div>
-            <a href="/subscribe?plan=CREDITS_11000" className="mt-8 inline-flex h-11 items-center justify-center rounded-xl bg-ink text-sm font-medium text-canvas transition-opacity hover:opacity-90">
+            <a href="/subscribe?plan=CREDITS_3000" className="mt-8 inline-flex h-11 items-center justify-center rounded-xl bg-ink text-sm font-medium text-canvas transition-opacity hover:opacity-90">
               {p.hostedCta}
             </a>
           </div>

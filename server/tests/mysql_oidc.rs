@@ -9,7 +9,7 @@ use axum::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use http_body_util::BodyExt;
-use rabbit_gateway::{auth::hash_password, router};
+use oncue_gateway::{auth::hash_password, router};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
@@ -169,10 +169,12 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     assert_eq!(catalog.0, StatusCode::OK);
     let catalog: Value = serde_json::from_slice(&catalog.1)?;
     assert_eq!(catalog["payments_enabled"], false);
-    assert_eq!(catalog["products"][0]["code"], "CREDITS_2900");
-    assert_eq!(catalog["products"][0]["price_minor"], 8900);
-    assert_eq!(catalog["products"][1]["code"], "CREDITS_11000");
-    assert_eq!(catalog["products"][1]["price_minor"], 19900);
+    assert_eq!(catalog["products"][0]["code"], "CREDITS_700");
+    assert_eq!(catalog["products"][0]["price_minor"], 1990);
+    assert_eq!(catalog["products"][1]["code"], "CREDITS_3000");
+    assert_eq!(catalog["products"][1]["price_minor"], 7900);
+    assert_eq!(catalog["products"][2]["code"], "CREDITS_11000");
+    assert_eq!(catalog["products"][2]["price_minor"], 17900);
 
     let unauthenticated_subscription = send(
         &app,
@@ -461,9 +463,9 @@ async fn password_actions_validate_before_consumption_and_preserve_hashes() -> a
         let email = format!("{account}@example.test");
         sqlx::query("INSERT INTO accounts (id, email, normalized_email, status) VALUES (?, ?, ?, ?)")
             .bind(&account).bind(&email).bind(&email).bind(initial_status).execute(state.auth().pool()).await?;
-        let token = rabbit_gateway::auth::random_secret();
+        let token = oncue_gateway::auth::random_secret();
         sqlx::query("INSERT INTO oidc_action_tokens (id, account_id, kind, token_hash, expires_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6) + INTERVAL 1 HOUR)")
-            .bind(Uuid::new_v4().to_string()).bind(&account).bind(kind).bind(rabbit_gateway::auth::secret_hash(&token))
+            .bind(Uuid::new_v4().to_string()).bind(&account).bind(kind).bind(oncue_gateway::auth::secret_hash(&token))
             .execute(state.auth().pool()).await?;
         let csrf = state.auth().csrf_token(&token, kind);
         for password in ["short", "a valid replacement password"] {
@@ -491,7 +493,7 @@ async fn password_actions_validate_before_consumption_and_preserve_hashes() -> a
         let (count, units, days): (i64, i64, Option<i64>) = sqlx::query_as("SELECT COUNT(*), CAST(COALESCE(SUM(remaining_units), 0) AS SIGNED), MAX(TIMESTAMPDIFF(DAY, created_at, valid_until)) FROM quota_buckets WHERE account_id = ? AND source_ref = 'signup-v1'")
             .bind(&account).fetch_one(state.auth().pool()).await?;
         assert_eq!(count, i64::from(kind == "INVITE"));
-        assert_eq!(units, if kind == "INVITE" { 100 * 60_000 } else { 0 });
+        assert_eq!(units, if kind == "INVITE" { 300 * 60_000 } else { 0 });
         if kind == "INVITE" {
             assert_eq!(days, Some(30));
         }

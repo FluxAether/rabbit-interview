@@ -3,6 +3,7 @@
 #   `tauri-signing`: TAURI_SIGNING_PRIVATE_KEY and, if encrypted,
 #                    TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 #   `github-release`: GH_TOKEN or GITHUB_TOKEN (GitHub PAT with repo contents:write)
+#   `server-deploy`: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (optional: DEPLOY_PORT, DEPLOY_PATH)
 version: 2.1
 
 orbs:
@@ -204,6 +205,91 @@ jobs:
           target: x86_64-pc-windows-msvc
           run_shell: bash.exe
 
+  build-server:
+    docker:
+      - image: cimg/base:current
+    resource_class: medium
+    steps:
+      - checkout
+      - run:
+          name: Setup Rust
+          command: |
+            set -euo pipefail
+            if ! command -v rustup >/dev/null 2>&1; then
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            fi
+            if [ -f "$HOME/.cargo/env" ]; then
+              . "$HOME/.cargo/env"
+            fi
+            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+            export PATH="$HOME/.cargo/bin:$PATH"
+            rustup default stable
+      - run:
+          name: Build rabbit-gateway binary
+          command: |
+            set -euo pipefail
+            cargo build --manifest-path server/Cargo.toml --locked --release
+      - run:
+          name: Package server release assets
+          command: |
+            set -euo pipefail
+            mkdir -p dist-server
+            cp server/target/release/rabbit-gateway dist-server/
+            chmod +x dist-server/rabbit-gateway
+            (cd dist-server && sha256sum rabbit-gateway > SHA256SUMS.txt)
+      - persist_to_workspace:
+          root: dist-server
+          paths:
+            - rabbit-gateway
+            - SHA256SUMS.txt
+      - store_artifacts:
+          path: dist-server
+          destination: dist-server
+
+  deploy-server:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - attach_workspace:
+          at: dist-server
+      - run:
+          name: Verify server binary
+          command: |
+            set -euo pipefail
+            test -f dist-server/rabbit-gateway
+            test -x dist-server/rabbit-gateway
+      - run:
+          name: Deploy to production server via SSH
+          command: |
+            set -euo pipefail
+            test -n "${DEPLOY_HOST:-}" || { echo "DEPLOY_HOST is required in the server-deploy context" >&2; exit 1; }
+            test -n "${DEPLOY_USER:-}" || { echo "DEPLOY_USER is required in the server-deploy context" >&2; exit 1; }
+            test -n "${DEPLOY_SSH_KEY:-}" || { echo "DEPLOY_SSH_KEY is required in the server-deploy context" >&2; exit 1; }
+
+            DEPLOY_PORT="${DEPLOY_PORT:-22}"
+            DEPLOY_PATH="${DEPLOY_PATH:-/opt/rabbit-gateway}"
+
+            mkdir -p ~/.ssh
+            chmod 700 ~/.ssh
+            echo "$DEPLOY_SSH_KEY" | base64 -d 2>/dev/null > ~/.ssh/deploy_key || echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+            chmod 600 ~/.ssh/deploy_key
+            ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+            SSH_CMD="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT $DEPLOY_USER@$DEPLOY_HOST"
+            SCP_CMD="scp -i ~/.ssh/deploy_key -P $DEPLOY_PORT"
+
+            echo "Uploading rabbit-gateway binary to $DEPLOY_HOST:$DEPLOY_PATH..."
+            $SSH_CMD "mkdir -p $DEPLOY_PATH"
+            $SCP_CMD dist-server/rabbit-gateway "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/rabbit-gateway.new"
+            $SSH_CMD "chmod +x $DEPLOY_PATH/rabbit-gateway.new && mv $DEPLOY_PATH/rabbit-gateway.new $DEPLOY_PATH/rabbit-gateway"
+
+            echo "Restarting rabbit-gateway systemd service..."
+            $SSH_CMD "sudo systemctl restart rabbit-gateway"
+
+            echo "Checking gateway health..."
+            HEALTH_URL="${GATEWAY_HEALTH_CHECK_URL:-http://127.0.0.1:8787/healthz}"
+            $SSH_CMD "for i in {1..10}; do if curl -fsS \"$HEALTH_URL\" >/dev/null 2>&1; then echo 'Gateway healthy!'; exit 0; fi; sleep 1; done; echo 'Gateway health check timed out' >&2; exit 1"
+
   publish:
     docker:
       - image: cimg/node:20.19
@@ -292,6 +378,21 @@ workflows:
     jobs:
       - build-macos:
           context: tauri-signing
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - build-server:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - deploy-server:
+          context: server-deploy
+          requires:
+            - build-server
           filters:
             tags:
               only: /^v.*/

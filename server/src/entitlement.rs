@@ -11,13 +11,25 @@ use crate::{error::AppError, protocol::MetricKind};
 
 pub const CREDIT_METRIC: &str = MetricKind::Credits.as_str();
 pub const CREDIT_UNIT_SCALE: i64 = 60_000;
-pub const SIGNUP_CREDIT_UNITS: i64 = 100 * CREDIT_UNIT_SCALE;
+pub const SIGNUP_CREDIT_UNITS: i64 = 300 * CREDIT_UNIT_SCALE;
+pub const STT_UNITS_PER_MS: i64 = 3;
 
 pub fn llm_credit_units(tokens: i64) -> Result<i64, AppError> {
     tokens
         .checked_mul(CREDIT_UNIT_SCALE / 1_000)
         .filter(|units| *units >= 0)
         .ok_or(AppError::ProviderProtocol)
+}
+
+pub fn stt_credit_units(audio_ms: i64) -> Result<i64, AppError> {
+    audio_ms
+        .checked_mul(STT_UNITS_PER_MS)
+        .filter(|units| *units >= 0)
+        .ok_or(AppError::ProviderProtocol)
+}
+
+pub fn stt_held_ms(held_units: i64) -> i64 {
+    (held_units / STT_UNITS_PER_MS).max(0)
 }
 
 pub async fn grant_signup_credits(
@@ -968,6 +980,21 @@ mod tests {
         assert_eq!(super::llm_credit_units(0).unwrap(), 0);
         assert!(super::llm_credit_units(-1).is_err());
         assert!(super::llm_credit_units(i64::MAX).is_err());
+
+        assert_eq!(super::stt_credit_units(1).unwrap(), 3);
+        assert_eq!(
+            super::stt_credit_units(20_000).unwrap(),
+            super::CREDIT_UNIT_SCALE
+        );
+        assert_eq!(
+            super::stt_credit_units(60_000).unwrap(),
+            3 * super::CREDIT_UNIT_SCALE
+        );
+        assert_eq!(super::stt_credit_units(0).unwrap(), 0);
+        assert!(super::stt_credit_units(-1).is_err());
+        assert!(super::stt_credit_units(i64::MAX).is_err());
+        assert_eq!(super::stt_held_ms(180_000), 60_000);
+        assert_eq!(super::stt_held_ms(0), 0);
     }
 
     #[test]

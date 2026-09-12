@@ -49,25 +49,39 @@ struct Product {
     credit_units: i64,
 }
 
-const PRODUCTS: [Product; 3] = [
+const PRODUCTS: [Product; 5] = [
     Product {
-        code: ProductCode::Credits2900,
-        subject: "OnCue - 2900 credits",
-        price_minor: 8_900,
+        code: ProductCode::Credits700,
+        subject: "OnCue - 700 credits",
+        price_minor: 1_990,
         kind: "CREDITS",
-        credit_units: 2_900 * CREDIT_UNIT_SCALE,
+        credit_units: 700 * CREDIT_UNIT_SCALE,
+    },
+    Product {
+        code: ProductCode::Credits3000,
+        subject: "OnCue - 3000 credits",
+        price_minor: 7_900,
+        kind: "CREDITS",
+        credit_units: 3_000 * CREDIT_UNIT_SCALE,
     },
     Product {
         code: ProductCode::Credits11000,
         subject: "OnCue - 11000 credits",
-        price_minor: 19_900,
+        price_minor: 17_900,
         kind: "CREDITS",
         credit_units: 11_000 * CREDIT_UNIT_SCALE,
     },
     Product {
+        code: ProductCode::PassWeek7D,
+        subject: "OnCue - 7-day pass (2800 credits)",
+        price_minor: 5_900,
+        kind: "CREDITS",
+        credit_units: 2_800 * CREDIT_UNIT_SCALE,
+    },
+    Product {
         code: ProductCode::ByokLifetime,
         subject: "OnCue - Lifetime BYOK",
-        price_minor: 700,
+        price_minor: 3_900,
         kind: "BYOK",
         credit_units: 0,
     },
@@ -1079,7 +1093,7 @@ mod tests {
     fn payment_config(private_key: String, public_key: String) -> Config {
         Config {
             listen_addr: "127.0.0.1:8787".parse().unwrap(),
-            database_url: "mysql://root@localhost/rabbit_gateway".to_owned(),
+            database_url: "mysql://root@localhost/oncue_gateway".to_owned(),
             gateway_public_url: "https://gateway.test".to_owned(),
             landing_public_url: "https://landing.test".to_owned(),
             allowed_origins: vec!["https://landing.test".to_owned()],
@@ -1265,8 +1279,10 @@ mod tests {
         .await?;
         let mut expected = 0;
         for (code, price, credits) in [
-            ("CREDITS_2900", "89.00", 2900),
-            ("CREDITS_11000", "199.00", 11000),
+            ("CREDITS_700", "19.90", 700),
+            ("CREDITS_3000", "79.00", 3000),
+            ("CREDITS_11000", "179.00", 11000),
+            ("PASS_WEEK_7D", "59.00", 2800),
         ] {
             let request = CreateOrderRequest {
                 product_code: code.into(),
@@ -1328,7 +1344,7 @@ mod tests {
         assert_eq!(order.merchant_order_no, two?.merchant_order_no);
         assert!(!wallet.byok_unlocked(&account).await?);
         let different = CreateOrderRequest {
-            product_code: "CREDITS_2900".into(),
+            product_code: "CREDITS_700".into(),
         };
         for key in ["byok-one", "byok-two"] {
             assert!(matches!(
@@ -1338,7 +1354,7 @@ mod tests {
         }
         assert!(matches!(
             service
-                .create(&account, &request, &format!("{account}-CREDITS_2900"))
+                .create(&account, &request, &format!("{account}-CREDITS_700"))
                 .await,
             Err(crate::error::AppError::IdempotencyConflict)
         ));
@@ -1346,7 +1362,7 @@ mod tests {
         let notice = paid_notification(
             &order.merchant_order_no,
             &format!("byok-{account}"),
-            "7.00",
+            "39.00",
             &format!("byok-event-{account}"),
             &signer,
         );

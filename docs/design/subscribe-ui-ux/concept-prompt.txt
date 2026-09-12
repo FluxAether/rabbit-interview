@@ -1,0 +1,20 @@
+Use case: ui-mockup
+Asset type: a high-fidelity Chinese UI/UX proposal board for the existing OnCue website purchase page, clearly a design proposal, not a screenshot of a running build.
+Primary request: show ONE coherent redesign at desktop and mobile widths. Large flat desktop viewport on the left (roughly 1200x840), narrow flat mobile viewport on the right (roughly 390x840). Landscape board, high resolution, legible crisp Chinese sans typography. No physical device mockups. Overall board background neutral graphite. Small external caption "OnCue / 订阅页优化概念". Desktop is DARK; mobile is LIGHT with precisely the same hierarchy and emerald accent, illustrating system light/dark support.
+Brand: preserve OnCue text wordmark; do not invent or draw a new logo mark. Existing brand colors: graphite #0c0c0e page, #19191d panel, #f4f4f7 main text, #9d9da8 muted text, restrained emerald #6ee7b7 accent. Light theme off-white #f7f7fa, near-black text #17171b, deep emerald #176b52. One controlled 12px panel / 10px button radius scale. No outer glow, no gradients, no glass noise, no photography or unrelated product illustration. A transaction page should be calm, exact and trustworthy.
+Desktop layout: compact top nav "OnCue" on left, "返回官网" and "简  繁  EN" on right. Content container aligned left with generous yet disciplined margins; NOT enclosed in one giant login card. Main headline "积分与自备密钥" approximately 32px; short subheading "按需充值，或一次解锁自备 API Key。".
+A subtle compact outlined account strip below: "可用积分 300" and "自备密钥 未解锁". Add a small "示例账号" label, since 300 is illustrative.
+Then a two-option segmented product category control "托管积分" (selected) and "自备密钥". Under it a visible sentence "两种方式可同时拥有，按需切换使用。".
+Main area desktop 64% left / 32% right with gap. Left heading "选择积分" with helper "购买积分永久有效". FOUR selectable compact horizontal rows, all align radio indicator, exact credit quantity left and exact RMB price right. Rows EXACT:
+"700 积分"  "¥19.9"
+"2,800 积分" with small neutral subtitle "冲刺包"   "¥59" (this row SELECTED with thin emerald border, pale emerald fill and radio selected)
+"3,000 积分"  "¥79"
+"11,000 积分"  "¥179"
+Do NOT add 'recommended', savings, popular badges, crosses, or strikethrough prices. All four options visible. No four duplicate explanatory paragraphs. Below rows one shared small line "语音识别 3 积分/分钟；AI 回答 1 积分/千 token".
+Right panel is one clear order summary, label "本次购买", large "2,800 积分", a row "应付金额" and large "¥59". Helper "支付宝一次性支付，无自动续费". Single emerald-filled primary button with dark text, exact label "使用支付宝支付", on one line. Under button exact note "支付确认后立即到账". No separate primary purchase buttons in the option rows.
+Below main block a restrained "常见问题" disclosure area with two collapsed rows "积分如何扣除？" and "自备密钥需要另外付费吗？". Modest footer copyright OnCue. No decorative eyebrows, version tags, repeated CTA or marketing hero.
+Mobile same exact information, labels and selected 2,800 option. Compact top nav OnCue and 简. Headline naturally at most two lines. Account summary concise. Category choices full-width side by side. Four option rows vertically stacked. Amount and purchase button in a sticky bottom action area with proper bottom safe area, readable dark green button with off-white text. The selected amount "¥59" to left of single-line "使用支付宝支付". Leave bottom body padding so fixed action does not cover content.
+Every visible label must be readable, aligned to its role, no gibberish filler. No invented promises, no guaranteed number of interviews, no auto renewal, no claim that credits expire in seven days. Focus on realistic implementable hierarchy and accessible contrast.
+
+Targeted correction prompt:
+Edit this OnCue UI/UX proposal board. Change ONLY the desktop footer at the bottom left from its current incorrect copyright year to the exact text "© 2026 OnCue". Remove any other footer words on that line. Keep every other pixel, both screen layouts, all Chinese labels, all prices (¥19.9, ¥59, ¥79, ¥179), the selected 2,800 credits option, typography, and light/dark colors unchanged. Do not change the concept caption.

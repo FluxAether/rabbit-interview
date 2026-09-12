@@ -39,11 +39,14 @@ function loadTypeScriptModule(relativePath, exports, dependencies = {}) {
     compilerOptions: {
       module: ts.ModuleKind.ESNext,
       target: ts.ScriptTarget.ES2022,
+      jsx: ts.JsxEmit.React,
     },
   }).outputText
   const script = output
     .replace(/^import[\s\S]*?from ['"][^'"]+['"];?\s*$/gm, '')
     .replace(/^import ['"][^'"]+['"];?\s*$/gm, '')
+    .replace(/const \{[^}]*\} = await import\(['"]\.\/hostedAuth['"]\);/g, '')
+    .replace(/^export default /gm, '')
     .replace(/^export /gm, '')
   return new Function(...Object.keys(dependencies), `${script}\nreturn { ${exports.join(', ')} }`)(...Object.values(dependencies))
 }
@@ -79,6 +82,45 @@ const { recordingBytes } = loadTypeScriptModule('src/lib/recordingBytes.ts', ['r
 const { waveformSampleLevel } = loadTypeScriptModule('src/lib/copilotWaveform.ts', ['waveformSampleLevel'])
 const copilotStateApi = loadTypeScriptModule('src/lib/copilotSessionState.ts', ['createInitialSnapshot', 'reduceCopilotSnapshot', 'orderCopilotMessagesForDisplay', 'reconcileCopilotSnapshot', 'createCopilotSnapshotPatch', 'applyCopilotSnapshotPatch'])
 const { groupCopilotMessages, extractKeyTakeaways } = loadTypeScriptModule('src/lib/copilotPresentation.ts', ['groupCopilotMessages', 'extractKeyTakeaways'], copilotStateApi)
+
+const { isInsufficientBalanceError } = loadTypeScriptModule('src/lib/credits.ts', ['isInsufficientBalanceError'])
+const { resumeAnalysisErrorKey } = loadTypeScriptModule('src/pages/ResumeOptimizer.tsx', ['resumeAnalysisErrorKey'], { isInsufficientBalanceError })
+const quotaBody = { code: 'QUOTA_INSUFFICIENT', message: 'Available quota is insufficient.' }
+for (const error of [new Error(JSON.stringify(quotaBody)), new Error(quotaBody.code), new Error(quotaBody.message), 'Error: Hosted STT ended (quota_exhausted)']) {
+  assert(isInsufficientBalanceError(error), 'HTTP, SSE, and native STT quota errors share the balance notice')
+}
+for (const error of [new Error('PROVIDER_UNAVAILABLE'), new Error('RATE_LIMITED'), 'Hosted STT connection failed', 'Hosted STT quota is low (5000 ms remaining).']) {
+  assert(!isInsufficientBalanceError(error), 'provider outages, rate limits, and low-quota warnings are not depleted balances')
+}
+assert.equal(
+  resumeAnalysisErrorKey(new Error(JSON.stringify(quotaBody)), false),
+  'account.insufficientBalance',
+  'a depleted hosted balance must show the balance notice instead of a generic AI service error',
+)
+assert.equal(resumeAnalysisErrorKey(new Error('PROVIDER_UNAVAILABLE'), false), 'resume.analysisError')
+assert.equal(resumeAnalysisErrorKey(new Error('Timed out'), true), 'resume.analysisTimeout')
+const { translations: balanceTranslations } = loadTypeScriptModule('src/i18n/translations.ts', ['translations'])
+for (const dictionary of Object.values(balanceTranslations)) assert(dictionary['account.insufficientBalance'])
+assert.match(balanceTranslations['zh-CN']['account.insufficientBalance'], /余额不足/)
+
+const hostedQuotaLlm = loadTypeScriptModule('src/lib/llm.ts', ['generateHostedSuggestionsStream', 'generateHostedStructuredJson'], {
+  hostedFetch: async () => new Response(JSON.stringify(quotaBody), { status: 402 }),
+})
+for (const request of [
+  () => hostedQuotaLlm.generateHostedSuggestionsStream('question', '', { onDelta() {} }),
+  () => hostedQuotaLlm.generateHostedStructuredJson('system', 'prompt', undefined, 256),
+]) {
+  await assert.rejects(request, error => resumeAnalysisErrorKey(error, false) === 'account.insufficientBalance')
+}
+const hostedQuotaStt = loadTypeScriptModule('src/lib/realtimeStt.ts', ['startNativeSession'], {
+  useAppStore: { getState: () => ({ settings: {} }) },
+  hostedFetch: async () => new Response(JSON.stringify(quotaBody), { status: 402 }),
+})
+await assert.rejects(
+  () => hostedQuotaStt.startNativeSession({ source: 'system', sampleRate: 16000, captureId: 1, sessionId: 1 }, 'hosted', new AbortController().signal),
+  error => isInsufficientBalanceError(error) && error.retryable === false,
+)
+check(true, 'depleted LLM and native STT requests reach the localized balance notice without being retried')
 
 check(session.length > 0, 'single Copilot session host exists')
 check(panel.length > 0 && app.includes('CopilotPanel') && page.includes('CopilotPanel'), 'main and floating views share CopilotPanel')
@@ -601,6 +643,12 @@ check(
     && !hostedDepleted.canStartCopilot,
   'depleted hosted credits block starting and direct the user to account settings',
 )
+const disabledHostedServices = deriveHostedReadiness({
+  ...hostedReadinessBase,
+  hosted: { authenticated: true, reachable: true, eligible: true, status: 'ACTIVE', creditUnits: 60_000, byokUnlocked: false, sttEnabled: false, llmEnabled: false },
+})
+assert(disabledHostedServices.issues.some(issue => issue.code === 'hosted-unavailable'))
+assert(!disabledHostedServices.issues.some(issue => issue.code === 'hosted-quota-insufficient'))
 check(
   [...hostedSignedOut.issues, ...hostedUnavailable.issues].every((issue) => issue.settingsTab === 'account'),
   'sign-in and account connection issues direct the user to account settings',
@@ -1473,6 +1521,40 @@ check(
 )
 
 const flushTasks = () => new Promise((resolve) => setImmediate(resolve))
+
+const { openHostedSttSocket } = loadTypeScriptModule('src/lib/llm.ts', ['openHostedSttSocket'], {
+  useAppStore: { getState: () => ({ settings: {} }) },
+  hostedFetch: async () => new Response(JSON.stringify({ ws_url: 'wss://gateway.example/stt', ws_ticket: 'test-ticket' })),
+  WebSocket: FakeWebSocket,
+})
+const quotaStreamErrors = []
+const quotaSocketOpening = openHostedSttSocket(16000, () => {}, error => quotaStreamErrors.push(error))
+await flushTasks()
+latestSocket.open()
+latestSocket.receive({ type: 'stt.ready' })
+const quotaSocket = await quotaSocketOpening
+quotaSocket.receive({ type: 'session.ended', reason: 'quota_exhausted' })
+assert.equal(quotaStreamErrors.length, 1)
+assert(isInsufficientBalanceError(quotaStreamErrors[0]))
+assert.equal(quotaSocket.readyState, FakeWebSocket.CLOSED)
+assert.equal(quotaSocket.__deepgramManaged, false, 'exhausted STT sessions must not reconnect')
+
+const { createVoiceEndpointState: createQuotaVoiceEndpoint } = loadTypeScriptModule('src/lib/mockInterviewVoiceEndpoint.ts', ['createVoiceEndpointState'])
+let quotaVoiceHandlers
+const { MockInterviewVoiceSession } = loadTypeScriptModule('src/lib/mockInterviewVoiceSession.ts', ['MockInterviewVoiceSession'], {
+  isInsufficientBalanceError,
+  createVoiceEndpointState: createQuotaVoiceEndpoint,
+  startRealtimeStt: async (_config, handlers) => { quotaVoiceHandlers = handlers; return { async stop() {}, async setAcceptAudio() {} } },
+})
+const quotaVoice = new MockInterviewVoiceSession()
+quotaVoice.config = { language: 'zh-CN', microphoneDevice: null, speechEnabled: false }
+quotaVoice.captureId = 1
+await quotaVoice.openDeepgram(0, 16000)
+const quotaVoiceEvents = []
+quotaVoice.subscribe(event => quotaVoiceEvents.push(event))
+quotaVoiceHandlers.onError(new Error('Hosted STT ended (quota_exhausted)'))
+assert(quotaVoiceEvents.some(event => event.type === 'error' && isInsufficientBalanceError(event.error)))
+check(true, 'STT exhaustion closes the stream and notifies the mock interview page')
 
 function createFakeTimers() {
   const timers = []

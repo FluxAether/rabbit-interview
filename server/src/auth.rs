@@ -46,7 +46,7 @@ pub const BROWSER_SESSION_IDLE_MINUTES: i64 = 60;
 pub const BROWSER_SESSION_TTL_HOURS: i64 = 12;
 pub const INVITATION_TTL_HOURS: i64 = 24;
 pub const RESET_TTL_MINUTES: i64 = 30;
-pub const GATEWAY_AUDIENCE: &str = "rabbit-gateway";
+pub const GATEWAY_AUDIENCE: &str = "oncue-gateway";
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -216,7 +216,7 @@ impl AuthService {
     pub fn verify_access_token(&self, token: &str) -> Result<Claims, AppError> {
         let key = self.decoding_key(token)?;
         let mut validation = Validation::new(Algorithm::RS256);
-        validation.set_audience(&[GATEWAY_AUDIENCE]);
+        validation.set_audience(&[GATEWAY_AUDIENCE, "rabbit-gateway"]);
         validation.set_issuer(&[self.issuer()]);
         validation.set_required_spec_claims(&["exp", "aud", "iss", "sub"]);
         validation.leeway = 60;

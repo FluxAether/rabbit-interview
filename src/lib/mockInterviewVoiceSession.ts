@@ -1,4 +1,5 @@
 import { withAppAccessCheck } from './hostedAuth'
+import { isInsufficientBalanceError } from './credits'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { SupportedLanguage } from '../i18n/types'
@@ -331,6 +332,10 @@ export class MockInterviewVoiceSession {
         onTranscript: event => this.handleTranscript(runtimeGeneration, event),
         onError: error => {
           if (runtimeGeneration !== this.runtimeGeneration) return
+          if (isInsufficientBalanceError(error)) {
+            this.fail(error instanceof Error ? error.message : String(error))
+            return
+          }
           console.warn('[MockInterviewVoice] Deepgram warning', error)
         },
       },

@@ -31,8 +31,8 @@ use crate::{
     require_admin, AppState,
 };
 
-const COOKIE_PRODUCTION: &str = "__Host-rabbit_oidc";
-const COOKIE_DEVELOPMENT: &str = "rabbit_oidc_dev";
+const COOKIE_PRODUCTION: &str = "__Host-oncue_oidc";
+const COOKIE_DEVELOPMENT: &str = "oncue_oidc_dev";
 const ALLOWED_SCOPES: [&str; 4] = ["openid", "profile", "email", "offline_access"];
 
 pub fn router() -> Router<AppState> {

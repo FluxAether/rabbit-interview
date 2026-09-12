@@ -1211,6 +1211,7 @@ async function openHostedSttSocket(
           if (HOSTED_STT_NO_RECONNECT.has(reason)) {
             ws.__deepgramClosedByClient = true;
             ws.__deepgramManaged = false;
+            if (reason === 'quota_exhausted') onError?.(new Error(reason));
           } else {
             onError?.(new Error(`Hosted STT ended (${reason}), reconnecting.`));
           }

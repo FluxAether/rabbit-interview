@@ -156,7 +156,7 @@ const { isPaymentProduct, FALLBACK_PRODUCTS } = load('landing/src/lib/catalog.ts
 assert(FALLBACK_PRODUCTS.every(isPaymentProduct))
 assert(!isPaymentProduct({ code: 'PRO_MONTH', duration_days: 30 }))
 assert(!isPaymentProduct({ ...FALLBACK_PRODUCTS[0], credit_units: -1 }))
-assert(!isPaymentProduct({ ...FALLBACK_PRODUCTS[2], credit_units: 60000 }))
+assert(!isPaymentProduct({ ...FALLBACK_PRODUCTS.find(p => p.kind === 'BYOK'), credit_units: 60000 }))
 
 // Account settings use live entitlements and keep a late profile from crossing accounts.
 const { formatCreditsDisplay } = load('src/lib/credits.ts', ['formatCreditsDisplay'])

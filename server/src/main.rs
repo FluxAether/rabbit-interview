@@ -1,6 +1,6 @@
 use std::{io::ErrorKind, time::Duration};
 
-use rabbit_gateway::{
+use oncue_gateway::{
     access::{LoggedListener, PeerAddr},
     config::Config,
     router, AppState,

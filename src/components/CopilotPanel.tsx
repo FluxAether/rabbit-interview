@@ -12,6 +12,7 @@ import { extractKeyTakeaways } from "../lib/copilotPresentation"
 import { getRealtimePerformanceSnapshot, useRealtimeHudVisible, type RealtimePerformanceSnapshot } from "../lib/realtimeMetrics"
 import { loadAppSettings, saveAppSettings, type CopilotFontSize } from "../lib/settingsStore"
 import { useAppStore } from "../stores/useAppStore"
+import { isInsufficientBalanceError } from "../lib/credits"
 
 interface CopilotPanelProps {
   floating?: boolean
@@ -529,12 +530,13 @@ export default function CopilotPanel({
           {copilot.archiveStatus === "saving"
             ? t("copilot.archive.saving")
             : t(copilot.archiveNotice || "copilot.archive.saved")}
+          {isInsufficientBalanceError(copilot.archiveNotice) && <div>{t("account.insufficientBalance")}</div>}
         </div>
       )}
 
       {copilot.error && (
         <div className="mt-2 rounded-lg bg-[var(--bg-subtle)] px-2.5 py-2 text-xs text-[var(--danger)]" role="alert">
-          {copilot.error}
+          {isInsufficientBalanceError(copilot.error) ? t("account.insufficientBalance") : copilot.error}
         </div>
       )}
 

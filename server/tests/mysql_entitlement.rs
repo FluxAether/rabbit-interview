@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use chrono::{Duration as ChronoDuration, Utc};
-use rabbit_gateway::{
+use oncue_gateway::{
     entitlement::{
         hash_json, Entitlement, ReserveInput, ReserveOutcome, UsageInput, CREDIT_METRIC,
     },
@@ -59,7 +59,7 @@ async fn active_stt(entitlement: &Entitlement) -> anyhow::Result<ReserveInput> {
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL pointing to MySQL 8.4"]
 async fn renewed_leases_survive_stale_candidates_and_terminal_sessions_stay_terminal() -> anyhow::Result<()> {
-    let pool = rabbit_gateway::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
+    let pool = oncue_gateway::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
     let entitlement = Entitlement::new(pool.clone());
     let input = active_stt(&entitlement).await?;
     sqlx::query("UPDATE quota_reservations SET expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?")
@@ -124,7 +124,7 @@ async fn renewed_leases_survive_stale_candidates_and_terminal_sessions_stay_term
 #[ignore = "requires TEST_DATABASE_URL pointing to MySQL 8.4 and performance_schema lock visibility"]
 async fn lock_timeout_retries_the_transaction_without_duplicate_top_up() -> anyhow::Result<()> {
     let url = std::env::var("TEST_DATABASE_URL")?;
-    let pool = rabbit_gateway::storage::connect(&url).await?;
+    let pool = oncue_gateway::storage::connect(&url).await?;
     let entitlement = Entitlement::new(pool.clone());
     let input = active_stt(&entitlement).await?;
     let worker_pool = MySqlPoolOptions::new().max_connections(1).after_connect(|connection, _| Box::pin(async move {
@@ -196,7 +196,7 @@ async fn lock_timeout_retries_the_transaction_without_duplicate_top_up() -> anyh
 #[tokio::test]
 #[ignore = "requires isolated TEST_DATABASE_URL"]
 async fn concurrent_settle_release_and_reap_have_only_one_financial_effect() -> anyhow::Result<()> {
-    let pool = rabbit_gateway::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
+    let pool = oncue_gateway::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
     let entitlement = Entitlement::new(pool.clone());
     for _ in 0..10 {
         let input = active_stt(&entitlement).await?;
@@ -277,7 +277,7 @@ async fn concurrent_settle_release_and_reap_have_only_one_financial_effect() -> 
 #[ignore = "requires TEST_DATABASE_URL pointing to MySQL 8.4"]
 async fn additional_holds_top_up_stt_and_settle_llm_without_double_charging() -> anyhow::Result<()>
 {
-    let pool = rabbit_gateway::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
+    let pool = oncue_gateway::storage::connect(&std::env::var("TEST_DATABASE_URL")?).await?;
     let entitlement = Entitlement::new(pool.clone());
     let account_id = Uuid::new_v4().to_string();
     let email = format!("{account_id}@example.test");

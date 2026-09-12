@@ -24,10 +24,16 @@ impl Default for MetricKind {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum ProductCode {
+    #[serde(rename = "CREDITS_700")]
+    Credits700,
     #[serde(rename = "CREDITS_2900")]
     Credits2900,
+    #[serde(rename = "CREDITS_3000")]
+    Credits3000,
     #[serde(rename = "CREDITS_11000")]
     Credits11000,
+    #[serde(rename = "PASS_WEEK_7D")]
+    PassWeek7D,
     #[serde(rename = "BYOK_LIFETIME")]
     ByokLifetime,
 }
@@ -35,8 +41,11 @@ pub enum ProductCode {
 impl ProductCode {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Credits700 => "CREDITS_700",
             Self::Credits2900 => "CREDITS_2900",
+            Self::Credits3000 => "CREDITS_3000",
             Self::Credits11000 => "CREDITS_11000",
+            Self::PassWeek7D => "PASS_WEEK_7D",
             Self::ByokLifetime => "BYOK_LIFETIME",
         }
     }

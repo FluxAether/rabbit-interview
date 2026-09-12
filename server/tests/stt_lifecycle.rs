@@ -3,7 +3,7 @@ mod common;
 use std::{io::Read, net::SocketAddr, sync::atomic::Ordering, time::Duration};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::{SinkExt, StreamExt};
-use rabbit_gateway::{
+use oncue_gateway::{
     router, AppState,
     entitlement::CREDIT_METRIC,
     protocol::CreateSttSessionResponse,

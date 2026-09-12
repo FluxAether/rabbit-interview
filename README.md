@@ -91,7 +91,7 @@ Other platforms fall back to microphone-only mode. See **Settings → Audio Capt
 
 ## Privacy
 
-- BYOK and Apple speech recognition work without a Rabbit account. Interview content stays on this device.
+- BYOK and Apple speech recognition work without an OnCue account. Interview content stays on this device.
 - Optional hosted mode signs in through the Gateway OIDC Provider using Authorization Code + PKCE. The refresh token is stored in the OS keychain; access tokens stay in memory.
 - Resume text, history, settings, and BYOK API keys live in local app data.
 - Recordings are files under the app data directory, not in this git tree.

@@ -18,7 +18,10 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::{
-    entitlement::{hash_json, ReserveInput, ReserveOutcome, UsageInput, CREDIT_METRIC},
+    entitlement::{
+        hash_json, stt_credit_units, stt_held_ms, ReserveInput, ReserveOutcome, UsageInput,
+        CREDIT_METRIC,
+    },
     error::AppError,
     protocol::{CreateSttSession, CreateSttSessionResponse},
     providers::{
@@ -82,6 +85,7 @@ pub async fn create_session(
         reserved_ms: state.config().initial_stt_hold_ms,
     };
     let source = request.source.to_ascii_uppercase();
+    let initial_units = stt_credit_units(state.config().initial_stt_hold_ms)?;
     let reserve = state
         .entitlement()
         .reserve(ReserveInput {
@@ -95,7 +99,7 @@ pub async fn create_session(
             provider: route.provider.to_ascii_uppercase(),
             model: route.model.clone(),
             metric: CREDIT_METRIC,
-            units: state.config().initial_stt_hold_ms,
+            units: initial_units,
             idempotency_key,
             request_hash,
             response_json: serde_json::to_value(&response).map_err(|_| AppError::Internal)?,
@@ -352,11 +356,13 @@ async fn proxy_stt(
                         let entitlement = state.entitlement().clone();
                         let reservation_id = claim.reservation_id.clone();
                         let key = format!("stt:{}:hold:{}", claim.session_id, top_up_index);
-                        let units = state.config().stt_top_up_ms;
+                        let top_up_units = stt_credit_units(state.config().stt_top_up_ms);
                         let send = provider_tx.send_pcm(pcm);
                         audio = Some(Box::pin(timed("audio_accept", STT_IO_TIMEOUT, async move {
+                            let units = top_up_units?;
                             let held = if needs_top_up {
-                                entitlement.top_up(&reservation_id, units, &key).await?
+                                let held_units = entitlement.top_up(&reservation_id, units, &key).await?;
+                                stt_held_ms(held_units)
                             } else { held_ms };
                             send.await?;
                             Ok((held, top_up_index + u64::from(needs_top_up), samples))
@@ -429,6 +435,7 @@ async fn proxy_stt(
     drop(provider_tx);
     drop(client_rx);
     let accepted_ms = received_samples * 1000 / 16_000;
+    let actual_units = stt_credit_units(accepted_ms).unwrap_or(i64::MAX);
     let settle_result = timed(
         "settlement",
         STT_IO_TIMEOUT,
@@ -445,7 +452,7 @@ async fn proxy_stt(
                 cache_hit_tokens: 0,
                 reasoning_tokens: 0,
                 charged_metric: CREDIT_METRIC,
-                actual_units: accepted_ms,
+                actual_units,
                 pricing_policy_version: state.config().pricing_policy_version.clone(),
                 terminate_reason: terminate_reason.to_owned(),
             },

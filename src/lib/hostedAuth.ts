@@ -181,7 +181,7 @@ export async function requireAppAccess(byok = false): Promise<void> {
   if (!hasAppAccess(snapshot)) throw new Error('Sign-in is required.')
   if (accessTokenExpiresAt <= Date.now() + 30_000) await refreshHostedEntitlements()
   if (!hasAppAccess(snapshot)) throw new Error('Sign-in is required.')
-  if (byok && !snapshot.entitlements?.byok_unlocked) throw new Error('BYOK requires the ¥7 lifetime unlock.')
+  if (byok && !snapshot.entitlements?.byok_unlocked) throw new Error('BYOK requires the ¥39 lifetime unlock.')
 }
 
 export async function withAppAccessCheck<T>(

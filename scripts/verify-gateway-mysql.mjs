@@ -10,7 +10,7 @@ const database = new URL(process.env.DATABASE_URL ?? values.DATABASE_URL);
 if (!['localhost', '127.0.0.1'].includes(database.hostname) || (database.port && database.port !== '3306')) {
   throw new Error("The integration runner requires local MySQL on port 3306.");
 }
-const schema = `rabbit_gateway_test_${randomUUID().replaceAll("-", "")}`;
+const schema = `oncue_gateway_test_${randomUUID().replaceAll("-", "")}`;
 const mysqlEnv = { ...process.env, MYSQL_PWD: decodeURIComponent(database.password) };
 function sql(statement) {
   const result = spawnSync("docker", [

@@ -97,7 +97,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
         capabilities,
         capabilitiesError: !capabilities,
       })
-      setReadinessLabel(readiness.status)
+      setReadinessLabel(readiness.issues.find(issue => issue.blocking)?.code === 'hosted-quota-insufficient' ? 'insufficientBalance' : readiness.status)
       setSettingsTab(primarySettingsTab(readiness))
     })
     return () => { cancelled = true }
@@ -132,7 +132,7 @@ export default function Dashboard({ onLaunchCopilot, onViewHistory, onNavigateTo
               <div className="flex items-center gap-2">
                 <div className="text-sm font-semibold">{t('dashboard.readiness.title')}</div>
                 <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${readinessLabel === 'ready' ? 'bg-[color-mix(in_srgb,var(--success)_15%,transparent)] text-[var(--success)]' : 'bg-[color-mix(in_srgb,var(--warning)_15%,transparent)] text-[var(--warning)]'}`}>
-                  {t(`dashboard.readiness.${readinessLabel}`)}
+                  {t(readinessLabel === 'insufficientBalance' ? 'account.insufficientBalance' : `dashboard.readiness.${readinessLabel}`)}
                 </span>
               </div>
               <div className="mt-1 text-xs text-[var(--text-muted)]">

@@ -99,7 +99,7 @@ impl AppState {
         let http = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(120))
-            .user_agent("rabbit-interview-gateway/0.1")
+            .user_agent("OnCue-gateway/0.1")
             .build()?;
         let auth = AuthService::new(pool.clone(), config.clone(), http.clone())?;
         let routing = routing::Routing::new(pool.clone(), &config).await?;
@@ -294,15 +294,19 @@ async fn ready(State(state): State<AppState>) -> Response {
 }
 
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
+    let stt_active = state.metrics().stt_active.load(Ordering::Relaxed);
+    let stt_started = state.metrics().stt_started.load(Ordering::Relaxed);
+    let llm_active = state.metrics().llm_active.load(Ordering::Relaxed);
+    let llm_started = state.metrics().llm_started.load(Ordering::Relaxed);
     let body = format!(
-        "# TYPE rabbit_stt_active gauge\nrabbit_stt_active {}\n\
-         # TYPE rabbit_stt_started_total counter\nrabbit_stt_started_total {}\n\
-         # TYPE rabbit_llm_active gauge\nrabbit_llm_active {}\n\
-         # TYPE rabbit_llm_started_total counter\nrabbit_llm_started_total {}\n",
-        state.metrics().stt_active.load(Ordering::Relaxed),
-        state.metrics().stt_started.load(Ordering::Relaxed),
-        state.metrics().llm_active.load(Ordering::Relaxed),
-        state.metrics().llm_started.load(Ordering::Relaxed),
+        "# TYPE oncue_stt_active gauge\noncue_stt_active {stt_active}\n\
+         # TYPE oncue_stt_started_total counter\noncue_stt_started_total {stt_started}\n\
+         # TYPE oncue_llm_active gauge\noncue_llm_active {llm_active}\n\
+         # TYPE oncue_llm_started_total counter\noncue_llm_started_total {llm_started}\n\
+         # TYPE rabbit_stt_active gauge\nrabbit_stt_active {stt_active}\n\
+         # TYPE rabbit_stt_started_total counter\nrabbit_stt_started_total {stt_started}\n\
+         # TYPE rabbit_llm_active gauge\nrabbit_llm_active {llm_active}\n\
+         # TYPE rabbit_llm_started_total counter\nrabbit_llm_started_total {llm_started}\n",
     );
     ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], body)
 }

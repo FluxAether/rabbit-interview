@@ -819,11 +819,13 @@ function SubscribePage({ t }: { t: T }) {
         </div>
       ) : null}
       {context && !context.payments_enabled ? <p className="text-sm text-mute">{t.subscribe.paymentsOff}</p> : null}
-      <div className="grid gap-5 sm:grid-cols-3">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {(context?.products || FALLBACK_PRODUCTS).map((product) => {
           const byok = product.kind === 'BYOK'
+          const isPass = product.code === 'PASS_WEEK_7D'
           const unlocked = byok && context?.byok_unlocked
           const isSelected = selectedPlan === product.code
+          const tag = byok ? t.subscribe.lifetime : isPass ? t.subscribe.sprint : t.subscribe.permanent
           return (
             <section
               key={product.code}
@@ -835,7 +837,7 @@ function SubscribePage({ t }: { t: T }) {
               }`}
             >
               <div className="flex items-center justify-between">
-                <p className="text-xs text-emerald-300">{byok ? t.subscribe.lifetime : t.subscribe.permanent}</p>
+                <p className={`text-xs ${isPass ? 'text-amber-300' : 'text-emerald-300'}`}>{tag}</p>
                 {isSelected ? <span className="text-xs font-semibold text-emerald-300">✓</span> : null}
               </div>
               <h2 className="mt-3 text-lg font-semibold">{byok ? t.subscribe.byokTitle : `${formatCredits(product.credit_units, product.credit_unit_scale, t.htmlLang)} ${t.subscribe.creditLabel}`}</h2>

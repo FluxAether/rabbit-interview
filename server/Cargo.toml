@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [lib]
-name = "rabbit_gateway"
+name = "oncue_gateway"
 path = "src/lib.rs"
 
 [[bin]]

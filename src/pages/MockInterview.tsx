@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { RefreshCw, Mic, Volume2, FileText } from 'lucide-react'
 import { useAppStore, selectResumeWorkspace } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
+import { isInsufficientBalanceError } from '../lib/credits'
 import {
   clearMockDraft,
   loadMockDraft,
@@ -643,7 +644,7 @@ export default function MockInterview() {
         </div>
       </div>
 
-      {session.error && <div className="mt-4 rounded-md border border-[var(--danger)] bg-[var(--bg-subtle)] p-3 text-sm text-[var(--danger)]">{session.error}</div>}
+      {session.error && <div className="mt-4 rounded-md border border-[var(--danger)] bg-[var(--bg-subtle)] p-3 text-sm text-[var(--danger)]">{isInsufficientBalanceError(session.error) ? t('account.insufficientBalance') : session.error}</div>}
       <button onClick={startInterview} className="mt-6 w-full rounded-md bg-[var(--action)] py-2.5 font-medium text-[var(--action-text)] transition-opacity hover:opacity-90">{copy.start}</button>
       </section>
     </div>
@@ -973,7 +974,7 @@ export default function MockInterview() {
       </section>
       {session.error && (
         <div className="mt-4 rounded-md border border-[var(--danger)] bg-[var(--bg-subtle)] p-4 text-sm text-[var(--danger)]">
-          <div>{session.error}</div>
+          <div>{isInsufficientBalanceError(session.error) ? t('account.insufficientBalance') : session.error}</div>
           <div className="mt-3 flex flex-wrap gap-3">
             {failedAnswerRef.current ? (
               <>

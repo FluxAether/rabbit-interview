@@ -164,7 +164,7 @@ impl Config {
             max_stt_session: Duration::from_secs(parse("MAX_STT_SESSION_SECONDS", "3600")?),
             global_concurrency_limit: parse("GLOBAL_CONCURRENCY_LIMIT", "100")?,
             pricing_policy_version: env::var("PRICING_POLICY_VERSION")
-                .unwrap_or_else(|_| "2026-09-credits-v1".to_owned()),
+                .unwrap_or_else(|_| "2026-09-credits-v2".to_owned()),
         })
     }
 
@@ -199,8 +199,8 @@ impl Config {
             &self.oidc_post_logout_redirect_uri,
             "/logout",
         )?;
-        if self.oidc_client_id != "rabbit-desktop" {
-            return Err(anyhow!("OIDC_CLIENT_ID must be rabbit-desktop"));
+        if self.oidc_client_id != "rabbit-desktop" && self.oidc_client_id != "oncue-desktop" {
+            return Err(anyhow!("OIDC_CLIENT_ID must be rabbit-desktop or oncue-desktop"));
         }
         validate_from_mailbox(&self.resend_from)?;
         if !self.resend_api_key.starts_with("re_") {
@@ -286,7 +286,7 @@ impl Config {
 
 fn validate_redirect_uri(name: &str, value: &str, path: &str) -> Result<()> {
     let url = url::Url::parse(value).with_context(|| format!("invalid {name}"))?;
-    if url.scheme() != "rabbitinterview"
+    if (url.scheme() != "rabbitinterview" && url.scheme() != "oncue")
         || url.host_str() != Some("auth")
         || url.path() != path
         || url.query().is_some()
@@ -454,6 +454,12 @@ mod tests {
         assert!(validate_redirect_uri(
             "OIDC_REDIRECT_URI",
             "rabbitinterview://auth/callback",
+            "/callback"
+        )
+        .is_ok());
+        assert!(validate_redirect_uri(
+            "OIDC_REDIRECT_URI",
+            "oncue://auth/callback",
             "/callback"
         )
         .is_ok());

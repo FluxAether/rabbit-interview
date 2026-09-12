@@ -114,7 +114,7 @@ export function deriveReadiness(input: ReadinessInput): ReadinessState {
 
   if (llmProvider === 'hosted') {
     if (input.hosted?.authenticated && (!input.hosted.llmEnabled || input.hosted.creditUnits <= 0)) {
-      issues.push({ code: 'hosted-quota-insufficient', settingsTab: 'account', blocking: true })
+      issues.push({ code: input.hosted.llmEnabled ? 'hosted-quota-insufficient' : 'hosted-unavailable', settingsTab: 'account', blocking: true })
     }
   } else {
     const llmConfigured = Boolean(input.keys?.[llmProvider])
@@ -127,7 +127,7 @@ export function deriveReadiness(input: ReadinessInput): ReadinessState {
 
   if (sttProvider === 'hosted') {
     if (input.hosted?.authenticated && (!input.hosted.sttEnabled || input.hosted.creditUnits <= 0)) {
-      issues.push({ code: 'hosted-quota-insufficient', settingsTab: 'account', blocking: true })
+      issues.push({ code: input.hosted.sttEnabled ? 'hosted-quota-insufficient' : 'hosted-unavailable', settingsTab: 'account', blocking: true })
     }
   } else if (sttProvider === 'apple') {
     if (input.appleSttAvailable === false) {
