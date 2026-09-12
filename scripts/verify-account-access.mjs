@@ -2,11 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import ts from 'typescript'
+import * as React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { ArrowUpRight, CheckCircle2, Loader2, LogOut, RefreshCw, UserRound, Wallet } from 'lucide-react'
 
 function load(file, exports, dependencies = {}, extra = '') {
   const js = ts.transpileModule(readFileSync(file, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-  }).outputText.replace(/^import[\s\S]*?from ['"][^'"]+['"];?\s*$/gm, '').replace(/^export /gm, '')
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
+  }).outputText.replace(/^import[\s\S]*?from ['"][^'"]+['"];?\s*$/gm, '').replace(/^export default /gm, '').replace(/^export /gm, '')
     .replaceAll('import.meta.env', '({ DEV: true })').replaceAll('import.meta', '({ env: { DEV: true } })')
   return new Function(...Object.keys(dependencies), `${js}\n${extra}\nreturn {${exports.join(',')}}`)(...Object.values(dependencies))
 }
@@ -141,7 +144,7 @@ const base = { capabilities: { system_audio_available: true, microphone_availabl
 assert.equal(deriveReadiness(base).sttProvider, 'apple')
 assert(deriveReadiness(base).canStartCopilot)
 const legacy = { ...base, settings: { aiAccessMode: 'byok', aiModel: 'gpt-4o-mini', sttProvider: 'apple' }, keys: { openai: true } }
-assert(deriveReadiness(legacy).issues.some(issue => issue.code === 'byok-locked'))
+assert(deriveReadiness(legacy).issues.some(issue => issue.code === 'byok-locked' && issue.settingsTab === 'account'))
 assert(deriveReadiness({ ...legacy, hosted: { ...base.hosted, creditUnits: 0, byokUnlocked: true } }).canStartCopilot)
 const settings = load('src/lib/settingsStore.ts', ['normalizeSettings', 'DEFAULT_SETTINGS'])
 assert.equal(settings.DEFAULT_SETTINGS.aiAccessMode, 'hosted')
@@ -154,3 +157,75 @@ assert(FALLBACK_PRODUCTS.every(isPaymentProduct))
 assert(!isPaymentProduct({ code: 'PRO_MONTH', duration_days: 30 }))
 assert(!isPaymentProduct({ ...FALLBACK_PRODUCTS[0], credit_units: -1 }))
 assert(!isPaymentProduct({ ...FALLBACK_PRODUCTS[2], credit_units: 60000 }))
+
+// Account settings use live entitlements and keep a late profile from crossing accounts.
+const { formatCreditsDisplay } = load('src/lib/credits.ts', ['formatCreditsDisplay'])
+const { translations } = load('src/i18n/translations.ts', ['translations'])
+let accountView = { status: 'signed-in', entitlements: { ...entitlements, balances: { CREDITS: 7_407_000 } }, error: null }
+let hookIndex = 0, effect, profileResponse = deferred(), profileSignal
+const hookState = []
+const actions = []
+const { AccountSettings } = load('src/components/AccountSettings.tsx', ['AccountSettings'], {
+  React, ArrowUpRight, CheckCircle2, Loader2, LogOut, RefreshCw, UserRound, Wallet, formatCreditsDisplay, window: { setTimeout, clearTimeout },
+  useCurrentLanguage: () => 'en-US',
+  useTranslation: () => key => translations['en-US'][key] || key,
+  useHostedAuth: () => accountView, hasAppAccess: auth.hasAppAccess,
+  useState: initial => { const i = hookIndex++; if (!(i in hookState)) hookState[i] = initial; return [hookState[i], value => { hookState[i] = value }] },
+  useEffect: callback => { effect = callback },
+  hostedFetch: (_path, init) => { profileSignal = init.signal; return profileResponse.promise },
+  ...Object.fromEntries(['initializeHostedAuth', 'openHostedSubscription', 'refreshHostedEntitlements', 'signInHosted', 'signOutHosted'].map(name => [name, async () => { actions.push(name) }])),
+})
+const renderAccount = () => { hookIndex = 0; return AccountSettings() }
+const accountText = () => renderToStaticMarkup(renderAccount())
+const nodes = element => React.isValidElement(element) ? [element, ...React.Children.toArray(element.props.children).flatMap(nodes)] : []
+const clickAccount = label => {
+  const button = nodes(renderAccount()).find(node => node.type === 'button' && renderToStaticMarkup(node).includes(label))
+  assert(button && !button.props.disabled, `account action is enabled: ${label}`)
+  button.props.onClick()
+}
+assert.match(accountText(), /123\.45/)
+const cancelProfile = effect()
+cancelProfile()
+assert(profileSignal.aborted, 'leaving the account page cancels its profile request')
+profileResponse.resolve(json({ sub: 'test-account', email: 'old@example.com', name: 'Old account' }))
+await flush()
+assert(!accountText().includes('old@example.com'), 'a late profile response must not be displayed')
+
+profileResponse = deferred()
+const completeProfile = effect()
+profileResponse.resolve(json({ sub: 'test-account', email: 'member@example.com', name: 'Member' }))
+await flush()
+assert.match(accountText(), /member@example\.com/)
+completeProfile()
+clickAccount('Refresh balance')
+assert(nodes(renderAccount()).filter(node => node.type === 'button').every(node => node.props.disabled), 'pending actions prevent duplicate account requests')
+await flush()
+clickAccount('Buy credits / Unlock BYOK'); await flush()
+clickAccount('Sign out'); await flush()
+assert.deepEqual(actions, ['refreshHostedEntitlements', 'openHostedSubscription', 'signOutHosted'])
+
+profileResponse = deferred()
+const invalidProfile = effect()
+profileResponse.resolve(json({ sub: 'another-account', email: 'wrong@example.com' }))
+await flush()
+assert(!accountText().includes('wrong@example.com'), 'profile identity must match the signed-in account')
+assert.match(accountText(), /Unable to load your email/)
+invalidProfile()
+
+accountView = { ...accountView, entitlements: { ...accountView.entitlements, balances: { CREDITS: 0 } } }
+assert.match(accountText(), />0<\/span>/, 'zero balance remains a valid displayed balance')
+accountView = { status: 'signed-out', entitlements: null, error: null }
+assert(!accountText().includes('member@example.com'), 'signed-out state hides the previous profile')
+assert(nodes(renderAccount()).filter(node => node.type === 'button' && /Refresh balance|Buy credits/.test(renderToStaticMarkup(node))).every(node => node.props.disabled))
+clickAccount('Sign in / Register'); await flush()
+assert.equal(actions.at(-1), 'signInHosted')
+accountView = { status: 'restoring', entitlements: null, error: null }
+assert(nodes(renderAccount()).filter(node => node.type === 'button').every(node => node.props.disabled))
+accountView = { status: 'error', entitlements: null, error: 'Connection failed' }
+assert.match(accountText(), /role="alert"[^>]*>Connection failed/)
+clickAccount('Retry connection'); await flush()
+assert.equal(actions.at(-1), 'initializeHostedAuth')
+for (const dictionary of Object.values(translations)) {
+  for (const key of Object.keys(translations['en-US']).filter(key => key.startsWith('settings.account.') || key.endsWith('.account'))) assert(dictionary[key], `${key} is translated`)
+}
+console.log('Account settings verification passed: profile cancellation, identity privacy, credit formatting, sign-in/out, refresh, subscription entry, retry, and translations')

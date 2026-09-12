@@ -23,7 +23,11 @@ import {
   HardDrive,
   History as HistoryIcon,
   Trash2,
+  UserRound,
+  FileText,
+  FolderOpen,
 } from 'lucide-react'
+import AccountSettings from '../components/AccountSettings'
 import { useAppStore } from '../stores/useAppStore'
 import { useTranslation } from '../i18n'
 import { LANGUAGE_OPTIONS, SupportedLanguage, DEFAULT_LANGUAGE } from '../i18n/types'
@@ -38,10 +42,9 @@ import {
   type SttLanguage,
   type SttProvider,
 } from '../lib/settingsStore'
-import { formatCreditsDisplay } from '../lib/credits'
 import type { SettingsTab } from '../lib/readiness'
 import type { Page } from '../lib/navigation'
-import { accountRequest, hasAppAccess, openHostedSubscription, refreshHostedEntitlements, signInHosted, signOutHosted, useHostedAuth, withAppAccessCheck } from '../lib/hostedAuth'
+import { accountRequest, hasAppAccess, signOutHosted, useHostedAuth, withAppAccessCheck } from '../lib/hostedAuth'
 
 type TabType = SettingsTab
 
@@ -103,7 +106,6 @@ export default function Settings({
   const [language, setLanguage] = useState<SupportedLanguage>(DEFAULT_LANGUAGE)
   const [aiModel, setAiModel] = useState('groq-llama-3.1')
   const [aiAccessMode, setAiAccessMode] = useState<AiAccessMode>('byok')
-  const [hostedAction, setHostedAction] = useState(false)
   const [stealth, setStealth] = useState(true)
 
   // Per-provider model selections
@@ -155,10 +157,16 @@ export default function Settings({
   const [appleTest, setAppleTest] = useState<TestResult>({ loading: false })
   const byokSttRef = useRef<{ provider: SttProvider; model: string }>({ provider: 'deepgram', model: 'nova-3' })
 
+  interface LogStorageUsage {
+    bytes: number
+    fileCount: number
+  }
+
   const [recordingStorage, setRecordingStorage] = useState<RecordingStorageUsage>({ bytes: 0, fileCount: 0 })
   const [historyStorage, setHistoryStorage] = useState<HistoryStorageUsage>({ bytes: 0, recordCount: 0 })
+  const [logStorage, setLogStorage] = useState<LogStorageUsage>({ bytes: 0, fileCount: 0 })
   const [storageLoading, setStorageLoading] = useState(false)
-  const [storageAction, setStorageAction] = useState<'recordings' | 'history' | null>(null)
+  const [storageAction, setStorageAction] = useState<'recordings' | 'history' | 'logs' | null>(null)
   const [storageError, setStorageError] = useState('')
   const [storageNotice, setStorageNotice] = useState('')
 
@@ -185,12 +193,14 @@ export default function Settings({
     if (!preserveError) setStorageError('')
     try {
       const { loadHistoryStorageUsage } = await import('../lib/db')
-      const [recordings, history] = await Promise.all([
+      const [recordings, history, logs] = await Promise.all([
         invoke<RecordingStorageUsage>('get_recording_storage_usage'),
         loadHistoryStorageUsage(),
+        invoke<LogStorageUsage>('get_log_storage_usage').catch(() => ({ bytes: 0, fileCount: 0 })),
       ])
       setRecordingStorage(recordings)
       setHistoryStorage(history)
+      setLogStorage(logs)
     } catch (error) {
       setStorageError(t('settings.storage.loadFailed'))
     } finally {
@@ -252,6 +262,30 @@ export default function Settings({
     } finally {
       await refreshStorageUsage(true)
       setStorageAction(null)
+    }
+  }
+
+  const handleClearLogs = async () => {
+    if (!window.confirm(t('settings.storage.clearLogsConfirm'))) return
+    setStorageAction('logs')
+    setStorageError('')
+    setStorageNotice('')
+    try {
+      const updated = await invoke<LogStorageUsage>('clear_logs')
+      setLogStorage(updated)
+      setStorageNotice(t('settings.storage.logsCleared'))
+    } catch (error) {
+      setStorageError(`${t('settings.storage.clearLogsFailed')}: ${String(error)}`)
+    } finally {
+      setStorageAction(null)
+    }
+  }
+
+  const handleOpenLogDir = async () => {
+    try {
+      await invoke('open_log_dir')
+    } catch (error) {
+      setStorageError(`${t('settings.storage.openLogDirFailed')}: ${String(error)}`)
     }
   }
 
@@ -551,18 +585,6 @@ export default function Settings({
     }))
   }
 
-  const handleHostedAuth = async () => {
-    setHostedAction(true)
-    try {
-      if (hosted.status === 'signed-in') await signOutHosted()
-      else await signInHosted()
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setHostedAction(false)
-    }
-  }
-
   // --- API Connectivity Testing ---
   const testConnection = async (provider: ProviderKeyType, useGeminiLive = false) => {
     setTestResults((prev) => ({ ...prev, [provider]: { loading: true } }))
@@ -824,7 +846,7 @@ export default function Settings({
         <div className="mb-6 flex items-center justify-between gap-4">
           <div>
             <h1 className="mb-1 text-2xl font-semibold tracking-tight">{t(`settings.heading.${activeTab}`)}</h1>
-            <p className="text-sm text-[var(--text-muted)]">{t('settings.description')}</p>
+            <p className="text-sm text-[var(--text-muted)]">{t(activeTab === 'account' ? 'settings.account.description' : 'settings.description')}</p>
           </div>
 
           {/* Auto-save toast badge (fades after 2s) */}
@@ -914,9 +936,24 @@ export default function Settings({
               <HardDrive className="w-4 h-4" />
               <span>{t('settings.tab.storage')}</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('account')} aria-current={activeTab === 'account' ? 'page' : undefined}
+              className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium transition-colors lg:w-full ${
+                activeTab === 'account'
+                  ? 'bg-[var(--bg-subtle)] text-[var(--text-main)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-main)]'
+              }`}
+            >
+              <UserRound className="w-4 h-4" aria-hidden="true" />
+              <span>{t('settings.tab.account')}</span>
+            </button>
           </nav>
 
           <div className="w-full min-w-0 flex-1 space-y-4">
+            {activeTab === 'account' && <AccountSettings />}
+
             {/* TAB 1: General */}
             {activeTab === 'general' && (
               <>
@@ -1124,31 +1161,7 @@ export default function Settings({
                       ))}
                     </div>
                   </div>
-                  <p className="mb-3 text-xs text-[var(--text-muted)]">{t(byokUnlocked ? 'account.byokUnlocked' : 'account.byokLocked')}</p>
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-                    <div className="text-[var(--text-muted)]">
-                      {hosted.status === 'signed-in' && hosted.entitlements
-                        ? t('settings.hosted.quota', {
-                            credits: formatCreditsDisplay(hosted.entitlements.balances.CREDITS, hosted.entitlements.credit_unit_scale, language),
-                          })
-                        : hosted.error || t(`settings.hosted.status.${hosted.status}`)}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {hosted.status === 'signed-in' && (
-                        <>
-                          <button type="button" disabled={hostedAction} onClick={() => { setHostedAction(true); void openHostedSubscription().catch((error) => setSaveError(String(error))).finally(() => setHostedAction(false)) }} className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs hover:bg-[var(--bg-hover)] disabled:opacity-50">
-                            {t('settings.hosted.manage')}
-                          </button>
-                          <button type="button" disabled={hostedAction} onClick={() => { setHostedAction(true); void refreshHostedEntitlements().catch((error) => setSaveError(String(error))).finally(() => setHostedAction(false)) }} className="rounded-md border border-[var(--border-color)] px-3 py-1 text-xs hover:bg-[var(--bg-hover)] disabled:opacity-50">
-                            {t('settings.hosted.refresh')}
-                          </button>
-                        </>
-                      )}
-                      <button type="button" disabled={hostedAction || hosted.status === 'restoring'} onClick={() => void handleHostedAuth()} className="rounded-md bg-[var(--action)] px-3 py-1 text-xs font-medium text-[var(--action-text)] disabled:opacity-50">
-                        {hosted.status === 'signed-in' ? t('settings.hosted.signOut') : t('settings.hosted.signIn')}
-                      </button>
-                    </div>
-                  </div>
+                  <button type="button" onClick={() => setActiveTab('account')} className="rounded-md border border-[var(--border-color)] px-3 py-1.5 text-xs hover:bg-[var(--bg-hover)]">{t('settings.account.open')}</button>
                 </div>
 
                 <div className="space-y-4">
@@ -1678,6 +1691,45 @@ export default function Settings({
                       {storageAction === 'history' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                       {t('settings.storage.clearHistory')}
                     </button>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-surface)] p-5">
+                  <div className="flex items-start justify-between gap-6">
+                    <div className="flex items-start gap-3">
+                      <FileText className="mt-0.5 h-5 w-5 text-[var(--text-muted)]" />
+                      <div>
+                        <div className="font-semibold">{t('settings.storage.logs')}</div>
+                        <div className="mt-1 text-sm text-[var(--text-muted)]">
+                          {t('settings.storage.logsDesc')}
+                        </div>
+                        <div className="mt-3 text-lg font-semibold">
+                          {storageLoading ? '—' : formatStorageBytes(logStorage.bytes)}
+                        </div>
+                        <div className="text-xs text-[var(--text-muted)]">
+                          {storageLoading ? '—' : t('settings.storage.fileCount', { count: logStorage.fileCount })}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleOpenLogDir()}
+                        className="flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--border-color)] px-3 py-1.5 text-sm font-medium text-[var(--text-main)] transition-colors hover:bg-[var(--bg-hover)]"
+                      >
+                        <FolderOpen className="w-4 h-4" />
+                        {t('settings.storage.openLogDir')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleClearLogs()}
+                        disabled={storageLoading || storageAction !== null || logStorage.fileCount === 0}
+                        className="flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--danger)] px-3 py-1.5 text-sm font-medium text-[var(--danger)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {storageAction === 'logs' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                        {t('settings.storage.clearLogs')}
+                      </button>
+                    </div>
                   </div>
                 </div>
 

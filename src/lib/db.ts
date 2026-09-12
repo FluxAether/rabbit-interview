@@ -266,7 +266,8 @@ async function readLegacyStoreValue<T>(fileName: string, key: string): Promise<T
     const store = await Store.load(fileName);
     const value = await store.get<T>(key);
     return value ?? null;
-  } catch {
+  } catch (error) {
+    console.warn(`[DB] Failed to read legacy store key ${key} from ${fileName}:`, error);
     return null;
   }
 }
@@ -279,8 +280,8 @@ async function clearLegacyStoreKeys(fileName: string, keys: string[]): Promise<v
       await store.delete(key);
     }
     await store.save();
-  } catch {
-    // Best-effort cleanup only.
+  } catch (error) {
+    console.warn(`[DB] Failed to clear legacy store keys from ${fileName}:`, error);
   }
 }
 

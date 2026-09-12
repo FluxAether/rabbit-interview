@@ -1,4 +1,5 @@
 mod audio;
+mod log_manager;
 mod copilot_window;
 mod realtime_metrics;
 mod resume_export;
@@ -16,6 +17,7 @@ use copilot_window::{
     show_copilot_window, toggle_copilot_window,
 };
 use realtime_metrics::{get_realtime_metrics, record_realtime_event, reset_realtime_metrics};
+use log_manager::{clear_logs, get_log_storage_usage, open_log_dir};
 use secure_store::{delete_secure_secret, load_secure_secret, save_secure_secret};
 use speech::{speak_text, stop_speaking};
 use stt::apple::{
@@ -29,7 +31,30 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default();
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        log::error!("Native panic: {}", panic_info);
+        default_hook(panic_info);
+    }));
+
+    let log_plugin = tauri_plugin_log::Builder::new()
+        .targets([
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                file_name: Some("oncue".into()),
+            }),
+            #[cfg(debug_assertions)]
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+        ])
+        .level(if cfg!(debug_assertions) {
+            log::LevelFilter::Info
+        } else {
+            log::LevelFilter::Warn
+        })
+        .max_file_size(10 * 1024 * 1024)
+        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
+        .build();
+
+    let mut builder = tauri::Builder::default().plugin(log_plugin);
     #[cfg(desktop)]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -99,6 +124,9 @@ pub fn run() {
             load_secure_secret,
             save_secure_secret,
             delete_secure_secret,
+            get_log_storage_usage,
+            clear_logs,
+            open_log_dir,
         ])
         .setup(|app| {
             // Register the actual hotkey combinations.
@@ -106,13 +134,13 @@ pub fn run() {
             let capture_shortcut =
                 Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyC);
             if let Err(e) = app.global_shortcut().register(capture_shortcut) {
-                eprintln!("Failed to register ⌘⇧C capture shortcut: {}", e);
+                log::error!("Failed to register ⌘⇧C capture shortcut: {}", e);
             }
 
             let copilot_shortcut =
                 Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyI);
             if let Err(e) = app.global_shortcut().register(copilot_shortcut) {
-                eprintln!("Failed to register ⌘⇧I copilot shortcut: {}", e);
+                log::error!("Failed to register ⌘⇧I copilot shortcut: {}", e);
             }
 
             stt::apple::attach_app(app.handle());

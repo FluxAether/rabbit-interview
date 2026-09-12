@@ -417,7 +417,7 @@ async function generateHostedSuggestionsStream(
     );
   } finally {
     signal?.removeEventListener('abort', cancel);
-    void refreshHostedEntitlements().catch(() => {});
+    void refreshHostedEntitlements().catch((error) => console.warn('[LLM] refreshHostedEntitlements failed:', error));
   }
 }
 
@@ -1490,7 +1490,7 @@ async function generateHostedStructuredJson<T>(
     }
   } finally {
     signal?.removeEventListener('abort', cancel);
-    void refreshHostedEntitlements().catch(() => {});
+    void refreshHostedEntitlements().catch((error) => console.warn('[LLM] refreshHostedEntitlements failed:', error));
   }
 }
 

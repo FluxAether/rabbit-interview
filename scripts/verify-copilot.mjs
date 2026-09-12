@@ -596,10 +596,14 @@ check(
   'hosted readiness distinguishes signed-out and unreachable states before enabling eligible quota',
 )
 check(
-  hostedDepleted.issues.some((issue) => issue.code === 'hosted-quota-insufficient' && issue.settingsTab === 'ai')
-    && hostedDepleted.issues.some((issue) => issue.code === 'hosted-quota-insufficient' && issue.settingsTab === 'stt')
+  hostedDepleted.issues.some((issue) => issue.code === 'hosted-quota-insufficient')
+    && hostedDepleted.issues.every((issue) => issue.settingsTab === 'account')
     && !hostedDepleted.canStartCopilot,
-  'hosted readiness blocks both hosted services when shared credits are depleted',
+  'depleted hosted credits block starting and direct the user to account settings',
+)
+check(
+  [...hostedSignedOut.issues, ...hostedUnavailable.issues].every((issue) => issue.settingsTab === 'account'),
+  'sign-in and account connection issues direct the user to account settings',
 )
 
 if (sessionState) {

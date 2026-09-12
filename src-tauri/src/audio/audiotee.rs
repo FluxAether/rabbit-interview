@@ -213,7 +213,7 @@ impl AudioTeeProcess {
         let stderr_thread = std::thread::spawn(move || {
             use std::io::{BufRead, BufReader};
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                eprintln!("[AudioTee] {line}");
+                log::warn!("[AudioTee] {line}");
             }
         });
 

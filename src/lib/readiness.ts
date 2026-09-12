@@ -1,6 +1,6 @@
 import type { AppSettings, SttProvider } from './settingsStore'
 
-export type SettingsTab = 'general' | 'ai' | 'stt' | 'shortcuts_privacy' | 'storage'
+export type SettingsTab = 'general' | 'account' | 'ai' | 'stt' | 'shortcuts_privacy' | 'storage'
 export type LlmProvider = 'groq' | 'openai' | 'anthropic' | 'gemini' | 'hosted'
 export type ReadinessStatus = 'loading' | 'unconfigured' | 'testing' | 'ready' | 'degraded' | 'error'
 export type ReadinessIssueCode =
@@ -100,21 +100,21 @@ export function deriveReadiness(input: ReadinessInput): ReadinessState {
 
   {
     if (input.hosted?.reachable === false) {
-      issues.push({ code: 'hosted-unavailable', settingsTab: 'ai', blocking: true })
+      issues.push({ code: 'hosted-unavailable', settingsTab: 'account', blocking: true })
     } else if (!input.hosted?.authenticated) {
-      issues.push({ code: 'hosted-auth-required', settingsTab: 'ai', blocking: true })
+      issues.push({ code: 'hosted-auth-required', settingsTab: 'account', blocking: true })
     } else if (!input.hosted.eligible || input.hosted.status !== 'ACTIVE') {
-      issues.push({ code: 'hosted-not-eligible', settingsTab: 'ai', blocking: true })
+      issues.push({ code: 'hosted-not-eligible', settingsTab: 'account', blocking: true })
     }
   }
 
   if ((llmProvider !== 'hosted' || sttRequiresCloudKey(sttProvider)) && !input.hosted?.byokUnlocked) {
-    issues.push({ code: 'byok-locked', settingsTab: 'ai', blocking: true })
+    issues.push({ code: 'byok-locked', settingsTab: 'account', blocking: true })
   }
 
   if (llmProvider === 'hosted') {
     if (input.hosted?.authenticated && (!input.hosted.llmEnabled || input.hosted.creditUnits <= 0)) {
-      issues.push({ code: 'hosted-quota-insufficient', settingsTab: 'ai', blocking: true })
+      issues.push({ code: 'hosted-quota-insufficient', settingsTab: 'account', blocking: true })
     }
   } else {
     const llmConfigured = Boolean(input.keys?.[llmProvider])
@@ -127,7 +127,7 @@ export function deriveReadiness(input: ReadinessInput): ReadinessState {
 
   if (sttProvider === 'hosted') {
     if (input.hosted?.authenticated && (!input.hosted.sttEnabled || input.hosted.creditUnits <= 0)) {
-      issues.push({ code: 'hosted-quota-insufficient', settingsTab: 'stt', blocking: true })
+      issues.push({ code: 'hosted-quota-insufficient', settingsTab: 'account', blocking: true })
     }
   } else if (sttProvider === 'apple') {
     if (input.appleSttAvailable === false) {

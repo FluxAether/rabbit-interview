@@ -59,7 +59,7 @@ pub async fn create_answer(
     if system.chars().count() + prompt.chars().count() > 64_000 {
         return Err(AppError::BadRequest("LLM request context is too large."));
     }
-    let max_output_tokens = request.max_output_tokens.unwrap_or(2_400).clamp(128, 2_400);
+    let max_output_tokens = resolve_max_output_tokens(json_response, request.max_output_tokens);
     let estimated_input = estimate_tokens(&format!("{system}\n\n{prompt}"));
     let held_units = estimated_input + max_output_tokens + 4_000;
     let route = state.routing().current(RouteKind::Llm).await?;
@@ -603,6 +603,18 @@ fn build_prompt(request: &LlmAnswerRequest) -> Result<(String, String, bool), Ap
     }
 }
 
+pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: i64 = 2_400;
+pub(crate) const STRUCTURED_JSON_MAX_OUTPUT_TOKENS: i64 = 8_192;
+
+pub(crate) fn resolve_max_output_tokens(json_response: bool, requested: Option<i64>) -> i64 {
+    let max_cap = if json_response {
+        STRUCTURED_JSON_MAX_OUTPUT_TOKENS
+    } else {
+        DEFAULT_MAX_OUTPUT_TOKENS
+    };
+    requested.unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS).clamp(128, max_cap)
+}
+
 fn estimate_tokens(text: &str) -> i64 {
     let chars = text.chars().count() as i64;
     // CJK frequently approaches one token per character; using that bound avoids under-reserving.
@@ -690,7 +702,7 @@ fn request_hash_view(request: &LlmAnswerRequest) -> serde_json::Value {
 mod tests {
     use super::{
         billable_units, estimate_tokens, provider_usage_status, send_event_cancellable,
-        settled_usage, tail,
+        settled_usage, tail, resolve_max_output_tokens,
     };
     use crate::providers::llm::Usage;
     use serde_json::json;
@@ -749,6 +761,16 @@ mod tests {
             billable_units(&usage, "ESTIMATED", "length", 10, 2_400),
             2_410
         );
+    }
+
+    #[test]
+    fn max_output_tokens_resolution_allows_larger_budget_for_structured_json() {
+        assert_eq!(resolve_max_output_tokens(false, None), 2_400);
+        assert_eq!(resolve_max_output_tokens(false, Some(8_000)), 2_400);
+        assert_eq!(resolve_max_output_tokens(true, None), 2_400);
+        assert_eq!(resolve_max_output_tokens(true, Some(8_000)), 8_000);
+        assert_eq!(resolve_max_output_tokens(true, Some(10_000)), 8_192);
+        assert_eq!(resolve_max_output_tokens(true, Some(50)), 128);
     }
 
     #[tokio::test]

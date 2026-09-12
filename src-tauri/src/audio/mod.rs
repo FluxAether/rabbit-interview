@@ -173,7 +173,9 @@ fn remember_audio_state(mode: &str, failure_reason: Option<String>) {
 }
 
 fn remember_audio_failure(error: impl Into<String>) {
-    remember_audio_state("error", Some(error.into()));
+    let err_str = error.into();
+    log::error!("Audio failure: {}", err_str);
+    remember_audio_state("error", Some(err_str));
 }
 
 fn capture_origin_frame(origin: &AtomicU64, elapsed_frame: u64) -> u64 {

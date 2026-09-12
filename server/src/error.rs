@@ -50,6 +50,7 @@ struct ErrorBody {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        let request_id = Uuid::new_v4().to_string();
         let (status, code, message, retryable) = match self {
             Self::BadRequest(message) => {
                 (StatusCode::BAD_REQUEST, "INVALID_REQUEST", message, false)
@@ -102,46 +103,68 @@ impl IntoResponse for AppError {
                 "The requested resource was not found.",
                 false,
             ),
-            Self::ProviderUnavailable => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "PROVIDER_UNAVAILABLE",
-                "The upstream provider is unavailable.",
-                true,
-            ),
-            Self::ProviderProtocol => (
-                StatusCode::BAD_GATEWAY,
-                "PROVIDER_PROTOCOL_ERROR",
-                "The upstream provider returned an invalid response.",
-                false,
-            ),
-            Self::ProviderRejected => (
-                StatusCode::BAD_GATEWAY,
-                "PROVIDER_REJECTED",
-                "The upstream provider rejected the request.",
-                false,
-            ),
+            Self::ProviderUnavailable => {
+                tracing::warn!(%request_id, "provider unavailable");
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "PROVIDER_UNAVAILABLE",
+                    "The upstream provider is unavailable.",
+                    true,
+                )
+            }
+            Self::ProviderProtocol => {
+                tracing::error!(%request_id, "provider protocol error");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "PROVIDER_PROTOCOL_ERROR",
+                    "The upstream provider returned an invalid response.",
+                    false,
+                )
+            }
+            Self::ProviderRejected => {
+                tracing::warn!(%request_id, "provider rejected request");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "PROVIDER_REJECTED",
+                    "The upstream provider rejected the request.",
+                    false,
+                )
+            }
             Self::RateLimited => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "RATE_LIMITED",
                 "Too many requests. Try again later.",
                 true,
             ),
-            Self::Database(_) | Self::Internal => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "INTERNAL_ERROR",
-                "The request could not be completed.",
-                true,
-            ),
+            Self::Database(ref error) => {
+                tracing::error!(%request_id, error = ?error, "database error");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "INTERNAL_ERROR",
+                    "The request could not be completed.",
+                    true,
+                )
+            }
+            Self::Internal => {
+                tracing::error!(%request_id, "internal server error");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "INTERNAL_ERROR",
+                    "The request could not be completed.",
+                    true,
+                )
+            }
         };
         (
             status,
             Json(ErrorBody {
                 code,
                 message,
-                request_id: Uuid::new_v4().to_string(),
+                request_id,
                 retryable,
             }),
         )
             .into_response()
     }
 }
+

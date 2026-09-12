@@ -254,7 +254,7 @@ function AppContent() {
     }).then(register)
     loadAppSettings().then((saved) => {
       useAppStore.getState().setSettings({ ...saved, language: saved.language || DEFAULT_LANGUAGE })
-    }).catch(() => {})
+    }).catch((err) => console.warn('Failed to load app settings:', err))
 
     if (floating) {
       mountCopilotSessionClient().then((cleanup) => {
@@ -280,7 +280,7 @@ function AppContent() {
           })
           loadAppSettings().then((saved) => {
             useAppStore.getState().setSettings({ ...saved, language: saved.language || DEFAULT_LANGUAGE })
-          }).catch(() => {})
+          }).catch((err) => console.warn('Failed to load app settings:', err))
         })
     }
     return () => {
