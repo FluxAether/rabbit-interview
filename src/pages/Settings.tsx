@@ -1707,7 +1707,7 @@ export default function Settings({
                           {storageLoading ? '—' : formatStorageBytes(logStorage.bytes)}
                         </div>
                         <div className="text-xs text-[var(--text-muted)]">
-                          {storageLoading ? '—' : t('settings.storage.fileCount', { count: logStorage.fileCount })}
+                          {storageLoading ? '—' : t('settings.storage.logFileCount', { count: logStorage.fileCount })}
                         </div>
                       </div>
                     </div>
