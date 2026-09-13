@@ -1,0 +1,562 @@
+<template id="04-hud-copilot-template">
+  <div data-hf-id="hf-296p" id="frame-04-hud-copilot" data-composition-id="04-hud-copilot" data-width="1920" data-height="1080" data-duration="16.107">
+    <!-- Ambient Background -->
+    <div data-hf-id="hf-xbga" class="f4-bg">
+      <div data-hf-id="hf-4588" class="f4-radial-glow"></div>
+      <div data-hf-id="hf-dpy2" class="f4-grid-pattern"></div>
+    </div>
+
+    <!-- Step Header -->
+    <div data-hf-id="hf-xfuo" class="f4-header">
+      <div data-hf-id="hf-az5j" class="f4-step-badge">
+        <span data-hf-id="hf-rzxc" class="f4-step-num">03</span>
+        <span data-hf-id="hf-lheq" class="f4-step-text">STEP 03 · 实时护航</span>
+      </div>
+      <h2 data-hf-id="hf-ro4b" class="f4-main-title">置顶隐形 HUD · 系统级音频内录 · 毫秒级思路推流</h2>
+    </div>
+
+    <!-- Main Stage Content -->
+    <div data-hf-id="hf-4ggn" class="f4-stage">
+      <!-- Simulated Online Meeting Desk Screen -->
+      <div data-hf-id="hf-ntg7" class="f4-meeting-window">
+        <div data-hf-id="hf-fz6z" class="f4-meeting-topbar">
+          <div data-hf-id="hf-oq8j" class="f4-meeting-dots">
+            <span data-hf-id="hf-x40l" class="f4-dot f4-dot-red"></span>
+            <span data-hf-id="hf-wy9c" class="f4-dot f4-dot-yellow"></span>
+            <span data-hf-id="hf-xss1" class="f4-dot f4-dot-green"></span>
+          </div>
+          <div data-hf-id="hf-drpn" class="f4-meeting-room">Zoom Meeting · 终面技术考核</div>
+          <div data-hf-id="hf-dya9" class="f4-meeting-time">REC 00:24:18</div>
+        </div>
+
+        <div data-hf-id="hf-rf1j" class="f4-meeting-body">
+          <!-- Remote Interviewer Video Feed Box -->
+          <div data-hf-id="hf-ufrm" class="f4-interviewer-tile">
+            <div data-hf-id="hf-rmf2" class="f4-video-avatar">
+              <svg data-hf-id="hf-1qor" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#9d9da8" stroke-width="1.5">
+                <path data-hf-id="hf-ehgg" d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle data-hf-id="hf-ybtk" cx="12" cy="7" r="4" />
+              </svg>
+            </div>
+            <div data-hf-id="hf-s79q" class="f4-participant-badge">面试官 · 资深首席架构师</div>
+
+            <!-- Real-time Speech Captions from Interviewer -->
+            <div data-hf-id="hf-k99l" class="f4-speech-box">
+              <div data-hf-id="hf-ad38" class="f4-audio-tag">
+                <span data-hf-id="hf-bhz4" class="f4-audio-dot"></span>
+                <span data-hf-id="hf-iyo7">System Audio 虚拟声道捕获中</span>
+              </div>
+              <div data-hf-id="hf-ex84" class="f4-speech-text">
+                “请详细谈谈你之前主导的千万级并发订单系统架构改造，遇到过哪些最大挑战？”
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- OnCue Floating HUD Copilot (Pinned Overlay) -->
+      <div data-hf-id="hf-hrtv" class="f4-hud-panel">
+        <div data-hf-id="hf-a6n0" class="f4-hud-header">
+          <div data-hf-id="hf-ij5i" class="f4-hud-brand">
+            <span data-hf-id="hf-01z0" class="f4-hud-live-dot"></span>
+            <span data-hf-id="hf-um5v" class="f4-hud-title">OnCue HUD</span>
+            <span data-hf-id="hf-s90x" class="f4-hud-sub">TOPMOST · 置顶</span>
+          </div>
+          <div data-hf-id="hf-64b8" class="f4-hud-meta">
+            <span data-hf-id="hf-9li4" class="f4-hud-latency">⚡ 160ms</span>
+            <span data-hf-id="hf-j2gy" class="f4-hotkey-badge">Alt + Space 隐形</span>
+          </div>
+        </div>
+
+        <div data-hf-id="hf-d5lv" class="f4-hud-body">
+          <div data-hf-id="hf-xgnh" class="f4-intel-header">
+            <div data-hf-id="hf-fgct" class="f4-intel-tag">AI 实时拆解回答思路</div>
+            <div data-hf-id="hf-vtc7" class="f4-intel-focus">重点：高并发演进背景 + 核心选型权衡 + 成果量化</div>
+          </div>
+
+          <!-- Structured Answer Bullets -->
+          <div data-hf-id="hf-erwa" class="f4-answer-stack">
+            <div data-hf-id="hf-ub97" class="f4-answer-bullet f4-bullet-1">
+              <div data-hf-id="hf-nf0r" class="f4-bullet-index">01</div>
+              <div data-hf-id="hf-0e43" class="f4-bullet-content">
+                <div data-hf-id="hf-36hl" class="f4-bullet-heading">明确业务瓶颈与容量痛点</div>
+                <div data-hf-id="hf-9tk1" class="f4-bullet-detail">订单库行锁竞争剧烈，高峰期接口 RT 飙升超 800ms，日峰值 2000 万单。</div>
+              </div>
+            </div>
+
+            <div data-hf-id="hf-jfrk" class="f4-answer-bullet f4-bullet-2">
+              <div data-hf-id="hf-n0pq" class="f4-bullet-index">02</div>
+              <div data-hf-id="hf-hnmb" class="f4-bullet-content">
+                <div data-hf-id="hf-1gs5" class="f4-bullet-heading">技术改造核心方案（分库分表+Redis+RocketMQ）</div>
+                <div data-hf-id="hf-rdlw" class="f4-bullet-detail">Sharding-Sphere 基因法分片，本地多级缓存削峰，异步扣减与补偿事务。</div>
+              </div>
+            </div>
+
+            <div data-hf-id="hf-k7fd" class="f4-answer-bullet f4-bullet-3">
+              <div data-hf-id="hf-mmep" class="f4-bullet-index">03</div>
+              <div data-hf-id="hf-h9ba" class="f4-bullet-content">
+                <div data-hf-id="hf-7bn4" class="f4-bullet-heading">量化成果降维打击</div>
+                <div data-hf-id="hf-okvd" class="f4-bullet-detail">P99 延迟骤降 85%（&lt;40ms），吞吐量提升 4 倍，双十一期间零线上故障。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div data-hf-id="hf-r00y" class="f4-hud-footer">
+          <div data-hf-id="hf-wfy8" class="f4-stealth-indicator">
+            <svg data-hf-id="hf-yfqu" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2">
+              <path data-hf-id="hf-06ci" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            <span data-hf-id="hf-hwe8">无痕屏幕捕获 · 共享屏幕完全不可见</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      #frame-04-hud-copilot {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #0c0c0e;
+        font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #f4f4f7;
+      }
+
+      .f4-bg {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .f4-radial-glow {
+        position: absolute;
+        top: 25%;
+        right: 20%;
+        width: 1100px;
+        height: 700px;
+        background: radial-gradient(circle, rgba(56, 189, 248, 0.09) 0%, rgba(12, 12, 14, 0) 70%);
+        filter: blur(50px);
+      }
+
+      .f4-grid-pattern {
+        position: absolute;
+        inset: 0;
+        background-image: linear-gradient(rgba(46, 46, 56, 0.2) 1px, transparent 1px),
+                          linear-gradient(90deg, rgba(46, 46, 56, 0.2) 1px, transparent 1px);
+        background-size: 80px 80px;
+        opacity: 0.35;
+      }
+
+      .f4-header {
+        position: absolute;
+        top: 60px;
+        left: 120px;
+      }
+
+      .f4-step-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        background: rgba(56, 189, 248, 0.1);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        padding: 6px 14px;
+        border-radius: 100px;
+        margin-bottom: 12px;
+      }
+
+      .f4-step-num {
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 700;
+        font-size: 13px;
+        color: #0c0c0e;
+        background: #38bdf8;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+
+      .f4-step-text {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        color: #38bdf8;
+      }
+
+      .f4-main-title {
+        font-size: 42px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: #f4f4f7;
+      }
+
+      .f4-stage {
+        position: absolute;
+        top: 200px;
+        left: 120px;
+        right: 120px;
+        height: 670px;
+        display: grid;
+        grid-template-columns: 820px 1fr;
+        gap: 40px;
+        align-items: start;
+      }
+
+      /* Meeting Window Mockup */
+      .f4-meeting-window {
+        background: rgba(19, 19, 22, 0.7);
+        border: 1.5px solid #282832;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.5);
+      }
+
+      .f4-meeting-topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 20px;
+        background: rgba(25, 25, 29, 0.85);
+        border-bottom: 1px solid #282832;
+      }
+
+      .f4-meeting-dots {
+        display: flex;
+        gap: 8px;
+      }
+
+      .f4-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+      .f4-dot-red { background: #f87171; }
+      .f4-dot-yellow { background: #fbbf24; }
+      .f4-dot-green { background: #34d399; }
+
+      .f4-meeting-room {
+        font-size: 13px;
+        font-weight: 600;
+        color: #9d9da8;
+      }
+
+      .f4-meeting-time {
+        font-size: 12px;
+        font-family: "JetBrains Mono", monospace;
+        color: #f87171;
+      }
+
+      .f4-meeting-body {
+        padding: 24px;
+      }
+
+      .f4-interviewer-tile {
+        height: 480px;
+        background: rgba(12, 12, 14, 0.85);
+        border: 1px solid #23232c;
+        border-radius: 12px;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .f4-video-avatar {
+        width: 110px;
+        height: 110px;
+        border-radius: 50%;
+        background: #19191d;
+        border: 2px solid #2e2e38;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 20px;
+      }
+
+      .f4-participant-badge {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #f4f4f7;
+        background: rgba(0, 0, 0, 0.6);
+        padding: 6px 14px;
+        border-radius: 6px;
+      }
+
+      .f4-speech-box {
+        position: absolute;
+        bottom: 24px;
+        left: 24px;
+        right: 24px;
+        background: rgba(25, 25, 29, 0.9);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        border-radius: 10px;
+        padding: 16px 20px;
+        backdrop-filter: blur(12px);
+      }
+
+      .f4-audio-tag {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 700;
+        color: #34d399;
+        margin-bottom: 6px;
+      }
+
+      .f4-audio-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #34d399;
+        box-shadow: 0 0 6px #34d399;
+      }
+
+      .f4-speech-text {
+        font-size: 16px;
+        line-height: 1.5;
+        color: #f4f4f7;
+        font-weight: 500;
+      }
+
+      /* OnCue HUD Panel */
+      .f4-hud-panel {
+        background: rgba(19, 19, 22, 0.88);
+        border: 1.5px solid rgba(56, 189, 248, 0.45);
+        border-radius: 18px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.75), 0 0 35px rgba(56, 189, 248, 0.15);
+        backdrop-filter: blur(24px);
+        overflow: hidden;
+      }
+
+      .f4-hud-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 24px;
+        background: rgba(25, 25, 29, 0.85);
+        border-bottom: 1px solid #282832;
+      }
+
+      .f4-hud-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .f4-hud-live-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #34d399;
+        box-shadow: 0 0 10px #34d399;
+      }
+
+      .f4-hud-title {
+        font-size: 15px;
+        font-weight: 800;
+        color: #f4f4f7;
+        letter-spacing: -0.01em;
+      }
+
+      .f4-hud-sub {
+        font-size: 11px;
+        font-weight: 700;
+        color: #38bdf8;
+        background: rgba(56, 189, 248, 0.15);
+        padding: 2px 8px;
+        border-radius: 4px;
+      }
+
+      .f4-hud-meta {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .f4-hud-latency {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+        color: #34d399;
+      }
+
+      .f4-hotkey-badge {
+        font-size: 12px;
+        font-weight: 600;
+        color: #f4f4f7;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid #2e2e38;
+        padding: 4px 10px;
+        border-radius: 6px;
+      }
+
+      .f4-hud-body {
+        padding: 24px;
+      }
+
+      .f4-intel-header {
+        margin-bottom: 20px;
+      }
+
+      .f4-intel-tag {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #38bdf8;
+        margin-bottom: 4px;
+      }
+
+      .f4-intel-focus {
+        font-size: 14px;
+        color: #9d9da8;
+      }
+
+      .f4-answer-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .f4-answer-bullet {
+        display: flex;
+        gap: 16px;
+        background: rgba(25, 25, 29, 0.75);
+        border: 1px solid #2e2e38;
+        border-radius: 12px;
+        padding: 14px 18px;
+      }
+
+      .f4-bullet-index {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px;
+        font-weight: 800;
+        color: #38bdf8;
+        padding-top: 2px;
+      }
+
+      .f4-bullet-content {
+        flex: 1;
+      }
+
+      .f4-bullet-heading {
+        font-size: 15px;
+        font-weight: 700;
+        color: #f4f4f7;
+        margin-bottom: 4px;
+      }
+
+      .f4-bullet-detail {
+        font-size: 13px;
+        line-height: 1.5;
+        color: #9d9da8;
+      }
+
+      .f4-hud-footer {
+        padding: 12px 24px;
+        background: rgba(12, 12, 14, 0.6);
+        border-top: 1px solid #282832;
+      }
+
+      .f4-stealth-indicator {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: #34d399;
+      }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script>
+      (function () {
+        window.__timelines = window.__timelines || {};
+        var DURATION = 16.107;
+        var tl = gsap.timeline({ paused: true });
+        var scope = "#frame-04-hud-copilot";
+
+        // Scene 1: (0.0s - 2.4s) "第三步，实时护航。"
+        tl.fromTo(scope + " .f4-header",
+          { opacity: 0, y: -20 },
+          { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" },
+          0.3
+        );
+        tl.fromTo(scope + " .f4-meeting-window",
+          { opacity: 0, scale: 0.95 },
+          { opacity: 1, scale: 1, duration: 0.7, ease: "expo.out" },
+          0.8
+        );
+
+        // Scene 2: (2.4s - 5.6s) "真实面试开启置顶 HUD 浮窗。系统内录直听面试官提问，"
+        tl.fromTo(scope + " .f4-speech-box",
+          { opacity: 0, y: 20 },
+          { opacity: 1, y: 0, duration: 0.6, ease: "expo.out" },
+          2.4
+        );
+        tl.fromTo(scope + " .f4-hud-panel",
+          { opacity: 0, y: 50, scale: 0.92 },
+          { opacity: 1, y: 0, scale: 1, duration: 0.8, ease: "expo.out" },
+          3.2
+        );
+
+        // Scene 3: (5.6s - 8.6s) "毫秒级推送结构化回答思路。"
+        tl.fromTo(scope + " .f4-bullet-1",
+          { opacity: 0, x: 25 },
+          { opacity: 1, x: 0, duration: 0.5, ease: "expo.out" },
+          5.6
+        );
+        tl.fromTo(scope + " .f4-bullet-2",
+          { opacity: 0, x: 25 },
+          { opacity: 1, x: 0, duration: 0.5, ease: "expo.out" },
+          6.6
+        );
+        tl.fromTo(scope + " .f4-bullet-3",
+          { opacity: 0, x: 25 },
+          { opacity: 1, x: 0, duration: 0.5, ease: "expo.out" },
+          7.6
+        );
+
+        // Scene 4: (8.6s - 11.9s) "快捷键一键隐形，"
+        // Demonstrate Alt + Space hotkey toggle: HUD fades to near-transparent (0.08)
+        tl.to(scope + " .f4-hotkey-badge", {
+          background: "rgba(56, 189, 248, 0.35)",
+          color: "#38bdf8",
+          scale: 1.1,
+          duration: 0.25,
+          yoyo: true,
+          repeat: 1
+        }, 9.2);
+
+        tl.to(scope + " .f4-hud-panel", {
+          opacity: 0.08,
+          scale: 0.97,
+          duration: 0.6,
+          ease: "power2.inOut"
+        }, 9.6);
+
+        // Scene 5: (11.9s - 15.8s) "全场从容掌控。"
+        // HUD restores gracefully to 100% full opacity
+        tl.to(scope + " .f4-hud-panel", {
+          opacity: 1,
+          scale: 1,
+          duration: 0.6,
+          ease: "power2.out"
+        }, 12.0);
+
+        tl.to(scope + " .f4-hud-panel", {
+          borderColor: "rgba(52, 211, 153, 0.65)",
+          boxShadow: "0 20px 60px rgba(0, 0, 0, 0.75), 0 0 45px rgba(52, 211, 153, 0.25)",
+          duration: 0.8
+        }, 12.8);
+
+        // Anchor full duration
+        tl.to({}, { duration: DURATION }, 0);
+        window.__timelines["04-hud-copilot"] = tl;
+      })();
+    </script>
+  </div>
+</template>

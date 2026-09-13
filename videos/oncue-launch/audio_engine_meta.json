@@ -1,0 +1,1127 @@
+{
+  "tts_provider": "kokoro",
+  "voice_id": "zf_xiaobei",
+  "bgm": null,
+  "bgm_pending": false,
+  "bgm_provider": null,
+  "bgm_pid": null,
+  "bgm_log": null,
+  "bgm_mode": null,
+  "bgm_target_duration_s": null,
+  "bgm_seed_duration_s": null,
+  "bgm_loop_count": null,
+  "voices": [
+    {
+      "id": "01",
+      "path": "assets/voice/01.wav",
+      "duration_s": 11.051,
+      "words": [
+        {
+          "id": "w0",
+          "text": "My",
+          "start": 0.03,
+          "end": 0.14
+        },
+        {
+          "id": "w1",
+          "text": "name",
+          "start": 0.14,
+          "end": 0.36
+        },
+        {
+          "id": "w2",
+          "text": "is",
+          "start": 0.46,
+          "end": 0.55
+        },
+        {
+          "id": "w3",
+          "text": "Yudao",
+          "start": 0.55,
+          "end": 0.85
+        },
+        {
+          "id": "w4",
+          "text": "Diao,",
+          "start": 0.89,
+          "end": 1.27
+        },
+        {
+          "id": "w5",
+          "text": "I",
+          "start": 1.27,
+          "end": 1.28
+        },
+        {
+          "id": "w6",
+          "text": "am",
+          "start": 1.41,
+          "end": 1.49
+        },
+        {
+          "id": "w7",
+          "text": "a",
+          "start": 1.49,
+          "end": 1.56
+        },
+        {
+          "id": "w8",
+          "text": "student",
+          "start": 1.56,
+          "end": 2.04
+        },
+        {
+          "id": "w9",
+          "text": "at",
+          "start": 2.04,
+          "end": 2.18
+        },
+        {
+          "id": "w10",
+          "text": "Wunau.",
+          "start": 2.18,
+          "end": 2.79
+        },
+        {
+          "id": "w11",
+          "text": "I",
+          "start": 2.79,
+          "end": 2.89
+        },
+        {
+          "id": "w12",
+          "text": "am",
+          "start": 2.89,
+          "end": 2.99
+        },
+        {
+          "id": "w13",
+          "text": "a",
+          "start": 2.99,
+          "end": 3.05
+        },
+        {
+          "id": "w14",
+          "text": "student",
+          "start": 3.05,
+          "end": 3.5
+        },
+        {
+          "id": "w15",
+          "text": "at",
+          "start": 3.5,
+          "end": 3.62
+        },
+        {
+          "id": "w16",
+          "text": "the",
+          "start": 3.73,
+          "end": 3.82
+        },
+        {
+          "id": "w17",
+          "text": "University",
+          "start": 3.82,
+          "end": 4.45
+        },
+        {
+          "id": "w18",
+          "text": "of",
+          "start": 4.45,
+          "end": 4.58
+        },
+        {
+          "id": "w19",
+          "text": "China.",
+          "start": 4.58,
+          "end": 5.08
+        },
+        {
+          "id": "w20",
+          "text": "I",
+          "start": 5.08,
+          "end": 5.34
+        },
+        {
+          "id": "w21",
+          "text": "am",
+          "start": 5.34,
+          "end": 5.58
+        },
+        {
+          "id": "w22",
+          "text": "a",
+          "start": 5.58,
+          "end": 5.92
+        },
+        {
+          "id": "w23",
+          "text": "student",
+          "start": 5.92,
+          "end": 6.85
+        },
+        {
+          "id": "w24",
+          "text": "at",
+          "start": 7.09,
+          "end": 7.23
+        },
+        {
+          "id": "w25",
+          "text": "the",
+          "start": 7.23,
+          "end": 7.71
+        },
+        {
+          "id": "w26",
+          "text": "University",
+          "start": 7.71,
+          "end": 9.33
+        },
+        {
+          "id": "w27",
+          "text": "of",
+          "start": 9.33,
+          "end": 9.65
+        },
+        {
+          "id": "w28",
+          "text": "China.",
+          "start": 9.65,
+          "end": 10.93
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "path": "assets/voice/02.wav",
+      "duration_s": 13.013,
+      "words": [
+        {
+          "id": "w0",
+          "text": "If",
+          "start": 0.06,
+          "end": 0.17
+        },
+        {
+          "id": "w1",
+          "text": "you",
+          "start": 0.17,
+          "end": 0.43
+        },
+        {
+          "id": "w2",
+          "text": "have",
+          "start": 0.43,
+          "end": 0.77
+        },
+        {
+          "id": "w3",
+          "text": "any",
+          "start": 0.77,
+          "end": 0.99
+        },
+        {
+          "id": "w4",
+          "text": "questions,",
+          "start": 1.04,
+          "end": 1.86
+        },
+        {
+          "id": "w5",
+          "text": "please",
+          "start": 2.03,
+          "end": 2.54
+        },
+        {
+          "id": "w6",
+          "text": "let",
+          "start": 2.54,
+          "end": 2.81
+        },
+        {
+          "id": "w7",
+          "text": "me",
+          "start": 2.81,
+          "end": 2.96
+        },
+        {
+          "id": "w8",
+          "text": "know",
+          "start": 3.02,
+          "end": 3.35
+        },
+        {
+          "id": "w9",
+          "text": "in",
+          "start": 3.35,
+          "end": 3.53
+        },
+        {
+          "id": "w10",
+          "text": "the",
+          "start": 3.53,
+          "end": 3.8
+        },
+        {
+          "id": "w11",
+          "text": "comments",
+          "start": 3.8,
+          "end": 4.34
+        },
+        {
+          "id": "w12",
+          "text": "below.",
+          "start": 4.58,
+          "end": 4.6
+        },
+        {
+          "id": "w13",
+          "text": "If",
+          "start": 4.66,
+          "end": 4.79
+        },
+        {
+          "id": "w14",
+          "text": "you",
+          "start": 4.79,
+          "end": 5.08
+        },
+        {
+          "id": "w15",
+          "text": "have",
+          "start": 5.08,
+          "end": 5.46
+        },
+        {
+          "id": "w16",
+          "text": "any",
+          "start": 5.46,
+          "end": 5.75
+        },
+        {
+          "id": "w17",
+          "text": "questions,",
+          "start": 5.75,
+          "end": 6.84
+        },
+        {
+          "id": "w18",
+          "text": "please",
+          "start": 6.84,
+          "end": 7.11
+        },
+        {
+          "id": "w19",
+          "text": "let",
+          "start": 7.11,
+          "end": 7.24
+        },
+        {
+          "id": "w20",
+          "text": "me",
+          "start": 7.24,
+          "end": 7.33
+        },
+        {
+          "id": "w21",
+          "text": "know",
+          "start": 7.33,
+          "end": 7.51
+        },
+        {
+          "id": "w22",
+          "text": "in",
+          "start": 7.51,
+          "end": 7.56
+        },
+        {
+          "id": "w23",
+          "text": "the",
+          "start": 7.62,
+          "end": 7.73
+        },
+        {
+          "id": "w24",
+          "text": "comments",
+          "start": 7.73,
+          "end": 8.09
+        },
+        {
+          "id": "w25",
+          "text": "below.",
+          "start": 8.09,
+          "end": 8.48
+        },
+        {
+          "id": "w26",
+          "text": "If",
+          "start": 8.54,
+          "end": 8.6
+        },
+        {
+          "id": "w27",
+          "text": "you",
+          "start": 8.6,
+          "end": 8.77
+        },
+        {
+          "id": "w28",
+          "text": "have",
+          "start": 8.83,
+          "end": 9.02
+        },
+        {
+          "id": "w29",
+          "text": "any",
+          "start": 9.02,
+          "end": 9.12
+        },
+        {
+          "id": "w30",
+          "text": "questions,",
+          "start": 9.21,
+          "end": 9.85
+        },
+        {
+          "id": "w31",
+          "text": "please",
+          "start": 9.85,
+          "end": 10.22
+        },
+        {
+          "id": "w32",
+          "text": "let",
+          "start": 10.22,
+          "end": 10.34
+        },
+        {
+          "id": "w33",
+          "text": "me",
+          "start": 10.49,
+          "end": 10.52
+        },
+        {
+          "id": "w34",
+          "text": "know",
+          "start": 10.52,
+          "end": 10.76
+        },
+        {
+          "id": "w35",
+          "text": "in",
+          "start": 10.76,
+          "end": 10.88
+        },
+        {
+          "id": "w36",
+          "text": "the",
+          "start": 10.88,
+          "end": 11.06
+        },
+        {
+          "id": "w37",
+          "text": "comments",
+          "start": 11.06,
+          "end": 11.54
+        },
+        {
+          "id": "w38",
+          "text": "below.",
+          "start": 11.54,
+          "end": 12.06
+        },
+        {
+          "id": "w39",
+          "text": "Thank",
+          "start": 12.14,
+          "end": 12.53
+        },
+        {
+          "id": "w40",
+          "text": "you.",
+          "start": 12.53,
+          "end": 13.07
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "path": "assets/voice/03.wav",
+      "duration_s": 13.333,
+      "words": [
+        {
+          "id": "w0",
+          "text": "The",
+          "start": 0.04,
+          "end": 0.26
+        },
+        {
+          "id": "w1",
+          "text": "airbusy",
+          "start": 0.26,
+          "end": 0.83
+        },
+        {
+          "id": "w2",
+          "text": "at",
+          "start": 0.92,
+          "end": 1
+        },
+        {
+          "id": "w3",
+          "text": "Santu",
+          "start": 1.16,
+          "end": 1.45
+        },
+        {
+          "id": "w4",
+          "text": "Elya",
+          "start": 1.45,
+          "end": 1.78
+        },
+        {
+          "id": "w5",
+          "text": "Monisensee.",
+          "start": 1.78,
+          "end": 2.73
+        },
+        {
+          "id": "w6",
+          "text": "My",
+          "start": 3,
+          "end": 3.1
+        },
+        {
+          "id": "w7",
+          "text": "answer",
+          "start": 3.1,
+          "end": 3.5
+        },
+        {
+          "id": "w8",
+          "text": "is,",
+          "start": 3.63,
+          "end": 3.79
+        },
+        {
+          "id": "w9",
+          "text": "I'm",
+          "start": 3.88,
+          "end": 3.96
+        },
+        {
+          "id": "w10",
+          "text": "not",
+          "start": 4.12,
+          "end": 4.25
+        },
+        {
+          "id": "w11",
+          "text": "a",
+          "start": 4.25,
+          "end": 4.31
+        },
+        {
+          "id": "w12",
+          "text": "fan",
+          "start": 4.35,
+          "end": 4.54
+        },
+        {
+          "id": "w13",
+          "text": "of",
+          "start": 4.54,
+          "end": 4.68
+        },
+        {
+          "id": "w14",
+          "text": "Santu",
+          "start": 4.68,
+          "end": 5.04
+        },
+        {
+          "id": "w15",
+          "text": "Elya",
+          "start": 5.04,
+          "end": 5.32
+        },
+        {
+          "id": "w16",
+          "text": "Monisensee.",
+          "start": 5.32,
+          "end": 6.35
+        },
+        {
+          "id": "w17",
+          "text": "I'm",
+          "start": 6.4,
+          "end": 6.52
+        },
+        {
+          "id": "w18",
+          "text": "a",
+          "start": 6.52,
+          "end": 6.57
+        },
+        {
+          "id": "w19",
+          "text": "fan",
+          "start": 6.57,
+          "end": 6.7
+        },
+        {
+          "id": "w20",
+          "text": "of",
+          "start": 6.79,
+          "end": 6.85
+        },
+        {
+          "id": "w21",
+          "text": "the",
+          "start": 6.85,
+          "end": 6.95
+        },
+        {
+          "id": "w22",
+          "text": "city",
+          "start": 7.03,
+          "end": 7.19
+        },
+        {
+          "id": "w23",
+          "text": "of",
+          "start": 7.28,
+          "end": 7.34
+        },
+        {
+          "id": "w24",
+          "text": "Santu",
+          "start": 7.52,
+          "end": 7.62
+        },
+        {
+          "id": "w25",
+          "text": "Elya",
+          "start": 7.62,
+          "end": 7.83
+        },
+        {
+          "id": "w26",
+          "text": "Monisensee.",
+          "start": 7.83,
+          "end": 8.6
+        },
+        {
+          "id": "w27",
+          "text": "I'm",
+          "start": 8.68,
+          "end": 8.83
+        },
+        {
+          "id": "w28",
+          "text": "a",
+          "start": 8.83,
+          "end": 8.89
+        },
+        {
+          "id": "w29",
+          "text": "fan",
+          "start": 8.89,
+          "end": 9.09
+        },
+        {
+          "id": "w30",
+          "text": "of",
+          "start": 9.09,
+          "end": 9.22
+        },
+        {
+          "id": "w31",
+          "text": "the",
+          "start": 9.23,
+          "end": 9.42
+        },
+        {
+          "id": "w32",
+          "text": "city",
+          "start": 9.42,
+          "end": 9.64
+        },
+        {
+          "id": "w33",
+          "text": "of",
+          "start": 9.8,
+          "end": 9.81
+        },
+        {
+          "id": "w34",
+          "text": "Santu",
+          "start": 9.81,
+          "end": 10.13
+        },
+        {
+          "id": "w35",
+          "text": "Elya",
+          "start": 10.13,
+          "end": 10.38
+        },
+        {
+          "id": "w36",
+          "text": "Monisensee.",
+          "start": 10.38,
+          "end": 11.32
+        },
+        {
+          "id": "w37",
+          "text": "I'm",
+          "start": 11.36,
+          "end": 11.46
+        },
+        {
+          "id": "w38",
+          "text": "a",
+          "start": 11.46,
+          "end": 11.51
+        },
+        {
+          "id": "w39",
+          "text": "fan",
+          "start": 11.51,
+          "end": 11.66
+        },
+        {
+          "id": "w40",
+          "text": "of",
+          "start": 11.66,
+          "end": 11.74
+        },
+        {
+          "id": "w41",
+          "text": "the",
+          "start": 11.74,
+          "end": 11.9
+        },
+        {
+          "id": "w42",
+          "text": "city",
+          "start": 11.91,
+          "end": 12.11
+        },
+        {
+          "id": "w43",
+          "text": "of",
+          "start": 12.11,
+          "end": 12.15
+        },
+        {
+          "id": "w44",
+          "text": "Santu",
+          "start": 12.24,
+          "end": 12.45
+        },
+        {
+          "id": "w45",
+          "text": "Elya",
+          "start": 12.48,
+          "end": 12.63
+        },
+        {
+          "id": "w46",
+          "text": "Monisensee.",
+          "start": 12.63,
+          "end": 13.32
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "path": "assets/voice/04.wav",
+      "duration_s": 16.107,
+      "words": [
+        {
+          "id": "w0",
+          "text": "The",
+          "start": 0.04,
+          "end": 0.18
+        },
+        {
+          "id": "w1",
+          "text": "sample",
+          "start": 0.25,
+          "end": 0.59
+        },
+        {
+          "id": "w2",
+          "text": "is",
+          "start": 0.7,
+          "end": 0.82
+        },
+        {
+          "id": "w3",
+          "text": "a",
+          "start": 0.82,
+          "end": 0.89
+        },
+        {
+          "id": "w4",
+          "text": "full-on-the-end-the-emiancy,",
+          "start": 0.89,
+          "end": 2.98
+        },
+        {
+          "id": "w5",
+          "text": "kai-chi-zie.",
+          "start": 3.09,
+          "end": 3.83
+        },
+        {
+          "id": "w6",
+          "text": "The",
+          "start": 4.18,
+          "end": 4.31
+        },
+        {
+          "id": "w7",
+          "text": "HUD",
+          "start": 4.4,
+          "end": 4.59
+        },
+        {
+          "id": "w8",
+          "text": "is",
+          "start": 4.59,
+          "end": 4.73
+        },
+        {
+          "id": "w9",
+          "text": "a",
+          "start": 4.73,
+          "end": 4.74
+        },
+        {
+          "id": "w10",
+          "text": "full-on-the-end-the-emiancy,",
+          "start": 4.84,
+          "end": 6.87
+        },
+        {
+          "id": "w11",
+          "text": "ting-miancy.",
+          "start": 6.97,
+          "end": 7.97
+        },
+        {
+          "id": "w12",
+          "text": "The",
+          "start": 8.18,
+          "end": 8.43
+        },
+        {
+          "id": "w13",
+          "text": "sample",
+          "start": 8.43,
+          "end": 9
+        },
+        {
+          "id": "w14",
+          "text": "is",
+          "start": 9,
+          "end": 9.06
+        },
+        {
+          "id": "w15",
+          "text": "a",
+          "start": 9.2,
+          "end": 9.28
+        },
+        {
+          "id": "w16",
+          "text": "full-on-the-emiancy,",
+          "start": 9.28,
+          "end": 11.1
+        },
+        {
+          "id": "w17",
+          "text": "kai-chi-zie.",
+          "start": 11.3,
+          "end": 12.68
+        },
+        {
+          "id": "w18",
+          "text": "The",
+          "start": 12.72,
+          "end": 12.85
+        },
+        {
+          "id": "w19",
+          "text": "HUD",
+          "start": 12.94,
+          "end": 13.13
+        },
+        {
+          "id": "w20",
+          "text": "is",
+          "start": 13.13,
+          "end": 13.27
+        },
+        {
+          "id": "w21",
+          "text": "a",
+          "start": 13.27,
+          "end": 13.28
+        },
+        {
+          "id": "w22",
+          "text": "full-on-the-emiancy,",
+          "start": 13.38,
+          "end": 14.92
+        },
+        {
+          "id": "w23",
+          "text": "ting-miancy.",
+          "start": 14.92,
+          "end": 16.08
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "path": "assets/voice/05.wav",
+      "duration_s": 10.283,
+      "words": [
+        {
+          "id": "w0",
+          "text": "The",
+          "start": 0.02,
+          "end": 0.24
+        },
+        {
+          "id": "w1",
+          "text": "company",
+          "start": 0.24,
+          "end": 0.76
+        },
+        {
+          "id": "w2",
+          "text": "is",
+          "start": 0.87,
+          "end": 0.97
+        },
+        {
+          "id": "w3",
+          "text": "a",
+          "start": 0.97,
+          "end": 1.05
+        },
+        {
+          "id": "w4",
+          "text": "company",
+          "start": 1.05,
+          "end": 1.62
+        },
+        {
+          "id": "w5",
+          "text": "that",
+          "start": 1.62,
+          "end": 1.95
+        },
+        {
+          "id": "w6",
+          "text": "is",
+          "start": 1.95,
+          "end": 2.11
+        },
+        {
+          "id": "w7",
+          "text": "focused",
+          "start": 2.11,
+          "end": 2.68
+        },
+        {
+          "id": "w8",
+          "text": "on",
+          "start": 2.68,
+          "end": 2.8
+        },
+        {
+          "id": "w9",
+          "text": "the",
+          "start": 2.87,
+          "end": 3.08
+        },
+        {
+          "id": "w10",
+          "text": "development",
+          "start": 3.08,
+          "end": 3.98
+        },
+        {
+          "id": "w11",
+          "text": "of",
+          "start": 3.98,
+          "end": 4.14
+        },
+        {
+          "id": "w12",
+          "text": "the",
+          "start": 4.14,
+          "end": 4.38
+        },
+        {
+          "id": "w13",
+          "text": "company.",
+          "start": 4.38,
+          "end": 5.11
+        },
+        {
+          "id": "w14",
+          "text": "It",
+          "start": 5.3,
+          "end": 5.45
+        },
+        {
+          "id": "w15",
+          "text": "is",
+          "start": 5.45,
+          "end": 5.62
+        },
+        {
+          "id": "w16",
+          "text": "a",
+          "start": 5.62,
+          "end": 5.7
+        },
+        {
+          "id": "w17",
+          "text": "company",
+          "start": 5.7,
+          "end": 6.32
+        },
+        {
+          "id": "w18",
+          "text": "that",
+          "start": 6.32,
+          "end": 6.63
+        },
+        {
+          "id": "w19",
+          "text": "is",
+          "start": 6.74,
+          "end": 6.84
+        },
+        {
+          "id": "w20",
+          "text": "focused",
+          "start": 6.84,
+          "end": 7.43
+        },
+        {
+          "id": "w21",
+          "text": "on",
+          "start": 7.57,
+          "end": 7.63
+        },
+        {
+          "id": "w22",
+          "text": "the",
+          "start": 7.63,
+          "end": 7.89
+        },
+        {
+          "id": "w23",
+          "text": "development",
+          "start": 7.89,
+          "end": 8.74
+        },
+        {
+          "id": "w24",
+          "text": "of",
+          "start": 8.87,
+          "end": 9.04
+        },
+        {
+          "id": "w25",
+          "text": "the",
+          "start": 9.04,
+          "end": 9.3
+        },
+        {
+          "id": "w26",
+          "text": "company.",
+          "start": 9.3,
+          "end": 10.28
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "path": "assets/voice/06.wav",
+      "duration_s": 10.368,
+      "words": [
+        {
+          "id": "w0",
+          "text": "If",
+          "start": 0.13,
+          "end": 1.94
+        },
+        {
+          "id": "w1",
+          "text": "you",
+          "start": 2.01,
+          "end": 2.48
+        },
+        {
+          "id": "w2",
+          "text": "like",
+          "start": 2.48,
+          "end": 3.01
+        },
+        {
+          "id": "w3",
+          "text": "this",
+          "start": 3.13,
+          "end": 3.76
+        },
+        {
+          "id": "w4",
+          "text": "video,",
+          "start": 3.76,
+          "end": 4.88
+        },
+        {
+          "id": "w5",
+          "text": "please",
+          "start": 4.88,
+          "end": 5.77
+        },
+        {
+          "id": "w6",
+          "text": "like,",
+          "start": 5.91,
+          "end": 6.8
+        },
+        {
+          "id": "w7",
+          "text": "share,",
+          "start": 6.8,
+          "end": 7.92
+        },
+        {
+          "id": "w8",
+          "text": "and",
+          "start": 7.92,
+          "end": 8.4
+        },
+        {
+          "id": "w9",
+          "text": "subscribe!",
+          "start": 8.4,
+          "end": 10.28
+        }
+      ]
+    }
+  ],
+  "sfx": [],
+  "total_duration_s": 74.155
+}

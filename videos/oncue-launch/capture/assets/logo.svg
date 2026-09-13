@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="logo-title logo-desc">
+  <title id="logo-title">OnCue</title>
+  <desc id="logo-desc">Two offset planes divided by a flowing negative-space cut</desc>
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="#171717"/>
+  <path fill="#F7F7F8" d="M406 204c-58 2-106 36-130 88l-82 176c-22 48-14 104 22 144l166 186c38 44 98 60 152 38l218-86c54-22 88-74 80-132l-42-284c-8-56-50-100-106-112l-222-24c-19-2-38 0-56 6Z"/>
+  <path d="M178 718c138-22 198-132 294-178 92-44 190-18 370-238" fill="none" stroke="#171717" stroke-width="96" stroke-linecap="round"/>
+</svg>

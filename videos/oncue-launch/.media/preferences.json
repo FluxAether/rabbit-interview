@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "preferences": {
+    "destination": {
+      "value": "landing-hero",
+      "confirmed_in": [
+        "oncue-launch"
+      ],
+      "updated_at": "2026-09-12T17:23:05.479Z"
+    },
+    "aspect": {
+      "value": "1920x1080",
+      "confirmed_in": [
+        "oncue-launch"
+      ],
+      "updated_at": "2026-09-12T17:23:05.507Z"
+    },
+    "language": {
+      "value": "zh",
+      "confirmed_in": [
+        "oncue-launch"
+      ],
+      "updated_at": "2026-09-12T17:23:05.537Z"
+    },
+    "flow": {
+      "value": "automation",
+      "confirmed_in": [
+        "oncue-launch"
+      ],
+      "updated_at": "2026-09-12T17:23:05.566Z"
+    },
+    "storyboard": {
+      "value": "yes",
+      "confirmed_in": [
+        "oncue-launch"
+      ],
+      "updated_at": "2026-09-12T17:23:05.593Z"
+    },
+    "style_preset.product-launch-video": {
+      "value": "blue-professional",
+      "confirmed_in": [
+        "oncue-launch"
+      ],
+      "updated_at": "2026-09-12T17:24:13.129Z"
+    }
+  },
+  "sightings": {}
+}

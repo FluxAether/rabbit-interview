@@ -1,0 +1,217 @@
+<template id="captions-template" data-composition-id="captions" data-width="1920" data-height="1080">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+
+
+<style data-brand-tokens="">
+      :root {
+      --bg: #0c0c0e;
+      --surface: #19191d;
+      --primary: #38bdf8;
+      --primary-glow: rgba(56, 189, 248, 0.25);
+      --text: #f4f4f7;
+      --text-muted: #9d9da8;
+      --text-light: #6b7280;
+      --accent-light: rgba(56, 189, 248, 0.08);
+      --accent-medium: rgba(56, 189, 248, 0.15);
+      --border: #2e2e38;
+      --card-bg: #131316;
+      --card-surface: #19191d;
+      --positive: #34d399;
+      --negative: #f87171;
+      --cap-ink: #f4f4f7;
+      --cap-canvas: #0c0c0e;
+      --cap-accent: #38bdf8;
+      --cap-accent-2: #6b7280;
+      --font-display: "Inter", system-ui, serif;
+      --font-body: "Inter", system-ui, sans-serif;
+      --cap-band-top: 900px;
+      --cap-band-height: 180px;
+      }
+    </style>
+
+<style>
+  #captions-root {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .caption-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    pointer-events: none;
+  }
+  /* the keep-out band, from captionBand(H) — frame content stays above it */
+  .caption-stage {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: var(--cap-band-top, 900px);
+    height: var(--cap-band-height, 180px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .caption-group {
+    /* every group is absolutely stacked over the SAME band — exactly one shown at a
+       time via opacity. Must be absolute: in-flow groups would lay out side-by-side. */
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+  }
+
+  /* THE tinted card — 4% cobalt fill, 1.5px 20%-cobalt border, soft 14px corners,
+     NO shadow (the tinted card does the lift; cast depth is forbidden) */
+  .caption-pill {
+    max-width: 78%;
+    padding: 20px 44px 24px;
+    background: color-mix(in srgb, var(--cap-accent, #1e2bfa) 4%, var(--cap-canvas, #fdfae7));
+    border: 1.5px solid color-mix(in srgb, var(--cap-accent, #1e2bfa) 20%, transparent);
+    border-radius: 14px;
+  }
+  .caption-line {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.1em 0.34em;
+    font-family: "Inter", system-ui, sans-serif;
+    font-weight: 600;
+    font-size: clamp(40px, 4.4vw, 58px);
+    line-height: 1.16;
+    letter-spacing: -0.02em;
+  }
+
+  /* upcoming — muted gray, no chip */
+  .caption-word {
+    display: inline-block;
+    padding: 0 0.18em;
+    border-radius: 0.32em;
+    color: color-mix(in srgb, var(--cap-ink, #111111) 52%, var(--cap-canvas, #fdfae7));
+  }
+  /* current word — THE solid cobalt chip (the single-accent gesture; pill-rounded
+     fill, NO shadow), cream reading on top */
+  .caption-word.is-active {
+    color: var(--cap-canvas, #fdfae7);
+    background: var(--cap-accent, #1e2bfa);
+    box-shadow: none;
+  }
+  /* already spoken — solid near-black ink, chip cleared */
+  .caption-word.is-spoken {
+    color: var(--cap-ink, #111111);
+    background: transparent;
+    box-shadow: none;
+  }
+
+  /* optional per-word accents (dormant until a word-classer tags them) */
+  /* brand / key term — cobalt, the system's one accent on a key word */
+  .caption-word.cap-brand {
+    color: var(--cap-accent, #1e2bfa);
+  }
+  /* numerals / data — cobalt 700, the figure voice */
+  .caption-word.cap-num {
+    font-family: "Inter", system-ui, sans-serif;
+    font-weight: 700;
+    color: var(--cap-accent, #1e2bfa);
+  }
+  /* emphasis — a directional-red hairline underline (inline only, never a fill) */
+  .caption-word.cap-cta {
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-decoration-color: var(--cap-accent-2, #dc2626);
+    text-underline-offset: 0.1em;
+  }
+
+  @media (max-aspect-ratio: 9/16) {
+    .caption-pill {
+      max-width: 92%;
+    }
+    .caption-line {
+      font-size: clamp(34px, 5.4vw, 48px);
+    }
+  }
+</style>
+
+<div data-hf-id="hf-b030" id="captions-root" data-composition-id="captions" data-timeline-locked="" data-start="0" data-duration="74.155" data-fps="30" data-width="1920" data-height="1080">
+  <div data-hf-id="hf-9flp" class="caption-layer" aria-hidden="true">
+    <div data-hf-id="hf-ajrg" id="caption-stage" class="caption-stage"></div>
+  </div>
+</div>
+
+<script>
+  // captions.mjs injects the engine's scene-aware groups + real duration here.
+  var GROUPS = [{"id": "caption-group-0", "frame": 1, "start": 0.4, "end": 2.824, "text": "面试遇到刁钻提问？", "words": [{"id": "caption-word-0-0", "text": "面试遇到刁钻提问？", "start": 0.4, "end": 2.704}]}, {"id": "caption-group-1", "frame": 1, "start": 2.9, "end": 5.012, "text": "脑子瞬间卡壳？", "words": [{"id": "caption-word-1-0", "text": "脑子瞬间卡壳？", "start": 2.9, "end": 4.892}]}, {"id": "caption-group-2", "frame": 1, "start": 5.1, "end": 7.38, "text": "你需要的不只是准备，", "words": [{"id": "caption-word-2-0", "text": "你需要的不只是准备，", "start": 5.1, "end": 7.26}]}, {"id": "caption-group-3", "frame": 1, "start": 7.5, "end": 10.908, "text": "而是一个随时在视线里护航的副驾。", "words": [{"id": "caption-word-3-0", "text": "而是一个随时在视线里护航的副驾。", "start": 7.5, "end": 10.788}]}, {"id": "caption-group-4", "frame": 2, "start": 11.301, "end": 13.437, "text": "第一步，靶向对齐。", "words": [{"id": "caption-word-4-0", "text": "第一步，靶向对齐。", "start": 11.301, "end": 13.317}]}, {"id": "caption-group-5", "frame": 2, "start": 13.451, "end": 15.923, "text": "导入简历与目标岗位，", "words": [{"id": "caption-word-5-0", "text": "导入简历与目标岗位，", "start": 13.451, "end": 15.803}]}, {"id": "caption-group-6", "frame": 2, "start": 15.851, "end": 18.227, "text": "AI 深度解析匹配度，", "words": [{"id": "caption-word-6-0", "text": "AI 深度解析匹配度，", "start": 15.851, "end": 18.107}]}, {"id": "caption-group-7", "frame": 2, "start": 18.201, "end": 21.561, "text": "自动提炼量化亮点与核心关键词，", "words": [{"id": "caption-word-7-0", "text": "自动提炼量化亮点与核心关键词，", "start": 18.201, "end": 21.441}]}, {"id": "caption-group-8", "frame": 2, "start": 21.501, "end": 24.117, "text": "让每一次投递都直击要害。", "words": [{"id": "caption-word-8-0", "text": "让每一次投递都直击要害。", "start": 21.501, "end": 23.997}]}, {"id": "caption-group-9", "frame": 3, "start": 24.364, "end": 26.62, "text": "第二步，实战对练。", "words": [{"id": "caption-word-9-0", "text": "第二步，实战对练。", "start": 24.364, "end": 26.5}]}, {"id": "caption-group-10", "frame": 3, "start": 26.514, "end": 28.698, "text": "模拟真实面试场景，", "words": [{"id": "caption-word-10-0", "text": "模拟真实面试场景，", "start": 26.514, "end": 28.578}]}, {"id": "caption-group-11", "frame": 3, "start": 28.664, "end": 31.088, "text": "全语音多轮深度交锋。", "words": [{"id": "caption-word-11-0", "text": "全语音多轮深度交锋。", "start": 28.664, "end": 30.968}]}, {"id": "caption-group-12", "frame": 3, "start": 31.014, "end": 34.326, "text": "练逻辑、练表达、抗压复盘，", "words": [{"id": "caption-word-12-0", "text": "练逻辑、练表达、抗压复盘，", "start": 31.014, "end": 34.206}]}, {"id": "caption-group-13", "frame": 3, "start": 34.264, "end": 37.168, "text": "在真正上场前胸有成竹。", "words": [{"id": "caption-word-13-0", "text": "在真正上场前胸有成竹。", "start": 34.264, "end": 37.048}]}, {"id": "caption-group-14", "frame": 4, "start": 37.697, "end": 40.001, "text": "第三步，实时护航。", "words": [{"id": "caption-word-14-0", "text": "第三步，实时护航。", "start": 37.697, "end": 39.881}]}, {"id": "caption-group-15", "frame": 4, "start": 39.941, "end": 43.277, "text": "真实面试开启置顶 HUD 浮窗。", "words": [{"id": "caption-word-15-0", "text": "真实面试开启置顶 HUD 浮窗。", "start": 39.941, "end": 43.157}]}, {"id": "caption-group-16", "frame": 4, "start": 43.217, "end": 45.857, "text": "系统内录直听面试官提问，", "words": [{"id": "caption-word-16-0", "text": "系统内录直听面试官提问，", "start": 43.217, "end": 45.737}]}, {"id": "caption-group-17", "frame": 4, "start": 45.797, "end": 48.725, "text": "毫秒级推送结构化回答思路。", "words": [{"id": "caption-word-17-0", "text": "毫秒级推送结构化回答思路。", "start": 45.797, "end": 48.605}]}, {"id": "caption-group-18", "frame": 4, "start": 48.747, "end": 50.811, "text": "快捷键一键隐形，", "words": [{"id": "caption-word-18-0", "text": "快捷键一键隐形，", "start": 48.747, "end": 50.691}]}, {"id": "caption-group-19", "frame": 4, "start": 50.847, "end": 52.863, "text": "全场从容掌控。", "words": [{"id": "caption-word-19-0", "text": "全场从容掌控。", "start": 50.847, "end": 52.743}]}, {"id": "caption-group-20", "frame": 5, "start": 53.754, "end": 56.226, "text": "本地优先，隐私无忧。", "words": [{"id": "caption-word-20-0", "text": "本地优先，隐私无忧。", "start": 53.754, "end": 56.106}]}, {"id": "caption-group-21", "frame": 5, "start": 56.154, "end": 59.01, "text": "数据与记录完全存留本机，", "words": [{"id": "caption-word-21-0", "text": "数据与记录完全存留本机，", "start": 56.154, "end": 58.89}]}, {"id": "caption-group-22", "frame": 5, "start": 58.904, "end": 61.424, "text": "支持自备 API Key，", "words": [{"id": "caption-word-22-0", "text": "支持自备 API Key，", "start": 58.904, "end": 61.304}]}, {"id": "caption-group-23", "frame": 5, "start": 61.304, "end": 63.56, "text": "自由接入主流大模型。", "words": [{"id": "caption-word-23-0", "text": "自由接入主流大模型。", "start": 61.304, "end": 63.44}]}, {"id": "caption-group-24", "frame": 6, "start": 64.087, "end": 66.775, "text": "从简历定制到真实面试，", "words": [{"id": "caption-word-24-0", "text": "从简历定制到真实面试，", "start": 64.087, "end": 66.655}]}, {"id": "caption-group-25", "frame": 6, "start": 66.715, "end": 68.515, "text": "一站式闭环。", "words": [{"id": "caption-word-25-0", "text": "一站式闭环。", "start": 66.715, "end": 68.395}]}, {"id": "caption-group-26", "frame": 6, "start": 68.455, "end": 70.615, "text": "立即下载 OnCue，", "words": [{"id": "caption-word-26-0", "text": "立即下载 OnCue，", "start": 68.455, "end": 70.495}]}, {"id": "caption-group-27", "frame": 6, "start": 70.555, "end": 73.195, "text": "开启你的下一场从容面试。", "words": [{"id": "caption-word-27-0", "text": "开启你的下一场从容面试。", "start": 70.555, "end": 73.075}]}];
+  var DURATION = 74.155;
+
+  (function () {
+    var stage = document.getElementById("caption-stage");
+
+    // build DOM: one .caption-group per group, .caption-word per word
+    GROUPS.forEach(function (group, g) {
+      var groupEl = document.createElement("div");
+      groupEl.className = "caption-group";
+      groupEl.id = "caption-group-" + g;
+      var pill = document.createElement("div");
+      pill.className = "caption-pill";
+      var line = document.createElement("div");
+      line.className = "caption-line";
+      (group.words || []).forEach(function (w, i) {
+        var span = document.createElement("span");
+        span.className = "caption-word";
+        span.id = "caption-word-" + g + "-" + i;
+        span.textContent = String(w.text);
+        line.appendChild(span);
+      });
+      pill.appendChild(line);
+      groupEl.appendChild(pill);
+      stage.appendChild(groupEl);
+    });
+
+    window.__timelines = window.__timelines || {};
+    var tl = gsap.timeline({ paused: true });
+
+    GROUPS.forEach(function (group, g) {
+      var groupEl = document.getElementById("caption-group-" + g);
+      var words = group.words || [];
+      var next = GROUPS[g + 1];
+      var isLast = g === GROUPS.length - 1;
+      var start = Math.max(0, Number(group.start));
+      var end = isLast ? DURATION : Math.min(Number(next.start), Number(group.end) + 0.3);
+      if (end <= start) end = start + 0.01;
+
+      // group on/off — exactly one group visible at a time
+      tl.set(groupEl, { opacity: 1 }, start);
+      tl.set(groupEl, { opacity: 0 }, end);
+
+      // 3-state karaoke via className SETS — seek-safe (gsap.set applies on the
+      // engine's frame-by-frame seek; .call callbacks would NOT fire).
+      words.forEach(function (w, i) {
+        var el = document.getElementById("caption-word-" + g + "-" + i);
+        var at = Math.max(start, Number(w.start));
+        tl.set(el, { className: "caption-word" }, start); // upcoming (also resets on reverse-seek)
+        tl.set(el, { className: "caption-word is-active" }, at); // current
+        tl.fromTo(el, { scale: 0.985 }, { scale: 1, duration: 0.18, ease: "power1.out" }, at);
+        if (i + 1 < words.length) {
+          var nextAt = Math.max(start, Number(words[i + 1].start));
+          tl.set(el, { className: "caption-word is-spoken" }, nextAt); // demote when next activates
+        }
+      });
+      if (words.length) {
+        var lastEl = document.getElementById("caption-word-" + g + "-" + (words.length - 1));
+        var lastSpoken = Math.min(end, Number(words[words.length - 1].end) + 0.1);
+        tl.set(lastEl, { className: "caption-word is-spoken" }, lastSpoken);
+      }
+    });
+
+    // full-span anchor so the sub-comp timeline spans the whole video
+    tl.to({}, { duration: DURATION }, 0);
+    window.__timelines["captions"] = tl;
+  })();
+</script>
+
+<style>
+  .caption-line { line-height: 1.1 !important; }
+</style>
+</template>

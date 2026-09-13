@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Apple, ArrowUpRight, Menu, X } from 'lucide-react'
+import { Apple, ArrowUpRight, Menu, Play, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import AuthPage from './components/AuthPage'
 import CopilotPanel from './components/CopilotPanel'
@@ -7,6 +7,7 @@ import FeatureCards from './components/FeatureCards'
 import GitHubIcon from './components/GitHubIcon'
 import PricingSection from './components/PricingSection'
 import WindowsIcon from './components/WindowsIcon'
+import VideoSection from './components/VideoSection'
 import { DOWNLOAD, copy, type Lang } from './locales/content'
 import { landingLangFromStore, writeLandingLang } from './locales/lang'
 
@@ -84,6 +85,7 @@ function LandingPage() {
           </a>
 
           <nav className="hidden items-center gap-7 text-sm text-mute md:flex" aria-label="primary">
+            <a href="#video" className="transition-colors hover:text-ink">{t.nav.video}</a>
             <a href="#features" className="transition-colors hover:text-ink">{t.nav.features}</a>
             <a href="#pricing" className="transition-colors hover:text-ink">{t.nav.pricing}</a>
             <a href="#privacy" className="transition-colors hover:text-ink">{t.nav.privacy}</a>
@@ -138,6 +140,7 @@ function LandingPage() {
         {menuOpen ? (
           <nav className="border-t border-white/5 px-5 py-3 md:hidden" aria-label="mobile">
             <div className="flex flex-col gap-3 text-sm">
+              <a href="#video" onClick={() => setMenuOpen(false)}>{t.nav.video}</a>
               <a href="#features" onClick={() => setMenuOpen(false)}>{t.nav.features}</a>
               <a href="#pricing" onClick={() => setMenuOpen(false)}>{t.nav.pricing}</a>
               <a href="#privacy" onClick={() => setMenuOpen(false)}>{t.nav.privacy}</a>
@@ -176,24 +179,31 @@ function LandingPage() {
               <div className="mt-8 flex flex-wrap items-center gap-3">
                 <a
                   href={DOWNLOAD.mac}
-                  className="inline-flex h-12 items-center gap-2 rounded-2xl bg-ink px-5 text-sm font-medium text-canvas transition-opacity hover:opacity-90"
+                  className="inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl bg-ink px-5 text-sm font-medium text-canvas transition-all hover:opacity-90 active:scale-[0.98]"
                 >
                   <Apple className="h-4 w-4" />
                   {t.downloadMac}
                 </a>
                 <a
                   href={DOWNLOAD.win}
-                  className="inline-flex h-12 items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.03] px-5 text-sm font-medium text-ink transition-colors hover:border-white/25 hover:bg-white/[0.06]"
+                  className="inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl border border-white/15 bg-white/[0.03] px-5 text-sm font-medium text-ink transition-all hover:border-white/25 hover:bg-white/[0.06] active:scale-[0.98]"
                 >
                   <WindowsIcon className="h-4 w-4" />
                   {t.downloadWin}
                 </a>
                 <a
                   href={DOWNLOAD.repo}
-                  className="inline-flex h-12 items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.03] px-5 text-sm text-ink transition-colors hover:border-white/25 hover:bg-white/[0.06]"
+                  className="inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl border border-white/15 bg-white/[0.03] px-5 text-sm text-ink transition-all hover:border-white/25 hover:bg-white/[0.06] active:scale-[0.98]"
                 >
                   <GitHubIcon className="h-4 w-4" />
                   {t.viewGithub}
+                </a>
+                <a
+                  href="#video"
+                  className="inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl border border-sky-400/30 bg-sky-400/[0.08] px-5 text-sm font-medium text-sky-200 transition-all hover:border-sky-400/50 hover:bg-sky-400/[0.14] active:scale-[0.98]"
+                >
+                  <Play className="h-3.5 w-3.5 fill-current" />
+                  {t.watchVideo}
                 </a>
               </div>
               <p className="mt-4 max-w-md text-[12px] leading-5 text-mute/80">{t.heroFine}</p>
@@ -211,6 +221,7 @@ function LandingPage() {
           </div>
         </section>
 
+        <VideoSection t={t} />
         <FeatureCards t={t} />
         <PricingSection t={t} />
 
