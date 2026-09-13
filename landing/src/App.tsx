@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Apple, ArrowUpRight, Menu, Play, X } from 'lucide-react'
+import { Apple, ArrowUpRight, Menu, Moon, Play, Sun, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import AuthPage from './components/AuthPage'
 import CopilotPanel from './components/CopilotPanel'
@@ -8,6 +8,7 @@ import GitHubIcon from './components/GitHubIcon'
 import PricingSection from './components/PricingSection'
 import WindowsIcon from './components/WindowsIcon'
 import VideoSection from './components/VideoSection'
+import { useTheme } from './lib/theme'
 import { DOWNLOAD, copy, type Lang } from './locales/content'
 import { landingLangFromStore, writeLandingLang } from './locales/lang'
 
@@ -47,6 +48,7 @@ function NotFoundPage() {
 function LandingPage() {
   const [lang, setLang] = useState<Lang>(landingLangFromStore)
   const [menuOpen, setMenuOpen] = useState(false)
+  const { resolvedTheme, toggleTheme } = useTheme()
   const t = copy[lang]
 
   useEffect(() => {
@@ -74,13 +76,13 @@ function LandingPage() {
         {t.skip}
       </a>
 
-      <header className="sticky top-0 z-40 border-b border-white/5 bg-canvas/80 backdrop-blur-xl">
+      <header className="sticky top-0 z-40 border-b border-line/60 bg-canvas/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3">
           <a href="#top" className="flex items-center gap-2.5" aria-label={t.homeAria}>
             <img src="/logo.svg" alt="" className="h-8 w-8 rounded-lg" />
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold tracking-tight">OnCue</span>
-              <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[9px] text-mute">v0.15</span>
+              <span className="rounded border border-line bg-subtle px-1.5 py-0.5 font-mono text-[9px] text-mute dark:border-transparent dark:bg-white/10">v0.15</span>
             </div>
           </a>
 
@@ -98,21 +100,21 @@ function LandingPage() {
           <div className="flex items-center gap-2 sm:gap-3">
             <a
               href="#pricing"
-              className="inline-flex h-11 items-center rounded-lg border border-white/15 bg-white/[0.04] px-3 text-xs font-medium text-ink md:hidden"
+              className="inline-flex h-11 items-center rounded-lg border border-line bg-subtle px-3 text-xs font-medium text-ink transition-colors hover:border-ink/20 md:hidden"
             >
               {t.nav.pricing}
             </a>
             <a
               href="#download"
-              className="inline-flex h-11 items-center rounded-lg border border-white/15 bg-white/[0.04] px-3 text-xs font-medium text-ink transition-colors hover:border-white/25 hover:bg-white/[0.08]"
+              className="inline-flex h-11 items-center rounded-lg border border-line bg-subtle px-3 text-xs font-medium text-ink transition-colors hover:border-ink/20"
             >
               {t.nav.download}
             </a>
-            <div className="flex h-11 items-center rounded-full border border-white/10 bg-white/[0.03] p-0.5 text-[11px] font-medium">
+            <div className="flex h-11 items-center rounded-full border border-line bg-subtle p-0.5 text-[11px] font-medium">
               <button
                 type="button"
                 onClick={() => switchLang('zh')}
-                className={`rounded-full px-3 py-2 transition-all ${lang === 'zh' ? 'bg-white/15 text-ink font-semibold' : 'text-mute hover:text-ink'}`}
+                className={`rounded-full px-3 py-2 transition-all ${lang === 'zh' ? 'border border-line/60 bg-surface font-semibold text-ink shadow-xs dark:border-transparent dark:bg-white/15' : 'text-mute hover:text-ink'}`}
                 aria-pressed={lang === 'zh'}
               >
                 {t.langZh}
@@ -120,15 +122,31 @@ function LandingPage() {
               <button
                 type="button"
                 onClick={() => switchLang('en')}
-                className={`rounded-full px-3 py-2 transition-all ${lang === 'en' ? 'bg-white/15 text-ink font-semibold' : 'text-mute hover:text-ink'}`}
+                className={`rounded-full px-3 py-2 transition-all ${lang === 'en' ? 'border border-line/60 bg-surface font-semibold text-ink shadow-xs dark:border-transparent dark:bg-white/15' : 'text-mute hover:text-ink'}`}
                 aria-pressed={lang === 'en'}
               >
                 {t.langEn}
               </button>
             </div>
+
+            {/* Theme Toggle Button */}
             <button
               type="button"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/15 text-ink md:hidden"
+              onClick={toggleTheme}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-line bg-subtle text-ink transition-colors hover:border-ink/20 focus-visible:outline-2"
+              aria-label={t.themeToggle}
+              title={resolvedTheme === 'dark' ? t.themeLight : t.themeDark}
+            >
+              {resolvedTheme === 'dark' ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-line bg-subtle text-ink md:hidden"
               aria-expanded={menuOpen}
               aria-label={t.nav.menu}
               onClick={() => setMenuOpen((open) => !open)}
@@ -138,7 +156,7 @@ function LandingPage() {
           </div>
         </div>
         {menuOpen ? (
-          <nav className="border-t border-white/5 px-5 py-3 md:hidden" aria-label="mobile">
+          <nav className="border-t border-line bg-canvas px-5 py-3 md:hidden" aria-label="mobile">
             <div className="flex flex-col gap-3 text-sm">
               <a href="#video" onClick={() => setMenuOpen(false)}>{t.nav.video}</a>
               <a href="#features" onClick={() => setMenuOpen(false)}>{t.nav.features}</a>
@@ -153,15 +171,15 @@ function LandingPage() {
 
       <main id="main">
         <section id="top" className="relative overflow-hidden">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_72%_38%,rgba(244,244,247,0.08),transparent_40%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[var(--hero-radial)]" />
           <div className="mx-auto grid max-w-6xl items-center gap-10 px-5 py-16 lg:grid-cols-[1fr_1fr] lg:gap-12 lg:py-24">
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.55, ease: 'easeOut' }}
             >
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-mute">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              <div className="inline-flex items-center gap-2 rounded-full border border-line bg-subtle px-3 py-1 text-xs text-mute">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 <span>{t.eyebrow}</span>
               </div>
 
@@ -186,14 +204,14 @@ function LandingPage() {
                 </a>
                 <a
                   href={DOWNLOAD.win}
-                  className="inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl border border-white/15 bg-white/[0.03] px-5 text-sm font-medium text-ink transition-all hover:border-white/25 hover:bg-white/[0.06] active:scale-[0.98]"
+                  className="inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl border border-line bg-subtle px-5 text-sm font-medium text-ink transition-all hover:border-ink/20 active:scale-[0.98]"
                 >
                   <WindowsIcon className="h-4 w-4" />
                   {t.downloadWin}
                 </a>
                 <a
                   href={DOWNLOAD.repo}
-                  className="inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl border border-white/15 bg-white/[0.03] px-5 text-sm text-ink transition-all hover:border-white/25 hover:bg-white/[0.06] active:scale-[0.98]"
+                  className="inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl border border-line bg-subtle px-5 text-sm text-ink transition-all hover:border-ink/20 active:scale-[0.98]"
                 >
                   <GitHubIcon className="h-4 w-4" />
                   {t.viewGithub}
@@ -225,7 +243,7 @@ function LandingPage() {
         <FeatureCards t={t} />
         <PricingSection t={t} />
 
-        <section id="download" className="border-t border-white/5 px-5 py-20 lg:py-28">
+        <section id="download" className="border-t border-line/60 px-5 py-20 lg:py-28">
           <div className="mx-auto max-w-3xl text-center">
             <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl lg:text-4xl">
               {t.downloadBand.title}
@@ -241,7 +259,7 @@ function LandingPage() {
             <div className="mt-10 grid gap-4 sm:grid-cols-2">
               <a
                 href={DOWNLOAD.mac}
-                className="group flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.03] px-6 py-6 text-left transition-all hover:border-white/20 hover:bg-white/[0.05]"
+                className="group flex items-center gap-4 rounded-2xl border border-line bg-surface px-6 py-6 text-left shadow-sm transition-all hover:border-ink/20 hover:shadow-md dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/20 dark:hover:bg-white/[0.05] dark:shadow-none"
               >
                 <Apple className="h-8 w-8 shrink-0 transition-transform group-hover:scale-105" />
                 <span>
@@ -251,7 +269,7 @@ function LandingPage() {
               </a>
               <a
                 href={DOWNLOAD.win}
-                className="group flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.03] px-6 py-6 text-left transition-all hover:border-white/20 hover:bg-white/[0.05]"
+                className="group flex items-center gap-4 rounded-2xl border border-line bg-surface px-6 py-6 text-left shadow-sm transition-all hover:border-ink/20 hover:shadow-md dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/20 dark:hover:bg-white/[0.05] dark:shadow-none"
               >
                 <WindowsIcon className="h-8 w-8 shrink-0 transition-transform group-hover:scale-105" />
                 <span>
@@ -264,7 +282,7 @@ function LandingPage() {
             <p className="mt-6 text-xs leading-5 text-mute">{t.downloadBand.help}</p>
             <p className="mt-3 text-xs text-mute">
               {t.footerNote}{' '}
-              <a href={DOWNLOAD.sums} className="underline decoration-white/20 underline-offset-4 hover:text-ink">
+              <a href={DOWNLOAD.sums} className="underline decoration-line hover:text-ink">
                 {t.downloadBand.checksum}
               </a>
             </p>
@@ -272,7 +290,7 @@ function LandingPage() {
         </section>
       </main>
 
-      <footer className="border-t border-white/5 px-5 py-6 text-center text-xs text-mute">
+      <footer className="border-t border-line/60 px-5 py-6 text-center text-xs text-mute">
         {t.copyright}
       </footer>
     </div>

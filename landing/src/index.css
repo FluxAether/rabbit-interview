@@ -3,31 +3,69 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   font-family: Inter, "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  background: #0c0c0e;
-  color: #f4f4f7;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+
+  --canvas: #ffffff;
+  --surface: #ffffff;
+  --subtle: #f4f4f7;
+  --line: #e5e5eb;
+  --ink: #0d0d12;
+  --mute: #6b6b78;
+
+  --shadow-glow: 0 12px 40px rgba(0, 0, 0, 0.06);
+  --hero-radial: radial-gradient(circle at 72% 38%, rgba(0, 0, 0, 0.035), transparent 40%);
+  --hero-glow: radial-gradient(circle at 50% 45%, rgba(0, 0, 0, 0.05), transparent 62%);
+  --waveform-color: rgba(13, 13, 18, 0.72);
+  --waveform-peak: #0d0d12;
+  --selection-bg: #e2e2ea;
+  --selection-color: #0d0d12;
+
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --canvas: #0c0c0e;
+  --surface: #19191d;
+  --subtle: #131316;
+  --line: #2e2e38;
+  --ink: #f4f4f7;
+  --mute: #9d9da8;
+
+  --shadow-glow: 0 0 80px rgba(244, 244, 247, 0.08);
+  --hero-radial: radial-gradient(circle at 72% 38%, rgba(244, 244, 247, 0.08), transparent 40%);
+  --hero-glow: radial-gradient(circle at 50% 45%, rgba(244, 244, 247, 0.16), transparent 62%);
+  --waveform-color: rgba(244, 244, 247, 0.78);
+  --waveform-peak: #ffffff;
+  --selection-bg: #2a2a32;
+  --selection-color: #f4f4f7;
 }
 
 html {
   scroll-behavior: smooth;
+  background: var(--canvas);
 }
 
 body {
   margin: 0;
   min-width: 320px;
-  background: #0c0c0e;
+  background: var(--canvas);
+  color: var(--ink);
+  transition: background-color 150ms ease, color 150ms ease;
 }
 
 ::selection {
-  background: #2a2a32;
-  color: #f4f4f7;
+  background: var(--selection-bg);
+  color: var(--selection-color);
 }
 
 :focus-visible {
-  outline: 2px solid #f4f4f7;
+  outline: 2px solid var(--ink);
   outline-offset: 3px;
 }
 
@@ -58,7 +96,7 @@ body {
 }
 
 .hero-glow {
-  background: radial-gradient(circle at 50% 45%, rgba(244, 244, 247, 0.16), transparent 62%);
+  background: var(--hero-glow);
   filter: blur(18px);
   animation: glow-breathe 4.8s ease-in-out infinite;
 }

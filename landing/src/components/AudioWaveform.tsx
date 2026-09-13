@@ -49,6 +49,10 @@ export default function AudioWaveform({ className = '' }: { className?: string }
       const gap = Math.max(3, width / (BAR_COUNT * 1.7))
       const barWidth = Math.max(2, Math.min(4, (width - gap * (BAR_COUNT - 1)) / BAR_COUNT))
       const mid = height / 2
+      const isDark = document.documentElement.classList.contains('dark')
+      const peakColor = isDark ? '#ffffff' : '#0d0d12'
+      const waveColor = isDark ? 'rgba(244,244,247,0.78)' : 'rgba(13,13,18,0.72)'
+
       heights.forEach((value, i) => {
         const h = Math.max(6, value * height * 0.88)
         const total = BAR_COUNT * barWidth + (BAR_COUNT - 1) * gap
@@ -56,7 +60,7 @@ export default function AudioWaveform({ className = '' }: { className?: string }
         const x = origin + i * (barWidth + gap)
         const y = mid - h / 2
         const isPeak = i === 22
-        ctx.fillStyle = isPeak ? '#ffffff' : 'rgba(244,244,247,0.78)'
+        ctx.fillStyle = isPeak ? peakColor : waveColor
         const radius = 1
         ctx.beginPath()
         ctx.roundRect(x, y, barWidth, h, radius)
@@ -74,6 +78,11 @@ export default function AudioWaveform({ className = '' }: { className?: string }
     const observer = new ResizeObserver(onResize)
     observer.observe(canvas)
 
+    const themeObserver = new MutationObserver(() => {
+      if (reduce) draw(0)
+    })
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+
     if (!reduce) {
       const start = performance.now()
       const tick = (now: number) => {
@@ -88,6 +97,7 @@ export default function AudioWaveform({ className = '' }: { className?: string }
       running = false
       cancelAnimationFrame(frame)
       observer.disconnect()
+      themeObserver.disconnect()
     }
   }, [])
 
