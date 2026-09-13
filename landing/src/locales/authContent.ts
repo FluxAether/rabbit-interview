@@ -8,6 +8,9 @@ type AuthCopy = {
   pageTitles: Record<string, string>
   backHome: string
   homeAria: string
+  themeToggle: string
+  themeLight: string
+  themeDark: string
   loading: string
   retry: string
   openApp: string
@@ -299,6 +302,9 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     },
     backHome: 'Back to the site',
     homeAria: 'Back to the OnCue home page',
+    themeToggle: 'Toggle theme',
+    themeLight: 'Light theme',
+    themeDark: 'Dark theme',
     loading: 'Loading…',
     retry: 'Try again',
     openApp: 'Open OnCue',
@@ -490,6 +496,9 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     },
     backHome: '返回官网',
     homeAria: '返回 OnCue 首页',
+    themeToggle: '切换主题',
+    themeLight: '浅色模式',
+    themeDark: '深色模式',
     loading: '加载中…',
     retry: '重试',
     openApp: '打开 OnCue',
@@ -681,6 +690,9 @@ export const authCopy: Record<AuthLang, AuthCopy> = {
     },
     backHome: '返回官網',
     homeAria: '返回 OnCue 首頁',
+    themeToggle: '切換主題',
+    themeLight: '淺色模式',
+    themeDark: '深色模式',
     loading: '載入中…',
     retry: '重試',
     openApp: '打開 OnCue',

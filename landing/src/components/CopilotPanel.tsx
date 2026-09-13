@@ -18,21 +18,21 @@ export default function CopilotPanel({
     <div className="flex flex-col gap-3">
       {/* Interactive Mode Control Bar (for Showcase) */}
       {!compact && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-subtle/70 px-3 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.02]">
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-mute">{t.copilot.hudBadge} · {t.previewBadge}</span>
           </div>
 
           <div className="flex items-center gap-3">
             {/* View Mode Toggle */}
-            <div className="flex items-center rounded-lg border border-white/10 bg-black/40 p-0.5">
+            <div className="flex items-center rounded-lg border border-line bg-subtle p-0.5 dark:border-white/10 dark:bg-black/40">
               <button
                 type="button"
                 onClick={() => setViewMode('normal')}
                 aria-pressed={viewMode === 'normal'}
                 className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-all ${
                   viewMode === 'normal'
-                    ? 'bg-white/15 font-medium text-ink shadow-sm'
+                    ? 'border border-line/60 bg-surface font-medium text-ink shadow-sm dark:border-transparent dark:bg-white/15'
                     : 'text-mute hover:text-ink'
                 }`}
               >
@@ -45,7 +45,7 @@ export default function CopilotPanel({
                 aria-pressed={viewMode === 'hud'}
                 className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-all ${
                   viewMode === 'hud'
-                    ? 'bg-white/15 font-medium text-ink shadow-sm'
+                    ? 'border border-line/60 bg-surface font-medium text-ink shadow-sm dark:border-transparent dark:bg-white/15'
                     : 'text-mute hover:text-ink'
                 }`}
               >
@@ -63,7 +63,7 @@ export default function CopilotPanel({
                 max={100}
                 value={opacityLevel}
                 onChange={(e) => setOpacityLevel(Number(e.target.value))}
-                className="h-1 w-16 cursor-pointer accent-white"
+                className="h-1 w-16 cursor-pointer accent-ink"
                 title={t.copilot.opacity}
               />
               <span className="font-mono text-[10px] text-mute">{opacityLevel}%</span>
@@ -77,11 +77,11 @@ export default function CopilotPanel({
         style={{ opacity: opacityLevel / 100 }}
         className={`relative overflow-hidden transition-all duration-300 ${
           viewMode === 'hud'
-            ? 'rounded-2xl border border-white/20 bg-[#0c0c0e]/80 shadow-[0_12px_40px_rgba(0,0,0,0.6)] backdrop-blur-2xl'
-            : 'rounded-[18px] border border-white/10 bg-[#111115]/95 shadow-[0_0_80px_rgba(244,244,247,0.12)] backdrop-blur-xl'
+            ? 'rounded-2xl border border-line bg-surface/90 shadow-xl backdrop-blur-2xl dark:border-white/20 dark:bg-[#0c0c0e]/80 dark:shadow-[0_12px_40px_rgba(0,0,0,0.6)]'
+            : 'rounded-[18px] border border-line bg-surface/95 shadow-glow backdrop-blur-xl dark:border-white/10 dark:bg-[#111115]/95'
         } ${compact ? 'p-3' : 'p-4 sm:p-5'}`}
       >
-        <div className="pointer-events-none absolute inset-0 rounded-[inherit] ring-1 ring-inset ring-white/10" />
+        <div className="pointer-events-none absolute inset-0 rounded-[inherit] ring-1 ring-inset ring-line/50 dark:ring-white/10" />
 
         {/* Window Title Bar */}
         <header className="mb-3 flex items-center justify-between gap-3">
@@ -91,7 +91,7 @@ export default function CopilotPanel({
               {t.copilot.title}
             </div>
             {viewMode === 'hud' && (
-              <span className="rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-medium tracking-wider text-ink/80">
+              <span className="rounded border border-line bg-subtle px-1.5 py-0.5 text-[9px] font-medium tracking-wider text-ink/80 dark:border-transparent dark:bg-white/10">
                 HUD
               </span>
             )}
@@ -111,7 +111,7 @@ export default function CopilotPanel({
         </header>
 
         {/* Audio Channel Separation Indicator */}
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-2.5 text-[11px]">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-line/60 pb-2.5 text-[11px] dark:border-white/5">
           <div className="flex items-center gap-1.5 text-mute">
             <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
               <span className="listening-dot h-1.5 w-1.5 rounded-full bg-ink" />
@@ -120,7 +120,7 @@ export default function CopilotPanel({
           </div>
           <div className="flex items-center gap-3 font-mono text-[10px] text-mute">
             <span className="flex items-center gap-1">
-              <Volume2 className="h-3 w-3 text-emerald-400" />
+              <Volume2 className="h-3 w-3 text-emerald-500" />
               {t.copilot.speakerInterviewer}
             </span>
           </div>
@@ -128,17 +128,17 @@ export default function CopilotPanel({
 
         {/* Question & Outline Bubbles */}
         <div className={`space-y-2 ${compact ? 'text-[11px]' : 'text-[13px]'}`}>
-          <div className="rounded-xl border border-white/15 bg-white/[0.06] px-3.5 py-2.5 text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
+          <div className="rounded-xl border border-line bg-subtle/80 px-3.5 py-2.5 text-ink shadow-sm dark:border-white/15 dark:bg-white/[0.06] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
             <span className="mr-2 text-[10px] font-mono text-mute">Q:</span>
             {t.copilot.question}
           </div>
 
           {/* If in HUD mode, render super-compact bullet points */}
           {viewMode === 'hud' ? (
-            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-2.5">
+            <div className="rounded-xl border border-line bg-subtle/50 p-2.5 dark:border-white/10 dark:bg-white/[0.02]">
               <div className="grid grid-cols-3 gap-2 text-center text-xs">
                 {steps.map((step, index) => (
-                  <div key={step} className="rounded-lg bg-white/[0.04] px-2 py-2 border border-white/5">
+                  <div key={step} className="rounded-lg border border-line bg-surface px-2 py-2 shadow-xs dark:border-white/5 dark:bg-white/[0.04]">
                     <div className="font-mono text-[10px] text-mute">Point 0{index + 1}</div>
                     <div className="mt-0.5 font-medium text-ink">{step}</div>
                   </div>
@@ -149,9 +149,9 @@ export default function CopilotPanel({
             steps.map((step, index) => (
               <div
                 key={step}
-                className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 transition-colors hover:border-white/15"
+                className="flex items-center gap-3 rounded-xl border border-line bg-subtle/60 px-3 py-2.5 transition-colors hover:border-line hover:bg-subtle dark:border-white/8 dark:bg-white/[0.03] dark:hover:border-white/15"
               >
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/15 font-mono text-[10px] text-mute">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line font-mono text-[10px] text-mute dark:border-white/15">
                   {index + 1}
                 </span>
                 <span className="text-ink/90">{step}</span>

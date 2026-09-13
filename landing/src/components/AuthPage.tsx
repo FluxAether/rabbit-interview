@@ -1,8 +1,9 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
-import { ArrowLeft, Check, KeyRound, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, Check, KeyRound, Moon, ShieldCheck, Sun } from 'lucide-react'
 import { authCopy, type AuthLang } from '../locales/authContent'
 import { FALLBACK_PRODUCTS, formatCredits, formatYuan, gateway, isPaymentProduct, type PaymentProduct } from '../lib/catalog'
 import { CREDIT_UNIT_SCALE, creditsToUnits } from '../lib/credits'
+import { useTheme } from '../lib/theme'
 
 type Interaction =
   | { step: 'login'; csrf: string }
@@ -63,9 +64,9 @@ type RoutingResponse = {
 }
 type T = (typeof authCopy)[AuthLang]
 
-const inputClass = 'mt-2 h-11 w-full rounded-xl border border-white/15 bg-black/20 px-3.5 text-sm text-ink placeholder:text-mute/60 focus:border-white/35 focus:outline-none'
-const primaryButton = 'inline-flex h-11 items-center justify-center rounded-xl bg-ink px-5 text-sm font-semibold text-canvas disabled:cursor-not-allowed disabled:opacity-50'
-const secondaryButton = 'inline-flex h-11 items-center justify-center rounded-xl border border-white/15 bg-white/[0.04] px-5 text-sm font-medium text-ink disabled:cursor-not-allowed disabled:opacity-50'
+const inputClass = 'mt-2 h-11 w-full rounded-xl border border-line bg-subtle px-3.5 text-sm text-ink placeholder:text-mute/60 focus:border-ink/40 focus:outline-none dark:border-white/15 dark:bg-black/20 dark:focus:border-white/35'
+const primaryButton = 'inline-flex h-11 items-center justify-center rounded-xl bg-ink px-5 text-sm font-semibold text-canvas transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
+const secondaryButton = 'inline-flex h-11 items-center justify-center rounded-xl border border-line bg-subtle px-5 text-sm font-medium text-ink transition-colors hover:border-ink/20 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:bg-white/[0.04] dark:hover:border-white/25'
 
 let cachedFragment: URLSearchParams | undefined
 
@@ -168,7 +169,7 @@ function formValue(form: HTMLFormElement, name: string): string {
 
 function ErrorMessage({ children }: { children: ReactNode }) {
   return (
-    <p role="alert" className="mt-5 rounded-xl border border-red-300/15 bg-red-300/[0.06] px-3.5 py-3 text-sm leading-6 text-red-100">
+    <p role="alert" className="mt-5 rounded-xl border border-red-500/20 bg-red-500/10 px-3.5 py-3 text-sm leading-6 text-red-600 dark:border-red-300/15 dark:bg-red-300/[0.06] dark:text-red-100">
       {children}
     </p>
   )
@@ -343,7 +344,7 @@ function LoginPage({ t }: { t: T }) {
         {error ? <ErrorMessage>{errorText(t, new Error(error))}</ErrorMessage> : null}
         <ul className="mt-6 space-y-3">
           {interaction.scopes.map((scope) => (
-            <li className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/[0.025] px-3.5 py-3 text-sm" key={scope}>
+            <li className="flex items-start gap-3 rounded-xl border border-line bg-subtle px-3.5 py-3 text-sm dark:border-white/10 dark:bg-white/[0.025]" key={scope}>
               <Check className="mt-0.5 h-4 w-4 shrink-0 text-mute" aria-hidden="true" />
               {t.scopes[scope] || scope}
             </li>
@@ -415,7 +416,7 @@ function RegisterPage({ t }: { t: T }) {
       ) : null}
       <p className="mt-5 text-center text-sm text-mute">
         {t.register.existing}{' '}
-        <a className="text-ink underline decoration-white/20 underline-offset-4 hover:decoration-white/50" href={authHref('/auth/login')}>{t.register.signIn}</a>
+        <a className="text-ink underline decoration-line underline-offset-4 hover:decoration-ink/40 dark:decoration-white/20 dark:hover:decoration-white/50" href={authHref('/auth/login')}>{t.register.signIn}</a>
       </p>
     </>
   )
@@ -470,7 +471,7 @@ function ForgotPage({ t }: { t: T }) {
         </form>
       ) : null}
       <p className="mt-5 text-center text-sm text-mute">
-        <a className="text-ink underline decoration-white/20 underline-offset-4 hover:decoration-white/50" href={authHref('/auth/login')}>{t.forgot.backToSignIn}</a>
+        <a className="text-ink underline decoration-line underline-offset-4 hover:decoration-ink/40 dark:decoration-white/20 dark:hover:decoration-white/50" href={authHref('/auth/login')}>{t.forgot.backToSignIn}</a>
       </p>
     </>
   )
@@ -622,18 +623,18 @@ function SecurityPage({ t }: { t: T }) {
   return (
     <>
       <Intro title={t.security.title} body={t.security.subtitle} />
-      <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3.5">
+      <div className="mt-6 rounded-xl border border-line bg-subtle px-4 py-3.5 dark:border-white/10 dark:bg-white/[0.025]">
         <p className="text-xs text-mute">{t.security.account}</p>
         <p className="mt-1 break-all text-sm font-medium">{context.email}</p>
       </div>
       {error ? <ErrorMessage>{errorText(t, new Error(error))}</ErrorMessage> : null}
-      {notice ? <p role="status" className="mt-5 rounded-xl border border-emerald-200/15 bg-emerald-200/[0.05] px-3.5 py-3 text-sm text-emerald-100">{notice}</p> : null}
+      {notice ? <p role="status" className="mt-5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3.5 py-3 text-sm text-emerald-700 dark:border-emerald-200/15 dark:bg-emerald-200/[0.05] dark:text-emerald-100">{notice}</p> : null}
       {recoveryCodes.length ? (
         <section className="mt-7">
           <h2 className="text-lg font-semibold">{t.security.recoveryTitle}</h2>
           <p className="mt-2 text-sm leading-6 text-mute">{t.security.recoveryHelp}</p>
           <div className="mt-4 grid grid-cols-2 gap-2" aria-label={t.security.recoveryTitle}>
-            {recoveryCodes.map((code) => <code className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-center text-xs" key={code}>{code}</code>)}
+            {recoveryCodes.map((code) => <code className="rounded-lg border border-line bg-subtle px-3 py-2 text-center text-xs dark:border-white/10 dark:bg-black/20" key={code}>{code}</code>)}
           </div>
         </section>
       ) : setup ? (
@@ -642,7 +643,7 @@ function SecurityPage({ t }: { t: T }) {
           <p className="mt-2 text-sm leading-6 text-mute">{t.security.setupHelp}</p>
           <img className="mx-auto mt-5 h-52 w-52 rounded-xl bg-white p-2" src={setup.qr_base64.startsWith('data:') ? setup.qr_base64 : `data:image/png;base64,${setup.qr_base64}`} alt={t.security.setupTitle} />
           <p className="mt-4 text-xs text-mute">{t.security.secret}</p>
-          <code className="mt-2 block break-all rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs">{setup.secret}</code>
+          <code className="mt-2 block break-all rounded-lg border border-line bg-subtle px-3 py-2 text-xs dark:border-white/10 dark:bg-black/20">{setup.secret}</code>
           <form className="mt-5" onSubmit={confirm} aria-busy={busy}>
             <label className="block text-sm font-medium">
               {t.security.code}
@@ -653,7 +654,7 @@ function SecurityPage({ t }: { t: T }) {
         </section>
       ) : (
         <section className="mt-7">
-          <div className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4">
+          <div className="flex items-start gap-3 rounded-xl border border-line bg-subtle px-4 py-4 dark:border-white/10 dark:bg-white/[0.025]">
             <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-mute" aria-hidden="true" />
             <p className="text-sm leading-6">{context.totp_enabled ? t.security.enabled : t.security.disabled}</p>
           </div>
@@ -674,7 +675,7 @@ function SecurityPage({ t }: { t: T }) {
           )}
         </section>
       )}
-      <hr className="my-7 border-white/10" />
+      <hr className="my-7 border-line dark:border-white/10" />
       <button className={`${secondaryButton} w-full`} disabled={busy} onClick={() => void revoke()}>{t.security.revoke}</button>
     </>
   )
@@ -796,7 +797,7 @@ function SubscribePage({ t }: { t: T }) {
       {error ? <ErrorMessage>{errorText(t, new Error(error))}</ErrorMessage> : null}
       {loading ? <p role="status" className="text-sm text-mute">{t.loading}</p> : null}
       {context ? (
-        <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
+        <section className="rounded-2xl border border-line bg-subtle p-5 dark:border-white/10 dark:bg-white/[0.025]">
           <p className="text-xs text-mute">{t.subscribe.signedIn}</p>
           <p className="mt-1 break-all font-medium">{context.email}</p>
           <dl className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -812,7 +813,7 @@ function SubscribePage({ t }: { t: T }) {
         </section>
       ) : <p className="text-sm text-mute">{t.subscribe.signedOut}</p>}
       {order ? (
-        <div role="status" className="space-y-3 rounded-xl border border-white/10 px-4 py-3 text-sm">
+        <div role="status" className="space-y-3 rounded-xl border border-line bg-subtle px-4 py-3 text-sm dark:border-white/10 dark:bg-transparent">
           <p>{order.status === 'PAID' ? t.subscribe.paymentPaid : order.status === 'CLOSED' ? t.subscribe.paymentClosed : t.subscribe.paymentPending}</p>
           <p className="break-all text-xs text-mute">{t.subscribe.orderNo}: {order.merchant_order_no}</p>
           {order.status === 'PENDING' ? <button className={secondaryButton} disabled={Boolean(busyProduct)} onClick={() => void refreshOrder()}>{t.subscribe.checkPayment}</button> : null}
@@ -832,13 +833,13 @@ function SubscribePage({ t }: { t: T }) {
               onClick={() => setSelectedPlan(product.code)}
               className={`flex flex-col rounded-2xl border p-5 transition-all cursor-pointer ${
                 isSelected
-                  ? 'border-emerald-400/80 bg-emerald-500/[0.04] ring-1 ring-emerald-400/30'
-                  : 'border-white/15 bg-white/[0.025] hover:border-white/25'
+                  ? 'border-emerald-500/80 bg-emerald-500/[0.05] ring-1 ring-emerald-500/30'
+                  : 'border-line bg-surface hover:border-ink/20 dark:border-white/15 dark:bg-white/[0.025] dark:hover:border-white/25'
               }`}
             >
               <div className="flex items-center justify-between">
-                <p className={`text-xs ${isPass ? 'text-amber-300' : 'text-emerald-300'}`}>{tag}</p>
-                {isSelected ? <span className="text-xs font-semibold text-emerald-300">✓</span> : null}
+                <p className={`text-xs ${isPass ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-300'}`}>{tag}</p>
+                {isSelected ? <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-300">✓</span> : null}
               </div>
               <h2 className="mt-3 text-lg font-semibold">{byok ? t.subscribe.byokTitle : `${formatCredits(product.credit_units, product.credit_unit_scale, t.htmlLang)} ${t.subscribe.creditLabel}`}</h2>
               <p className="mt-4 text-3xl font-semibold">{formatYuan(product.price_minor)}</p>
@@ -869,11 +870,11 @@ function SubscribePage({ t }: { t: T }) {
         })}
       </div>
       <p className="text-xs text-mute">{t.subscribe.paymentsNote}</p>
-      <section className="rounded-xl border border-white/10 p-4 text-sm">
+      <section className="rounded-xl border border-line bg-subtle/50 p-4 text-sm dark:border-white/10 dark:bg-transparent">
         <h2 className="font-medium">{t.subscribe.grantTitle}</h2>
         <p className="mt-2 leading-relaxed text-mute">{t.subscribe.grantBody}</p>
       </section>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4 dark:border-white/10">
         <a className={secondaryButton} href="/"><ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />{t.backHome}</a>
         <a className={secondaryButton} href={authHref('/auth/register')}>{t.login.register}</a>
       </div>
@@ -979,11 +980,11 @@ function AdminPage({ t }: { t: T }) {
     const selected = providers.find((option) => option.provider === draft.provider)
     const unchanged = current.provider === draft.provider && current.model === draft.model
     return (
-      <section className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+      <section className="rounded-xl border border-line bg-subtle/60 p-4 dark:border-white/10 dark:bg-white/[0.025]">
         <h3 className="text-sm font-semibold text-ink">{title}</h3>
         <p className="mt-2 text-xs text-mute">
           {t.admin.activeRoute}: <span className="text-ink">{current.provider} / {current.model}</span>
-          {!current.valid ? <span className="ml-2 text-amber-200">{t.admin.routeInvalid}</span> : null}
+          {!current.valid ? <span className="ml-2 text-amber-600 dark:text-amber-200">{t.admin.routeInvalid}</span> : null}
         </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="block text-sm font-medium">
@@ -1065,7 +1066,7 @@ function AdminPage({ t }: { t: T }) {
     <>
       <Intro title={t.admin.title} body={t.admin.subtitle} />
       {error ? <ErrorMessage>{errorScope === 'routing' ? routingErrorText(t, new Error(error)) : errorText(t, new Error(error))}</ErrorMessage> : null}
-      {notice ? <p role="status" className="mt-5 rounded-xl border border-emerald-200/15 bg-emerald-200/[0.05] px-3.5 py-3 text-sm text-emerald-100">{notice}</p> : null}
+      {notice ? <p role="status" className="mt-5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3.5 py-3 text-sm text-emerald-700 dark:border-emerald-200/15 dark:bg-emerald-200/[0.05] dark:text-emerald-100">{notice}</p> : null}
       <form className="mt-7 space-y-5" onSubmit={lookup} aria-busy={busy}>
         <label className="block text-sm font-medium">
           {t.admin.token}
@@ -1096,7 +1097,7 @@ function AdminPage({ t }: { t: T }) {
       ) : null}
       {account ? (
         <>
-          <div className="mt-7 rounded-xl border border-white/10 bg-white/[0.025] px-4 py-4 text-sm">
+          <div className="mt-7 rounded-xl border border-line bg-subtle px-4 py-4 text-sm dark:border-white/10 dark:bg-white/[0.025]">
             <p className="text-xs text-mute">{t.admin.account}</p>
             <p className="mt-1 break-all font-medium">{account.email}</p>
             <p className="mt-3 text-xs text-mute">{t.admin.status}</p>
@@ -1144,38 +1145,62 @@ function AuthShell({
   children,
   lang,
   setLang,
+  t,
   maxWidth = 'max-w-xl',
 }: {
   children: ReactNode
   lang: AuthLang
   setLang: (lang: AuthLang) => void
+  t: T
   maxWidth?: string
 }) {
+  const { resolvedTheme, toggleTheme } = useTheme()
+
   return (
     <div className="relative min-h-dvh overflow-hidden bg-canvas text-ink">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(244,244,247,0.13),transparent_43%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(0,0,0,0.04),transparent_43%)] dark:bg-[radial-gradient(circle_at_50%_-10%,rgba(244,244,247,0.13),transparent_43%)]" />
       <header className="relative mx-auto flex max-w-5xl items-center justify-between gap-4 px-5 py-5">
-        <a href="/" className="flex items-center gap-2.5 text-sm font-semibold">
+        <a href="/" className="flex items-center gap-2.5 text-sm font-semibold transition-opacity hover:opacity-80">
           <img src="/logo.svg" alt="" className="h-8 w-8 rounded-lg" />
           <span className="hidden sm:inline">OnCue</span>
         </a>
-        <div className="flex items-center rounded-full border border-white/10 bg-white/[0.03] p-1 text-[11px] font-medium" aria-label="Language">
-          {(['zh-CN', 'zh-TW', 'en'] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setLang(value)}
-              className={`rounded-full px-2.5 py-1.5 ${lang === value ? 'bg-white/10 text-ink' : 'text-mute'}`}
-              aria-pressed={lang === value}
-            >
-              {value === 'zh-CN' ? '简' : value === 'zh-TW' ? '繁' : 'EN'}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center rounded-full border border-line bg-subtle p-0.5 text-[11px] font-medium dark:border-white/10 dark:bg-white/[0.03]" aria-label="Language">
+            {(['zh-CN', 'zh-TW', 'en'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setLang(value)}
+                className={`rounded-full px-2.5 py-1.5 transition-all ${
+                  lang === value
+                    ? 'border border-line/60 bg-surface font-semibold text-ink shadow-xs dark:border-transparent dark:bg-white/15'
+                    : 'text-mute hover:text-ink'
+                }`}
+                aria-pressed={lang === value}
+              >
+                {value === 'zh-CN' ? '简' : value === 'zh-TW' ? '繁' : 'EN'}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-line bg-subtle text-ink transition-colors hover:border-ink/20 focus-visible:outline-2 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-white/20"
+            aria-label={t.themeToggle}
+            title={resolvedTheme === 'dark' ? t.themeLight : t.themeDark}
+          >
+            {resolvedTheme === 'dark' ? (
+              <Sun className="h-3.5 w-3.5" />
+            ) : (
+              <Moon className="h-3.5 w-3.5" />
+            )}
+          </button>
         </div>
       </header>
       <main className={`relative mx-auto flex w-full ${maxWidth} items-center px-5 pb-16 pt-8 sm:min-h-[calc(100dvh-152px)] sm:pt-4`}>
-        <div className="w-full rounded-2xl border border-white/10 bg-surface/90 p-6 shadow-glow backdrop-blur-xl sm:p-9">
-          <div className="mb-7 flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+        <div className="w-full rounded-2xl border border-line bg-surface p-6 shadow-sm sm:p-9 dark:border-white/10 dark:bg-surface/90 dark:shadow-glow dark:backdrop-blur-xl">
+          <div className="mb-7 flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-subtle dark:border-white/10 dark:bg-white/[0.04]">
             <KeyRound className="h-5 w-5 text-mute" aria-hidden="true" />
           </div>
           {children}
@@ -1221,5 +1246,5 @@ export default function AuthPage({ path: propPath }: { path?: string } = {}) {
   }
 
   const maxWidth = path === '/subscribe' ? 'max-w-4xl' : 'max-w-xl'
-  return <AuthShell lang={lang} setLang={setLang} maxWidth={maxWidth}>{content}</AuthShell>
+  return <AuthShell lang={lang} setLang={setLang} t={t} maxWidth={maxWidth}>{content}</AuthShell>
 }

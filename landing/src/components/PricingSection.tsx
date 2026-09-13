@@ -21,11 +21,11 @@ export default function PricingSection({ t }: { t: Copy }) {
   const byok = products.find((item) => item.code === 'BYOK_LIFETIME') || FALLBACK_PRODUCTS[4]
 
   return (
-    <section id="pricing" className="border-t border-white/5 px-5 py-20 lg:py-28">
+    <section id="pricing" className="border-t border-line/60 px-5 py-20 lg:py-28 dark:border-white/5">
       <div className="mx-auto max-w-5xl">
         <div className="mx-auto max-w-2xl text-center">
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-mute">
-            <Zap className="h-3.5 w-3.5 text-amber-400" />
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-line bg-subtle px-3 py-1 text-xs text-mute dark:border-white/10 dark:bg-white/[0.03]">
+            <Zap className="h-3.5 w-3.5 text-amber-500" />
             <span>{p.badge}</span>
           </div>
           <h2 className="mt-4 text-2xl font-semibold tracking-tight sm:text-3xl lg:text-4xl">
@@ -37,11 +37,11 @@ export default function PricingSection({ t }: { t: Copy }) {
         </div>
 
         <div className="mt-12 grid gap-6 md:grid-cols-2 lg:gap-8">
-          <div className="flex flex-col justify-between rounded-3xl border border-white/10 bg-white/[0.02] p-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] sm:p-8">
+          <div className="flex flex-col justify-between rounded-3xl border border-line bg-surface p-7 shadow-sm sm:p-8 dark:border-white/10 dark:bg-white/[0.02] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
             <div>
               <div className="flex items-center justify-between">
                 <span className="font-mono text-xs text-mute">{p.byokKicker}</span>
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-mute">
+                <span className="rounded-full border border-line bg-subtle px-2.5 py-0.5 text-[11px] text-mute dark:border-white/10 dark:bg-white/[0.04]">
                   {p.byokBadge}
                 </span>
               </div>
@@ -50,26 +50,26 @@ export default function PricingSection({ t }: { t: Copy }) {
                 {formatYuan(byok.price_minor)}
               </div>
               <p className="mt-3 text-sm leading-relaxed text-mute">{p.byokDesc}</p>
-              <div className="my-6 border-t border-white/5" />
+              <div className="my-6 border-t border-line/60 dark:border-white/5" />
               <ul className="space-y-3 text-sm text-ink/90">
-                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.byokFeature1}</span></li>
-                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.byokFeature2}</span></li>
+                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-500" /><span>{p.byokFeature1}</span></li>
+                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-500" /><span>{p.byokFeature2}</span></li>
                 <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.byokFeature3}</span></li>
               </ul>
             </div>
-            <a href="/subscribe?plan=BYOK_LIFETIME" className="mt-8 inline-flex h-11 items-center justify-center rounded-xl border border-white/15 bg-white/[0.03] text-sm font-medium text-ink transition-colors hover:border-white/25 hover:bg-white/[0.06]">
+            <a href="/subscribe?plan=BYOK_LIFETIME" className="mt-8 inline-flex h-11 items-center justify-center rounded-xl border border-line bg-subtle text-sm font-medium text-ink transition-colors hover:border-ink/20 dark:border-white/15 dark:bg-white/[0.03] dark:hover:border-white/25 dark:hover:bg-white/[0.06]">
               {p.byokCta}
             </a>
           </div>
 
-          <div className="relative flex flex-col justify-between rounded-3xl border border-white/20 bg-gradient-to-b from-white/[0.05] to-white/[0.01] p-7 shadow-[0_12px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12)] sm:p-8">
-            <div className="pointer-events-none absolute -top-3 right-6 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-0.5 text-[10px] font-medium text-emerald-300">
+          <div className="relative flex flex-col justify-between rounded-3xl border-2 border-emerald-500/40 bg-surface p-7 shadow-lg sm:p-8 dark:border-white/20 dark:bg-gradient-to-b dark:from-white/[0.05] dark:to-white/[0.01] dark:shadow-[0_12px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12)]">
+            <div className="pointer-events-none absolute -top-3 right-6 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-300">
               {p.hostedBadge}
             </div>
             <div>
               <div className="flex items-center justify-between">
                 <span className="font-mono text-xs text-mute">{p.hostedKicker}</span>
-                <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-0.5 text-[11px] text-emerald-300">
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] text-emerald-600 dark:border-emerald-400/20 dark:text-emerald-300">
                   {p.hostedTag}
                 </span>
               </div>
@@ -82,11 +82,11 @@ export default function PricingSection({ t }: { t: Copy }) {
                 </p>
               </div>
               <p className="mt-3 text-sm leading-relaxed text-mute">{p.hostedDesc}</p>
-              <div className="my-6 border-t border-white/5" />
+              <div className="my-6 border-t border-line/60 dark:border-white/5" />
               <ul className="space-y-3 text-sm text-ink/90">
-                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.hostedFeature1}</span></li>
-                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.hostedFeature2}</span></li>
-                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.hostedFeature3}</span></li>
+                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-500" /><span>{p.hostedFeature1}</span></li>
+                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-500" /><span>{p.hostedFeature2}</span></li>
+                <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-500" /><span>{p.hostedFeature3}</span></li>
               </ul>
             </div>
             <a href="/subscribe?plan=CREDITS_3000" className="mt-8 inline-flex h-11 items-center justify-center rounded-xl bg-ink text-sm font-medium text-canvas transition-opacity hover:opacity-90">

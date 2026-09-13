@@ -6,7 +6,7 @@ function SelectRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="block">
       <div className="mb-1 text-[11px] text-mute">{label}</div>
-      <div className="flex h-9 items-center justify-between rounded-lg border border-white/10 bg-[#0f0f13] px-3 text-xs text-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <div className="flex h-9 items-center justify-between rounded-lg border border-line bg-subtle px-3 text-xs text-ink shadow-xs dark:border-white/10 dark:bg-[#0f0f13] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
         <span>{value}</span>
         <ChevronDown className="h-3.5 w-3.5 text-mute" aria-hidden="true" />
       </div>
@@ -16,11 +16,11 @@ function SelectRow({ label, value }: { label: string; value: string }) {
 
 function MockCard({ t }: { t: Copy }) {
   return (
-    <div className="flex h-full flex-col justify-between rounded-[18px] border border-white/10 bg-[#111115]/95 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+    <div className="flex h-full flex-col justify-between rounded-[18px] border border-line bg-surface p-4 shadow-sm dark:border-white/10 dark:bg-[#111115]/95 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
       <div>
         <div className="mb-3 flex items-center justify-between text-xs">
           <span className="font-medium text-ink">{t.mock.title}</span>
-          <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-mute">{t.previewBadge}</span>
+          <span className="rounded border border-line bg-subtle px-1.5 py-0.5 text-[10px] text-mute dark:border-transparent dark:bg-white/10">{t.previewBadge}</span>
         </div>
         <div className="space-y-2.5">
           <SelectRow label={t.mock.scene} value={t.mock.sceneValue} />
@@ -29,16 +29,16 @@ function MockCard({ t }: { t: Copy }) {
         </div>
       </div>
       <div className="mt-4">
-        <div className="flex h-9 w-full items-center justify-center rounded-lg bg-white/10 text-xs font-medium text-ink/80">
+        <div className="flex h-9 w-full items-center justify-center rounded-lg border border-line bg-subtle text-xs font-medium text-ink transition-colors hover:border-ink/20 dark:border-transparent dark:bg-white/10 dark:text-ink/80">
           {t.mock.start}
         </div>
         <div className="mt-2.5 grid grid-cols-2 gap-2">
-          <div className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.02] text-[11px] text-mute">
-            <Mic className="h-3 w-3 text-emerald-400" />
+          <div className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-line bg-subtle/60 text-[11px] text-mute dark:border-white/10 dark:bg-white/[0.02]">
+            <Mic className="h-3 w-3 text-emerald-500" />
             {t.mock.voice}
           </div>
-          <div className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.02] text-[11px] text-mute">
-            <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
+          <div className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-line bg-subtle/60 text-[11px] text-mute dark:border-white/10 dark:bg-white/[0.02]">
+            <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
             {t.mock.record}
           </div>
         </div>
@@ -54,22 +54,22 @@ function ResumeCard({ t }: { t: Copy }) {
   const offset = circumference * (1 - 0.82)
 
   return (
-    <div className="flex h-full flex-col justify-between rounded-[18px] border border-white/10 bg-[#111115]/95 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+    <div className="flex h-full flex-col justify-between rounded-[18px] border border-line bg-surface p-4 shadow-sm dark:border-white/10 dark:bg-[#111115]/95 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
       <div>
         <div className="mb-3 flex items-center justify-between text-xs">
           <span className="font-medium text-ink">{t.resume.title}</span>
-          <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-mute">{t.previewBadge}</span>
+          <span className="rounded border border-line bg-subtle px-1.5 py-0.5 text-[10px] text-mute dark:border-transparent dark:bg-white/10">{t.previewBadge}</span>
         </div>
         <div className="mb-4 flex items-center gap-4 px-1">
           <div className="relative h-[84px] w-[84px] shrink-0">
             <svg viewBox="0 0 88 88" className="h-full w-full -rotate-90">
-              <circle cx="44" cy="44" r={radius} fill="none" stroke="#23232b" strokeWidth="6" />
+              <circle cx="44" cy="44" r={radius} fill="none" stroke="var(--line)" strokeWidth="6" />
               <circle
                 cx="44"
                 cy="44"
                 r={radius}
                 fill="none"
-                stroke="#f4f4f7"
+                stroke="var(--ink)"
                 strokeWidth="6"
                 strokeLinecap="round"
                 strokeDasharray={circumference}
@@ -87,9 +87,9 @@ function ResumeCard({ t }: { t: Copy }) {
         </div>
         <div className="space-y-2">
           {items.map((item) => (
-            <div key={item} className="flex items-center justify-between rounded-lg border border-white/8 bg-white/[0.03] px-2.5 py-2 text-[11px]">
+            <div key={item} className="flex items-center justify-between rounded-lg border border-line bg-subtle/60 px-2.5 py-2 text-[11px] dark:border-white/8 dark:bg-white/[0.03]">
               <span className="flex items-center gap-2">
-                <Check className="h-3.5 w-3.5 text-emerald-400" />
+                <Check className="h-3.5 w-3.5 text-emerald-500" />
                 {item}
               </span>
               <span className="text-mute">{t.resume.suggest}</span>
@@ -97,7 +97,7 @@ function ResumeCard({ t }: { t: Copy }) {
           ))}
         </div>
       </div>
-      <div className="mt-4 flex h-9 w-full items-center justify-center rounded-lg bg-white/10 text-xs font-medium text-ink/80">
+      <div className="mt-4 flex h-9 w-full items-center justify-center rounded-lg border border-line bg-subtle text-xs font-medium text-ink transition-colors hover:border-ink/20 dark:border-transparent dark:bg-white/10 dark:text-ink/80">
         {t.resume.export}
       </div>
     </div>
@@ -112,12 +112,12 @@ export default function FeatureCards({ t }: { t: Copy }) {
   ]
 
   return (
-    <section id="features" className="border-t border-white/5 bg-gradient-to-b from-transparent to-white/[0.01]">
+    <section id="features" className="border-t border-line/60 bg-gradient-to-b from-transparent to-subtle/30 dark:border-white/5 dark:to-white/[0.01]">
       <div id="workflow" className="h-0 w-0 overflow-hidden" />
       <div className="mx-auto max-w-6xl px-5 py-20 lg:py-28">
         <div className="mx-auto max-w-2xl text-center">
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-mute">
-            <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-line bg-subtle px-3 py-1 text-xs text-mute dark:border-white/10 dark:bg-white/[0.03]">
+            <Sparkles className="h-3.5 w-3.5 text-emerald-500" />
             <span>{t.features.badge}</span>
           </div>
           <h2 className="mt-4 text-2xl font-semibold tracking-tight sm:text-3xl lg:text-4xl">
@@ -129,7 +129,7 @@ export default function FeatureCards({ t }: { t: Copy }) {
         </div>
         <div className="mt-14 grid gap-6 lg:grid-cols-3 lg:gap-8">
           {pipeline.map((item) => (
-            <article key={item.title} className="group flex min-w-0 flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4 transition-all hover:border-white/20 sm:p-5">
+            <article key={item.title} className="group flex min-w-0 flex-col rounded-2xl border border-line bg-surface p-4 shadow-sm transition-all hover:border-ink/20 sm:p-5 dark:border-white/10 dark:bg-white/[0.02] dark:hover:border-white/20 dark:shadow-none">
               <div className="mb-2 font-mono text-[11px] font-medium tracking-wider text-mute">{item.step}</div>
               <h3 className="text-base font-semibold tracking-tight text-ink sm:text-lg">{item.title}</h3>
               <p className="mt-2 min-h-12 text-sm leading-relaxed text-mute">{item.body}</p>
