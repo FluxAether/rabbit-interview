@@ -229,6 +229,7 @@ export async function startRealtimeStt(
     forget(await listen<{ sessionId?: number; generation?: number; source: string; message: string; retryable?: boolean }>('stt-error', (event) => {
       if (stopped || event.payload.source !== config.source || !current) return
       if (event.payload.sessionId !== config.sessionId || event.payload.generation !== current.generation) return
+      if (event.payload.message?.includes('rotating after goAway')) return
       handlers.onError?.(new Error(event.payload.message || 'Realtime STT failed'))
       if (provider === 'hosted' && event.payload.retryable) retry()
     }))

@@ -629,7 +629,11 @@ async fn run_session(
                 emit_error(&app, session_id, generation, &config.source, &error);
                 return;
             }
-            SocketOutcome::Ended { reconnect, message } => {
+            SocketOutcome::Ended {
+                reconnect,
+                message,
+                silent,
+            } => {
                 if ever_connected {
                     realtime_metrics::record_stt_reconnect(&config.source);
                 }
@@ -645,9 +649,13 @@ async fn run_session(
                     );
                     return;
                 }
-                reconnect_attempt = reconnect_attempt.saturating_add(1);
-                emit_error(&app, session_id, generation, &config.source, &message);
-                wait_before_reconnect(reconnect_attempt, &mut stop_rx).await;
+                if silent {
+                    reconnect_attempt = 0;
+                } else {
+                    reconnect_attempt = 1;
+                    emit_error(&app, session_id, generation, &config.source, &message);
+                    wait_before_reconnect(reconnect_attempt, &mut stop_rx).await;
+                }
             }
         }
     }
@@ -656,7 +664,11 @@ async fn run_session(
 enum SocketOutcome {
     Stopped,
     ReadyFailed(String),
-    Ended { reconnect: bool, message: String },
+    Ended {
+        reconnect: bool,
+        message: String,
+        silent: bool,
+    },
 }
 
 async fn run_connected_socket<S>(
@@ -734,13 +746,18 @@ where
                         return SocketOutcome::Ended {
                             reconnect: true,
                             message: format!("{} disconnected; reconnecting", display_name(&config.provider)),
+                            silent: false,
                         };
                     }
                 }
             }
             _ = keepalive.tick(), if config.provider == "deepgram" => {
                 if writer.send(Message::Text(r#"{"type":"KeepAlive"}"#.into())).await.is_err() {
-                    return SocketOutcome::Ended { reconnect: true, message: "Deepgram disconnected; reconnecting".into() };
+                    return SocketOutcome::Ended {
+                        reconnect: true,
+                        message: "Deepgram disconnected; reconnecting".into(),
+                        silent: false,
+                    };
                 }
             }
             _ = sleep_until_optional(gemini_timer), if gemini_timer.is_some() => {
@@ -772,11 +789,19 @@ where
                             }
                             Ok(ProviderAction::Transcript(event)) => { let _ = app.emit(TRANSCRIPT_EVENT, event); }
                             Ok(ProviderAction::Error(message)) => emit_error(app, session_id, generation, &config.source, &message),
-                            Ok(ProviderAction::End { reconnect, message }) => {
+                            Ok(ProviderAction::End {
+                                reconnect,
+                                message,
+                                silent,
+                            }) => {
                                 return if !ready {
                                     fail_or_end(ready_tx, ready, &message)
                                 } else {
-                                    SocketOutcome::Ended { reconnect, message }
+                                    SocketOutcome::Ended {
+                                        reconnect,
+                                        message,
+                                        silent,
+                                    }
                                 };
                             }
                             Err(error) => {
@@ -792,6 +817,7 @@ where
                             SocketOutcome::Ended {
                                 reconnect: true,
                                 message: format!("{} disconnected; reconnecting", display_name(&config.provider)),
+                                silent: false,
                             }
                         };
                     }
@@ -801,7 +827,11 @@ where
                         return if !ready {
                             fail_or_end(ready_tx, ready, &message)
                         } else {
-                            SocketOutcome::Ended { reconnect: true, message }
+                            SocketOutcome::Ended {
+                                reconnect: true,
+                                message,
+                                silent: false,
+                            }
                         };
                     }
                 }
@@ -844,7 +874,11 @@ enum ProviderAction {
     Ready,
     Transcript(TranscriptEvent),
     Error(String),
-    End { reconnect: bool, message: String },
+    End {
+        reconnect: bool,
+        message: String,
+        silent: bool,
+    },
 }
 
 fn handle_provider_message(
@@ -873,6 +907,7 @@ fn handle_provider_message(
                 Some(gemini::GeminiEvent::GoAway) => Ok(ProviderAction::End {
                     reconnect: true,
                     message: "Gemini Live rotating after goAway".into(),
+                    silent: true,
                 }),
                 Some(gemini::GeminiEvent::Transcript(event)) => {
                     if event.boundary == "interim" || event.boundary == "final" {
@@ -906,6 +941,7 @@ fn handle_provider_message(
                         "Hosted STT ended ({reason}){}",
                         if reconnect { ", reconnecting." } else { "" }
                     ),
+                    silent: false,
                 }),
                 None => Ok(ProviderAction::None),
             }
@@ -928,6 +964,7 @@ fn fail_or_end(
         SocketOutcome::Ended {
             reconnect: true,
             message: message.to_string(),
+            silent: false,
         }
     }
 }
@@ -1150,5 +1187,53 @@ mod tests {
             .samples
             .iter()
             .all(|sample| (*sample - 0.2).abs() < f32::EPSILON));
+    }
+
+    #[test]
+    fn gemini_go_away_requests_silent_reconnect() {
+        let config = RealtimeSttConfig {
+            provider: "gemini".into(),
+            source: "system".into(),
+            capture_id: 1,
+            sources: None,
+            sample_rate: 16_000,
+            session_id: Some(1),
+            api_key: Some("fake-key".into()),
+            model: None,
+            language: "zh-CN".into(),
+            app_language: None,
+            endpointing_ms: None,
+            utterance_end_ms: None,
+            ws_url: None,
+            ws_ticket: None,
+        };
+        let mut final_seen = false;
+        let mut utterance_ended = false;
+        let mut timer = None;
+        let action = handle_provider_message(
+            &config,
+            1,
+            1,
+            1,
+            r#"{"goAway":{"timeLeft":"5s"}}"#,
+            &mut final_seen,
+            &mut utterance_ended,
+            &mut timer,
+            Duration::from_millis(1500),
+        )
+        .unwrap();
+
+        match action {
+            ProviderAction::End {
+                reconnect,
+                silent,
+                message,
+            } => {
+                assert!(reconnect);
+                assert!(silent);
+                assert_eq!(message, "Gemini Live rotating after goAway");
+            }
+            _ => panic!("expected ProviderAction::End for goAway"),
+        }
     }
 }
