@@ -27,7 +27,13 @@
     "verify:db-storage": "node scripts/verify-db-storage.mjs",
     "verify:ui-audit": "node scripts/verify-ui-audit-fixes.mjs",
     "verify:audit-fixes": "node scripts/verify-audit-fixes.mjs",
-    "migrate:json-to-db": "node scripts/migrate-json-to-db.mjs"
+    "migrate:json-to-db": "node scripts/migrate-json-to-db.mjs",
+    "stress:api": "node scripts/stress/api-stress.mjs",
+    "stress:ws": "node scripts/stress/ws-stress.mjs",
+    "stress:app": "node scripts/stress/app-state-stress.mjs",
+    "stress:e2e": "node scripts/stress/app-client-stress.mjs",
+    "stress:all": "node scripts/stress/run-all.mjs",
+    "stress:notion": "node scripts/stress/upload-to-notion.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
