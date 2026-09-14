@@ -34,14 +34,14 @@ export function writeLandingLang(lang: LandingLang) {
   writeRaw(lang === 'en' ? 'en' : 'zh-CN')
 }
 
-export function authLangFromStore(requested?: string | null): AuthLang {
+export function authLangFromStore(requested?: string | null, hideTraditional = false): AuthLang {
   const source = requested || readRaw()
   const value = (source || '').toLowerCase()
-  if (value === 'zh-tw' || value.startsWith('zh-tw') || value.startsWith('zh-hk') || value.startsWith('zh-hant')) return 'zh-TW'
+  if (!hideTraditional && (value === 'zh-tw' || value.startsWith('zh-tw') || value.startsWith('zh-hk') || value.startsWith('zh-hant'))) return 'zh-TW'
   if (value.startsWith('en')) return 'en'
   if (value === 'zh' || value === 'zh-cn' || value.startsWith('zh-cn') || value.startsWith('zh')) return 'zh-CN'
   const browser = navigator.language.toLowerCase()
-  if (browser.startsWith('zh-tw') || browser.startsWith('zh-hk') || browser.startsWith('zh-hant')) return 'zh-TW'
+  if (!hideTraditional && (browser.startsWith('zh-tw') || browser.startsWith('zh-hk') || browser.startsWith('zh-hant'))) return 'zh-TW'
   return browser.startsWith('zh') ? 'zh-CN' : 'en'
 }
 

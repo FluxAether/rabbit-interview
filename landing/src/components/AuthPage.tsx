@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
 import { ArrowLeft, Check, KeyRound, Moon, ShieldCheck, Sun } from 'lucide-react'
 import { authCopy, type AuthLang } from '../locales/authContent'
+import { authLangFromStore, writeAuthLang } from '../locales/lang'
 import { FALLBACK_PRODUCTS, formatCredits, formatYuan, gateway, isPaymentProduct, type PaymentProduct } from '../lib/catalog'
 import { CREDIT_UNIT_SCALE, creditsToUnits } from '../lib/credits'
 import { useTheme } from '../lib/theme'
@@ -80,20 +81,9 @@ function fragment(): URLSearchParams {
   return cachedFragment
 }
 
-function initialLang(): AuthLang {
+function initialLang(hideTraditional = false): AuthLang {
   const requested = fragment().get('lang')
-  if (requested === 'zh-TW' || requested?.toLowerCase().startsWith('zh-tw')) return 'zh-TW'
-  if (requested === 'zh-CN' || requested === 'zh' || requested?.toLowerCase().startsWith('zh-cn')) return 'zh-CN'
-  if (requested?.toLowerCase().startsWith('en')) return 'en'
-  try {
-    const stored = localStorage.getItem('rabbit-auth-lang')
-    if (stored === 'en' || stored === 'zh-CN' || stored === 'zh-TW') return stored
-  } catch {
-    // Language preference is optional.
-  }
-  const browser = navigator.language.toLowerCase()
-  if (browser.startsWith('zh-tw') || browser.startsWith('zh-hk') || browser.startsWith('zh-hant')) return 'zh-TW'
-  return browser.startsWith('zh') ? 'zh-CN' : 'en'
+  return authLangFromStore(requested, hideTraditional)
 }
 
 async function api<TResponse>(path: string, values?: Record<string, string>): Promise<TResponse> {
@@ -1147,12 +1137,14 @@ function AuthShell({
   setLang,
   t,
   maxWidth = 'max-w-xl',
+  hideTraditional = false,
 }: {
   children: ReactNode
   lang: AuthLang
   setLang: (lang: AuthLang) => void
   t: T
   maxWidth?: string
+  hideTraditional?: boolean
 }) {
   const { resolvedTheme, toggleTheme } = useTheme()
 
@@ -1166,7 +1158,7 @@ function AuthShell({
         </a>
         <div className="flex items-center gap-2 sm:gap-3">
           <div className="flex items-center rounded-full border border-line bg-subtle p-0.5 text-[11px] font-medium dark:border-white/10 dark:bg-white/[0.03]" aria-label="Language">
-            {(['zh-CN', 'zh-TW', 'en'] as const).map((value) => (
+            {(hideTraditional ? (['zh-CN', 'en'] as const) : (['zh-CN', 'zh-TW', 'en'] as const)).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -1178,7 +1170,9 @@ function AuthShell({
                 }`}
                 aria-pressed={lang === value}
               >
-                {value === 'zh-CN' ? '简' : value === 'zh-TW' ? '繁' : 'EN'}
+                {hideTraditional
+                  ? (value === 'zh-CN' ? '中文' : 'EN')
+                  : (value === 'zh-CN' ? '简' : value === 'zh-TW' ? '繁' : 'EN')}
               </button>
             ))}
           </div>
@@ -1212,9 +1206,11 @@ function AuthShell({
 }
 
 export default function AuthPage({ path: propPath }: { path?: string } = {}) {
-  const [lang, setLangState] = useState<AuthLang>(initialLang)
-  const t = authCopy[lang]
   const path = propPath || window.location.pathname
+  const isSubscribe = path === '/subscribe'
+  const [lang, setLangState] = useState<AuthLang>(() => initialLang(isSubscribe))
+  const effectiveLang = isSubscribe && lang === 'zh-TW' ? 'zh-CN' : lang
+  const t = authCopy[effectiveLang]
 
   useEffect(() => {
     document.documentElement.lang = t.htmlLang
@@ -1222,12 +1218,9 @@ export default function AuthPage({ path: propPath }: { path?: string } = {}) {
   }, [t])
 
   const setLang = (next: AuthLang) => {
-    setLangState(next)
-    try {
-      localStorage.setItem('rabbit-auth-lang', next)
-    } catch {
-      // Language preference is optional.
-    }
+    const target = isSubscribe && next === 'zh-TW' ? 'zh-CN' : next
+    setLangState(target)
+    writeAuthLang(target)
   }
 
   let content: ReactNode
@@ -1245,6 +1238,16 @@ export default function AuthPage({ path: propPath }: { path?: string } = {}) {
     content = <StaticPage t={t} title={t.errorTitle} body={t.errors[code] || t.errors.INTERNAL_ERROR} />
   }
 
-  const maxWidth = path === '/subscribe' ? 'max-w-4xl' : 'max-w-xl'
-  return <AuthShell lang={lang} setLang={setLang} t={t} maxWidth={maxWidth}>{content}</AuthShell>
+  const maxWidth = isSubscribe ? 'max-w-4xl' : 'max-w-xl'
+  return (
+    <AuthShell
+      lang={effectiveLang}
+      setLang={setLang}
+      t={t}
+      maxWidth={maxWidth}
+      hideTraditional={isSubscribe}
+    >
+      {content}
+    </AuthShell>
+  )
 }

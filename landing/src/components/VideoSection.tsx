@@ -11,6 +11,7 @@ export default function VideoSection({ t }: VideoSectionProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [hasStarted, setHasStarted] = useState(false)
+  const [isBuffering, setIsBuffering] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(74.16)
   const [isMuted, setIsMuted] = useState(false)
@@ -48,9 +49,30 @@ export default function VideoSection({ t }: VideoSectionProps) {
 
     const onPause = () => {
       setIsPlaying(false)
+      setIsBuffering(false)
     }
 
     const onEnded = () => {
+      setIsPlaying(false)
+      setIsBuffering(false)
+    }
+
+    const onWaiting = () => {
+      setIsBuffering(true)
+    }
+
+    const onPlaying = () => {
+      setIsBuffering(false)
+      setIsPlaying(true)
+      setHasStarted(true)
+    }
+
+    const onCanPlay = () => {
+      setIsBuffering(false)
+    }
+
+    const onError = () => {
+      setIsBuffering(false)
       setIsPlaying(false)
     }
 
@@ -59,6 +81,10 @@ export default function VideoSection({ t }: VideoSectionProps) {
     video.addEventListener('play', onPlay)
     video.addEventListener('pause', onPause)
     video.addEventListener('ended', onEnded)
+    video.addEventListener('waiting', onWaiting)
+    video.addEventListener('playing', onPlaying)
+    video.addEventListener('canplay', onCanPlay)
+    video.addEventListener('error', onError)
 
     return () => {
       video.removeEventListener('timeupdate', onTimeUpdate)
@@ -66,6 +92,10 @@ export default function VideoSection({ t }: VideoSectionProps) {
       video.removeEventListener('play', onPlay)
       video.removeEventListener('pause', onPause)
       video.removeEventListener('ended', onEnded)
+      video.removeEventListener('waiting', onWaiting)
+      video.removeEventListener('playing', onPlaying)
+      video.removeEventListener('canplay', onCanPlay)
+      video.removeEventListener('error', onError)
     }
   }, [chapters])
 
@@ -75,7 +105,12 @@ export default function VideoSection({ t }: VideoSectionProps) {
     if (isPlaying) {
       video.pause()
     } else {
-      video.play().catch(() => {})
+      if (video.readyState < 3) {
+        setIsBuffering(true)
+      }
+      video.play().catch(() => {
+        setIsBuffering(false)
+      })
     }
   }
 
@@ -105,7 +140,12 @@ export default function VideoSection({ t }: VideoSectionProps) {
     if (!video) return
     video.currentTime = time
     if (!isPlaying) {
-      video.play().catch(() => {})
+      if (video.readyState < 3) {
+        setIsBuffering(true)
+      }
+      video.play().catch(() => {
+        setIsBuffering(false)
+      })
     }
   }
 
@@ -160,27 +200,32 @@ export default function VideoSection({ t }: VideoSectionProps) {
                 onClick={togglePlay}
               />
 
-              {/* Center Play/Pause Overlay when paused or initial */}
-              {!isPlaying && (
+              {/* Center Play / Buffering Overlay */}
+              {(isBuffering || !isPlaying) && (
                 <div
                   className="absolute inset-0 flex flex-col items-center justify-center bg-black/35 backdrop-blur-[1px] transition-all hover:bg-black/25 cursor-pointer"
                   onClick={togglePlay}
                 >
-                  <button
-                    type="button"
-                    aria-label={t.videoShowcase.play}
-                    className="group relative flex h-20 w-20 items-center justify-center rounded-full bg-white text-canvas shadow-xl shadow-sky-500/20 transition-all hover:scale-105 active:scale-95"
-                  >
-                    {!hasStarted && (
-                      <div className="absolute -inset-2 rounded-full border border-white/30 animate-ping opacity-30 pointer-events-none" />
-                    )}
-                    <Play className="ml-1 h-8 w-8 fill-canvas text-canvas" />
-                  </button>
-                  {!hasStarted && (
-                    <div className="mt-4 flex items-center gap-2 rounded-full border border-white/20 bg-black/60 px-4 py-1.5 text-xs font-medium text-white backdrop-blur-md">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                      <span>{t.videoShowcase.play} · 1:14</span>
+                  {isBuffering ? (
+                    <div className="pointer-events-none relative flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-full border border-white/15 bg-black/60 backdrop-blur-md shadow-2xl shadow-black/80">
+                      <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-full border-2 border-white/15 border-t-sky-400 animate-spin" />
                     </div>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        aria-label={t.videoShowcase.play}
+                        className="group relative flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-full border border-white/25 bg-black/45 backdrop-blur-md text-white shadow-2xl shadow-black/80 transition-all duration-200 hover:scale-105 hover:border-sky-400/50 hover:bg-black/65 hover:shadow-sky-500/20 active:scale-95"
+                      >
+                        <Play className="ml-1 h-7 w-7 sm:h-8 sm:w-8 fill-white text-white transition-transform duration-200 group-hover:scale-105 group-hover:fill-sky-300 group-hover:text-sky-300" />
+                      </button>
+                      {!hasStarted && (
+                        <div className="mt-4 flex items-center gap-2 rounded-full border border-white/15 bg-black/60 px-3.5 py-1.5 text-xs font-medium text-white/90 backdrop-blur-md shadow-lg shadow-black/50">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          <span>{t.videoShowcase.play} · 1:14</span>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -323,4 +368,3 @@ export default function VideoSection({ t }: VideoSectionProps) {
     </section>
   )
 }
-
