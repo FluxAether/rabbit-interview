@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { LayoutTemplate, Sliders, Sparkles, Star, Volume2, X } from 'lucide-react'
 import type { Copy } from '../locales/content'
 import AudioWaveform from './AudioWaveform'
+import { gsap } from '../lib/gsap'
 
 export default function CopilotPanel({
   t,
@@ -13,6 +14,30 @@ export default function CopilotPanel({
   const [viewMode, setViewMode] = useState<'normal' | 'hud'>('normal')
   const [opacityLevel, setOpacityLevel] = useState<number>(90)
   const steps = [t.copilot.s1, t.copilot.s2, t.copilot.s3]
+  const contentAreaRef = useRef<HTMLDivElement>(null)
+
+  const handleModeChange = (mode: 'normal' | 'hud') => {
+    if (mode === viewMode) return
+    if (contentAreaRef.current) {
+      gsap.to(contentAreaRef.current, {
+        autoAlpha: 0.2,
+        scale: 0.98,
+        duration: 0.15,
+        ease: 'power2.in',
+        onComplete: () => {
+          setViewMode(mode)
+          gsap.to(contentAreaRef.current, {
+            autoAlpha: 1,
+            scale: 1,
+            duration: 0.25,
+            ease: 'power2.out',
+          })
+        },
+      })
+    } else {
+      setViewMode(mode)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -28,7 +53,7 @@ export default function CopilotPanel({
             <div className="flex items-center rounded-lg border border-line bg-subtle p-0.5 dark:border-white/10 dark:bg-black/40">
               <button
                 type="button"
-                onClick={() => setViewMode('normal')}
+                onClick={() => handleModeChange('normal')}
                 aria-pressed={viewMode === 'normal'}
                 className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-all ${
                   viewMode === 'normal'
@@ -41,7 +66,7 @@ export default function CopilotPanel({
               </button>
               <button
                 type="button"
-                onClick={() => setViewMode('hud')}
+                onClick={() => handleModeChange('hud')}
                 aria-pressed={viewMode === 'hud'}
                 className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-all ${
                   viewMode === 'hud'
@@ -127,7 +152,7 @@ export default function CopilotPanel({
         </div>
 
         {/* Question & Outline Bubbles */}
-        <div className={`space-y-2 ${compact ? 'text-[11px]' : 'text-[13px]'}`}>
+        <div ref={contentAreaRef} className={`space-y-2 ${compact ? 'text-[11px]' : 'text-[13px]'}`}>
           <div className="rounded-xl border border-line bg-subtle/80 px-3.5 py-2.5 text-ink shadow-sm dark:border-white/15 dark:bg-white/[0.06] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
             <span className="mr-2 text-[10px] font-mono text-mute">Q:</span>
             {t.copilot.question}

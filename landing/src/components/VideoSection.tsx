@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { Maximize2, Pause, Play, RotateCcw, Sparkles, Volume2, VolumeX } from 'lucide-react'
 import type { Copy } from '../locales/content'
+import { gsap, useGSAP } from '../lib/gsap'
 
 interface VideoSectionProps {
   t: Copy
 }
 
 export default function VideoSection({ t }: VideoSectionProps) {
+  const sectionRef = useRef<HTMLElement>(null)
+  const headerRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const glowRef = useRef<HTMLDivElement>(null)
+  const chaptersGridRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+
   const [isPlaying, setIsPlaying] = useState(false)
   const [hasStarted, setHasStarted] = useState(false)
   const [isBuffering, setIsBuffering] = useState(false)
@@ -19,25 +25,104 @@ export default function VideoSection({ t }: VideoSectionProps) {
 
   const chapters = t.videoShowcase.chapters
 
+  useGSAP(() => {
+    const mm = gsap.matchMedia()
+
+    mm.add('(prefers-reduced-motion: no-preference)', () => {
+      // Header entrance
+      if (headerRef.current) {
+        gsap.fromTo(
+          headerRef.current.children,
+          { y: 28, autoAlpha: 0 },
+          {
+            y: 0,
+            autoAlpha: 1,
+            stagger: 0.12,
+            duration: 0.7,
+            ease: 'power3.out',
+            clearProps: 'opacity,visibility,transform',
+            scrollTrigger: {
+              trigger: headerRef.current,
+              start: 'top 85%',
+              toggleActions: 'play none none none',
+            },
+          }
+        )
+      }
+
+      // Video card entrance + glow scale
+      if (containerRef.current) {
+        gsap.fromTo(
+          containerRef.current,
+          { y: 45, scale: 0.96, autoAlpha: 0 },
+          {
+            y: 0,
+            scale: 1,
+            autoAlpha: 1,
+            duration: 0.85,
+            ease: 'power2.out',
+            clearProps: 'opacity,visibility,transform',
+            scrollTrigger: {
+              trigger: containerRef.current,
+              start: 'top 80%',
+              toggleActions: 'play none none none',
+            },
+          }
+        )
+      }
+
+      // Ambient glow subtle pulse
+      if (glowRef.current) {
+        gsap.to(glowRef.current, {
+          scale: 1.06,
+          opacity: 0.9,
+          duration: 3.5,
+          yoyo: true,
+          repeat: -1,
+          ease: 'sine.inOut',
+        })
+      }
+
+      // Chapter buttons staggered entrance
+      if (chaptersGridRef.current) {
+        gsap.fromTo(
+          chaptersGridRef.current.children,
+          { y: 20, autoAlpha: 0 },
+          {
+            y: 0,
+            autoAlpha: 1,
+            stagger: 0.05,
+            duration: 0.5,
+            ease: 'power2.out',
+            clearProps: 'opacity,visibility,transform',
+            scrollTrigger: {
+              trigger: chaptersGridRef.current,
+              start: 'top 90%',
+              toggleActions: 'play none none none',
+            },
+          }
+        )
+      }
+    })
+  }, { scope: sectionRef })
+
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
     const onTimeUpdate = () => {
       setCurrentTime(video.currentTime)
-      // Determine active chapter
-      let currentIdx = 0
-      for (let i = chapters.length - 1; i >= 0; i--) {
-        if (video.currentTime >= chapters[i].time - 0.5) {
-          currentIdx = i
+      const current = video.currentTime
+      for (let i = chapters.length - 1; i >= 0; i -= 1) {
+        if (current >= chapters[i].time - 0.25) {
+          setActiveChapterIndex(i)
           break
         }
       }
-      setActiveChapterIndex(currentIdx)
     }
 
     const onLoadedMetadata = () => {
-      if (video.duration && !Number.isNaN(video.duration)) {
+      if (video.duration && Number.isFinite(video.duration)) {
         setDuration(video.duration)
       }
     }
@@ -49,12 +134,10 @@ export default function VideoSection({ t }: VideoSectionProps) {
 
     const onPause = () => {
       setIsPlaying(false)
-      setIsBuffering(false)
     }
 
     const onEnded = () => {
       setIsPlaying(false)
-      setIsBuffering(false)
     }
 
     const onWaiting = () => {
@@ -64,7 +147,6 @@ export default function VideoSection({ t }: VideoSectionProps) {
     const onPlaying = () => {
       setIsBuffering(false)
       setIsPlaying(true)
-      setHasStarted(true)
     }
 
     const onCanPlay = () => {
@@ -102,15 +184,12 @@ export default function VideoSection({ t }: VideoSectionProps) {
   const togglePlay = () => {
     const video = videoRef.current
     if (!video) return
-    if (isPlaying) {
-      video.pause()
-    } else {
-      if (video.readyState < 3) {
-        setIsBuffering(true)
-      }
+    if (video.paused) {
       video.play().catch(() => {
-        setIsBuffering(false)
+        setIsPlaying(false)
       })
+    } else {
+      video.pause()
     }
   }
 
@@ -122,39 +201,32 @@ export default function VideoSection({ t }: VideoSectionProps) {
   }
 
   const toggleFullscreen = () => {
-    const container = containerRef.current || videoRef.current
+    const container = containerRef.current
     if (!container) return
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {})
-    } else if (container.requestFullscreen) {
-      container.requestFullscreen().catch(() => {
-        videoRef.current?.requestFullscreen().catch(() => {})
-      })
-    } else if (videoRef.current && (videoRef.current as any).webkitEnterFullscreen) {
-      (videoRef.current as any).webkitEnterFullscreen()
+    } else {
+      container.requestFullscreen().catch(() => {})
     }
   }
 
   const seekToChapter = (time: number) => {
     const video = videoRef.current
     if (!video) return
-    video.currentTime = time
-    if (!isPlaying) {
-      if (video.readyState < 3) {
-        setIsBuffering(true)
-      }
-      video.play().catch(() => {
-        setIsBuffering(false)
-      })
+    video.currentTime = Math.max(0, time)
+    setCurrentTime(time)
+    if (video.paused) {
+      video.play().catch(() => {})
     }
   }
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const video = videoRef.current
-    if (!video) return
-    const target = Number(e.target.value)
-    video.currentTime = target
-    setCurrentTime(target)
+    const next = Number.parseFloat(e.target.value)
+    if (!Number.isNaN(next)) {
+      setCurrentTime(next)
+      if (video) video.currentTime = next
+    }
   }
 
   const formatTime = (secs: number) => {
@@ -164,9 +236,9 @@ export default function VideoSection({ t }: VideoSectionProps) {
   }
 
   return (
-    <section id="video" className="relative scroll-mt-16 border-t border-white/5 bg-gradient-to-b from-white/[0.01] to-transparent py-20 lg:py-28">
+    <section ref={sectionRef} id="video" className="relative scroll-mt-16 border-t border-white/5 bg-gradient-to-b from-white/[0.01] to-transparent py-20 lg:py-28">
       <div className="mx-auto max-w-6xl px-5">
-        <div className="mx-auto max-w-2xl text-center">
+        <div ref={headerRef} className="mx-auto max-w-2xl text-center">
           <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-mute">
             <Sparkles className="h-3.5 w-3.5 text-sky-400" />
             <span>{t.videoShowcase.badge}</span>
@@ -181,14 +253,17 @@ export default function VideoSection({ t }: VideoSectionProps) {
 
         <div className="relative mx-auto mt-12 max-w-5xl">
           {/* Subtle atmospheric backdrop glow */}
-          <div className="pointer-events-none absolute -inset-4 rounded-[36px] bg-gradient-to-r from-sky-500/10 via-emerald-500/10 to-purple-500/10 opacity-70 blur-2xl" />
+          <div
+            ref={glowRef}
+            className="pointer-events-none absolute -inset-4 rounded-[36px] bg-gradient-to-r from-sky-500/10 via-emerald-500/10 to-purple-500/10 opacity-70 blur-2xl will-change-transform"
+          />
 
           {/* Video Container Card */}
           <div
             ref={containerRef}
-            className="relative overflow-hidden rounded-[22px] border border-white/15 bg-[#0e0e12] shadow-2xl shadow-black/80"
+            className="relative overflow-hidden rounded-[22px] border border-white/15 bg-[#0e0e12] shadow-2xl shadow-black/80 will-change-transform"
           >
-            {/* Aspect Ratio Box: Video Display Area (Subtitles completely unblocked) */}
+            {/* Aspect Ratio Box: Video Display Area */}
             <div className="relative aspect-video w-full overflow-hidden bg-black">
               <video
                 ref={videoRef}
@@ -231,13 +306,13 @@ export default function VideoSection({ t }: VideoSectionProps) {
               )}
             </div>
 
-            {/* Dedicated Player HUD Toolbar (Docked cleanly below video so subtitles are never blocked) */}
+            {/* Dedicated Player HUD Toolbar */}
             <div className="border-t border-white/10 bg-[#0c0c10] p-4 sm:px-5 sm:py-3.5">
               {/* Progress Slider with Chapter Markers */}
               <div className="relative flex items-center py-1">
                 {/* Visual Fill Track */}
                 <div
-                  className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-1.5 rounded-l-lg bg-sky-400"
+                  className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 h-1.5 rounded-l-lg bg-sky-400 transition-all"
                   style={{ width: `${Math.min(100, Math.max(0, (currentTime / (duration || 74)) * 100))}%` }}
                 />
                 {/* Chapter Tick Marks */}
@@ -325,7 +400,7 @@ export default function VideoSection({ t }: VideoSectionProps) {
                 <span className="font-medium tracking-wide text-ink">{t.videoShowcase.chapterPrompt}</span>
                 <span className="font-mono text-[11px] text-mute/80">{activeChapterIndex + 1} / {chapters.length}</span>
               </div>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              <div ref={chaptersGridRef} className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                 {chapters.map((ch, idx) => {
                   const isActive = activeChapterIndex === idx
                   return (

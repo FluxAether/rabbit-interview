@@ -1,9 +1,11 @@
 # Matches .github/workflows/release.yml: v* tag -> macOS+Windows installers -> GitHub Release.
+# Also deploys server, then builds and publishes landing to Cloudflare Workers.
 # CircleCI contexts required:
 #   `tauri-signing`: TAURI_SIGNING_PRIVATE_KEY and, if encrypted,
 #                    TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 #   `github-release`: GH_TOKEN or GITHUB_TOKEN (GitHub PAT with repo contents:write)
 #   `server-deploy`: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (optional: DEPLOY_PORT, DEPLOY_PATH)
+#   `cloudflare-deploy`: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, VITE_HOSTED_GATEWAY_URL
 version: 2.1
 
 orbs:
@@ -290,6 +292,32 @@ jobs:
             HEALTH_URL="${GATEWAY_HEALTH_CHECK_URL:-http://127.0.0.1:8787/healthz}"
             $SSH_CMD "for i in {1..10}; do if curl -fsS \"$HEALTH_URL\" >/dev/null 2>&1; then echo 'Gateway healthy!'; exit 0; fi; sleep 1; done; echo 'Gateway health check timed out' >&2; exit 1"
 
+  build-deploy-landing:
+    docker:
+      - image: cimg/node:22.22
+    resource_class: medium
+    steps:
+      - checkout
+      - run:
+          name: Check Cloudflare deployment configuration
+          command: |
+            set -euo pipefail
+            test -n "${CLOUDFLARE_API_TOKEN:-}" || { echo "CLOUDFLARE_API_TOKEN is required in the cloudflare-deploy context" >&2; exit 1; }
+            test -n "${CLOUDFLARE_ACCOUNT_ID:-}" || { echo "CLOUDFLARE_ACCOUNT_ID is required in the cloudflare-deploy context" >&2; exit 1; }
+            test -n "${VITE_HOSTED_GATEWAY_URL:-}" || { echo "VITE_HOSTED_GATEWAY_URL is required in the cloudflare-deploy context" >&2; exit 1; }
+      - run:
+          name: Install dependencies
+          command: npm ci
+      - run:
+          name: Build landing
+          command: npm run landing:build
+      - store_artifacts:
+          path: landing/dist
+          destination: landing
+      - run:
+          name: Deploy landing to Cloudflare Workers
+          command: npx --yes wrangler@4.131.2 deploy --config landing/wrangler.jsonc
+
   publish:
     docker:
       - image: cimg/node:20.19
@@ -393,6 +421,15 @@ workflows:
           context: server-deploy
           requires:
             - build-server
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - build-deploy-landing:
+          context: cloudflare-deploy
+          requires:
+            - deploy-server
           filters:
             tags:
               only: /^v.*/
