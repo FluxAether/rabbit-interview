@@ -3,6 +3,7 @@
 # CircleCI contexts required:
 #   `release`: TAURI_SIGNING_PRIVATE_KEY, GH_TOKEN or GITHUB_TOKEN (GitHub PAT with repo contents:write)
 #   `server-deploy`: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (optional: DEPLOY_PORT, DEPLOY_PATH)
+#     DEPLOY_USER needs passwordless sudo for mkdir, tee, chmod, mv, and systemctl.
 #   `cloudflare-deploy`: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, VITE_HOSTED_GATEWAY_URL
 version: 2.1
 
@@ -276,15 +277,15 @@ jobs:
             ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
             SSH_CMD="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT $DEPLOY_USER@$DEPLOY_HOST"
-            SCP_CMD="scp -i ~/.ssh/deploy_key -P $DEPLOY_PORT"
+            printf -v REMOTE_DEPLOY_PATH '%q' "$DEPLOY_PATH"
 
             echo "Uploading oncue-gateway binary to $DEPLOY_HOST:$DEPLOY_PATH..."
-            $SSH_CMD "mkdir -p $DEPLOY_PATH"
-            $SCP_CMD dist-server/oncue-gateway "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/oncue-gateway.new"
-            $SSH_CMD "chmod +x $DEPLOY_PATH/oncue-gateway.new && mv $DEPLOY_PATH/oncue-gateway.new $DEPLOY_PATH/oncue-gateway"
+            $SSH_CMD "sudo -n mkdir -p -- $REMOTE_DEPLOY_PATH"
+            $SSH_CMD "sudo -n tee -- $REMOTE_DEPLOY_PATH/oncue-gateway.new >/dev/null" < dist-server/oncue-gateway
+            $SSH_CMD "sudo -n chmod -- 755 $REMOTE_DEPLOY_PATH/oncue-gateway.new && sudo -n mv -f -- $REMOTE_DEPLOY_PATH/oncue-gateway.new $REMOTE_DEPLOY_PATH/oncue-gateway"
 
             echo "Restarting oncue-gateway systemd service..."
-            $SSH_CMD "sudo systemctl restart oncue-gateway"
+            $SSH_CMD "sudo -n systemctl restart oncue-gateway"
 
             echo "Checking gateway health..."
             HEALTH_URL="${GATEWAY_HEALTH_CHECK_URL:-http://127.0.0.1:8787/healthz}"
