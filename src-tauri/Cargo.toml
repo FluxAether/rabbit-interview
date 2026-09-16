@@ -1,6 +1,6 @@
 [package]
 name = "rabbitinterview"
-version = "0.17.3"
+version = "0.17.4"
 description = "OnCue — Desktop Interview Copilot"
 authors = ["OnCue contributors"]
 license = "MIT"
