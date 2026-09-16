@@ -1596,7 +1596,7 @@ mod tests {
     fn saved_recording_paths_only_accept_interview_wav_names() {
         assert_eq!(
             saved_recording_file_name(
-                "/Users/thomas/Library/Application Support/com.rabbitinterview.desktop/recordings/interview-1.wav"
+                "/Users/thomas/Library/Application Support/com.oncue.desktop/recordings/interview-1.wav"
             )
             .unwrap(),
             "interview-1.wav"

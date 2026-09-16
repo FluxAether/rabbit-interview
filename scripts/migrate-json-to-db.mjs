@@ -78,7 +78,7 @@ Options:
 
 function defaultAppDataDir() {
   const home = os.homedir()
-  const id = 'com.rabbitinterview.desktop'
+  const id = 'com.oncue.desktop'
   if (process.platform === 'darwin') {
     return path.join(home, 'Library', 'Application Support', id)
   }

@@ -63,7 +63,7 @@ jobs:
           test "$(lipo -archs "$APP/Contents/MacOS/audiotee")" = "x86_64 arm64"
           codesign --verify --verbose=2 "$APP"
           IDENTIFIER=$(codesign -d --verbose=2 "$APP" 2>&1 | sed -n "s/^Identifier=//p")
-          test "$IDENTIFIER" = "com.rabbitinterview.desktop"
+          test "$IDENTIFIER" = "com.oncue.desktop"
 
       - name: Build Windows application
         if: matrix.platform_os == 'windows'

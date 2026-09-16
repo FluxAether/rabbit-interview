@@ -570,7 +570,7 @@ private func tccIdentityError() -> String? {
     let bundle = Bundle.main
     let identifier = bundle.bundleIdentifier ?? ""
     let hasUsage = bundle.object(forInfoDictionaryKey: "NSSpeechRecognitionUsageDescription") != nil
-    if identifier == "com.rabbitinterview.desktop" && hasUsage {
+    if (identifier == "com.oncue.desktop" || identifier == "com.rabbitinterview.desktop") && hasUsage {
         return nil
     }
     return "Apple on-device STT needs a packaged macOS app so Speech Recognition permission can be requested. Restart from a bundled .app instead of a bare tauri dev binary."

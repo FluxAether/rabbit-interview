@@ -22,7 +22,7 @@ The UI supports Simplified Chinese, Traditional Chinese, and English. Theme foll
   - **Deepgram** for speech-to-text
   - **Groq**, **OpenAI**, **Anthropic**, or **Google Gemini** for language features
 
-API keys are entered in **Settings**. They are stored in the local SQLite database under the app data directory (`com.rabbitinterview.desktop`). They are not committed to this repository.
+API keys are entered in **Settings**. They are stored in the local SQLite database under the app data directory (`com.oncue.desktop`). They are not committed to this repository.
 
 Use the copilot only where interview or assessment rules allow assistance tools.
 

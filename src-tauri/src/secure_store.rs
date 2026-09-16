@@ -8,7 +8,7 @@ fn invalid_key(key: &str) -> bool {
 }
 
 fn entry(key: &str) -> Result<Entry, String> {
-    Entry::new("com.rabbitinterview.desktop", key).map_err(|error| error.to_string())
+    Entry::new("com.oncue.desktop", key).map_err(|error| error.to_string())
 }
 
 #[command]
