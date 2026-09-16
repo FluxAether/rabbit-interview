@@ -227,7 +227,7 @@ jobs:
             export PATH="$HOME/.cargo/bin:$PATH"
             rustup default stable
       - run:
-          name: Build rabbit-gateway binary
+          name: Build oncue-gateway binary
           command: |
             set -euo pipefail
             cargo build --manifest-path server/Cargo.toml --locked --release
@@ -236,13 +236,13 @@ jobs:
           command: |
             set -euo pipefail
             mkdir -p dist-server
-            cp server/target/release/rabbit-gateway dist-server/
-            chmod +x dist-server/rabbit-gateway
-            (cd dist-server && sha256sum rabbit-gateway > SHA256SUMS.txt)
+            cp server/target/release/oncue-gateway dist-server/
+            chmod +x dist-server/oncue-gateway
+            (cd dist-server && sha256sum oncue-gateway > SHA256SUMS.txt)
       - persist_to_workspace:
           root: dist-server
           paths:
-            - rabbit-gateway
+            - oncue-gateway
             - SHA256SUMS.txt
       - store_artifacts:
           path: dist-server
@@ -258,8 +258,8 @@ jobs:
           name: Verify server binary
           command: |
             set -euo pipefail
-            test -f dist-server/rabbit-gateway
-            test -x dist-server/rabbit-gateway
+            test -f dist-server/oncue-gateway
+            test -x dist-server/oncue-gateway
       - run:
           name: Deploy to production server via SSH
           command: |
@@ -280,13 +280,13 @@ jobs:
             SSH_CMD="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT $DEPLOY_USER@$DEPLOY_HOST"
             SCP_CMD="scp -i ~/.ssh/deploy_key -P $DEPLOY_PORT"
 
-            echo "Uploading rabbit-gateway binary to $DEPLOY_HOST:$DEPLOY_PATH..."
+            echo "Uploading oncue-gateway binary to $DEPLOY_HOST:$DEPLOY_PATH..."
             $SSH_CMD "mkdir -p $DEPLOY_PATH"
-            $SCP_CMD dist-server/rabbit-gateway "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/rabbit-gateway.new"
-            $SSH_CMD "chmod +x $DEPLOY_PATH/rabbit-gateway.new && mv $DEPLOY_PATH/rabbit-gateway.new $DEPLOY_PATH/rabbit-gateway"
+            $SCP_CMD dist-server/oncue-gateway "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/oncue-gateway.new"
+            $SSH_CMD "chmod +x $DEPLOY_PATH/oncue-gateway.new && mv $DEPLOY_PATH/oncue-gateway.new $DEPLOY_PATH/oncue-gateway"
 
-            echo "Restarting rabbit-gateway systemd service..."
-            $SSH_CMD "sudo systemctl restart rabbit-gateway"
+            echo "Restarting oncue-gateway systemd service..."
+            $SSH_CMD "sudo systemctl restart oncue-gateway"
 
             echo "Checking gateway health..."
             HEALTH_URL="${GATEWAY_HEALTH_CHECK_URL:-http://127.0.0.1:8787/healthz}"

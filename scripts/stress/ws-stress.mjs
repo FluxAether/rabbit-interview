@@ -88,7 +88,7 @@ export async function runWsStressTest(options = {}) {
       MAX_WS_FRAME_BYTES: '65536',
     };
 
-    gatewayProcess = spawn('./target/debug/rabbit-gateway', ['.'], {
+    gatewayProcess = spawn('./target/debug/oncue-gateway', ['.'], {
       cwd: 'server',
       env,
       stdio: 'ignore',

@@ -209,7 +209,7 @@ export async function runAppClientStressTest(options = {}) {
       GLOBAL_CONCURRENCY_LIMIT: '100',
     };
 
-    gatewayProcess = spawn('./target/debug/rabbit-gateway', ['.'], {
+    gatewayProcess = spawn('./target/debug/oncue-gateway', ['.'], {
       cwd: 'server',
       env,
       stdio: 'ignore',

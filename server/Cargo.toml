@@ -1,5 +1,5 @@
 [package]
-name = "rabbit-gateway"
+name = "oncue-gateway"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -9,7 +9,7 @@ name = "oncue_gateway"
 path = "src/lib.rs"
 
 [[bin]]
-name = "rabbit-gateway"
+name = "oncue-gateway"
 path = "src/main.rs"
 
 [dependencies]

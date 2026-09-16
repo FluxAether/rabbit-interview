@@ -7,12 +7,12 @@ The Gateway is OnCue's OIDC Provider and hosted AI resource server. It runs as o
 ## Build and start
 
 ```bash
-docker build -f server/Dockerfile -t rabbit-gateway:local server
-docker run --rm --name rabbit-gateway \
+docker build -f server/Dockerfile -t oncue-gateway:local server
+docker run --rm --name oncue-gateway \
   --env-file .env \
   -v /host/secrets:/run/secrets:ro \
   -p 127.0.0.1:8787:8787 \
-  rabbit-gateway:local
+  oncue-gateway:local
 ```
 
 For a container, set `GATEWAY_LISTEN_ADDR=0.0.0.0:8787`. Terminate with `SIGTERM`. The listener then stops accepting new work and cancels in-flight streams. After `axum::serve` returns, the process waits up to 15 seconds for tracked HTTP and LLM tasks. An STT session that is already draining still uses its own 2-second transcript drain, 500 ms provider close, and a further 500 ms abort budget. Those session budgets are independent of the 15-second tracker wait, so a SIGTERM does not guarantee that every STT adapter has fully exited in 15 seconds. Unused holds stay in the database for the 30-second lease reaper.

@@ -10,8 +10,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --no-create-home rabbit
-COPY --from=build /build/target/release/rabbit-gateway /usr/local/bin/rabbit-gateway
+COPY --from=build /build/target/release/oncue-gateway /usr/local/bin/oncue-gateway
 ENV RUST_LOG=info,tower_http=info
 EXPOSE 8787
 USER rabbit
-ENTRYPOINT ["rabbit-gateway"]
+ENTRYPOINT ["oncue-gateway"]
