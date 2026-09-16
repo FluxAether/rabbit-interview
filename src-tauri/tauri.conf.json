@@ -28,7 +28,7 @@
         "default-src": "'self' ipc: http://ipc.localhost",
         "img-src": "'self' asset: http://asset.localhost data: blob:",
         "media-src": "'self' asset: http://asset.localhost blob:",
-        "connect-src": "'self' ipc: http://ipc.localhost blob: http://127.0.0.1:8787 ws://127.0.0.1:8787 https://gateway.example.com wss://gateway.example.com https://api.groq.com https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com wss://api.deepgram.com wss://generativelanguage.googleapis.com https://github.com https://objects.githubusercontent.com",
+        "connect-src": "'self' ipc: http://ipc.localhost blob: http://127.0.0.1:8787 ws://127.0.0.1:8787 https://gateway.example.com wss://gateway.example.com https://api.oncue.top wss://api.oncue.top https://api.groq.com https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com wss://api.deepgram.com wss://generativelanguage.googleapis.com https://github.com https://objects.githubusercontent.com",
         "style-src": "'self' 'unsafe-inline'"
       },
       "assetProtocol": {
