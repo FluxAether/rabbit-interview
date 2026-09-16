@@ -269,7 +269,7 @@ jobs:
             test -n "${DEPLOY_SSH_KEY:-}" || { echo "DEPLOY_SSH_KEY is required in the server-deploy context" >&2; exit 1; }
 
             DEPLOY_PORT="${DEPLOY_PORT:-22}"
-            DEPLOY_PATH="${DEPLOY_PATH:-/opt/rabbit-gateway}"
+            DEPLOY_PATH="${DEPLOY_PATH:-/opt/oncue-gateway}"
 
             mkdir -p ~/.ssh
             chmod 700 ~/.ssh
