@@ -576,6 +576,16 @@ check(
     && normalizedHostedAccessSettings.sttModel === 'hosted-managed',
   'hosted AI access normalizes leftover BYOK STT onto the gateway',
 )
+check(
+  DEFAULT_SETTINGS.aiModel === 'gemini-3.8-flash'
+    && DEFAULT_SETTINGS.aiModels.gemini === 'gemini-3.8-flash',
+  'new installs default to Google Gemini gemini-3.8-flash',
+)
+storedSettings = JSON.stringify({ aiModel: 'gemini-invalid' })
+check(
+  (await loadAppSettings()).aiModel === 'gemini-3.8-flash',
+  'invalid Gemini model normalizes to gemini-3.8-flash',
+)
 
 const { deriveReadiness: deriveHostedReadiness } = loadTypeScriptModule('src/lib/readiness.ts', ['deriveReadiness'])
 const hostedCapabilities = {
@@ -1464,6 +1474,14 @@ const geminiResult = await createProviderHarness(
 check(
   geminiResult?.provider === 'gemini' && geminiResult?.status === 'complete',
   'Gemini finishReason values are parsed as explicit stream completion',
+)
+const gemini38Result = await createProviderHarness(
+  'gemini-3.8-flash',
+  'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}' + '\n\n' + 'data: {"candidates":[{"finishReason":"STOP"}]}' + '\n\n',
+)('question', '', { onDelta: () => {} })
+check(
+  gemini38Result?.provider === 'gemini' && gemini38Result?.status === 'complete' && gemini38Result?.model === 'gemini-3.8-flash',
+  'Gemini 3.8 Flash resolves as supported provider and model',
 )
 
 let latestSocket = null

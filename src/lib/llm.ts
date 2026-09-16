@@ -49,7 +49,7 @@ async function getKeys(forceReload = false) {
  *   "claude-3.5", "claude-3.5-sonnet"
  *   "gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash"
  */
-const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 const SUPPORTED_GEMINI_MODELS = new Set(['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.8-flash']);
 
 function resolveProviderAndModel(aiModel: string): { provider: ByokLlmProvider; model: string } {
@@ -110,7 +110,7 @@ async function resolveConfiguredProvider(allowProviderFallback = true): Promise<
   apiKey: string;
 }> {
   return withAppAccessCheck(async () => {
-    const aiModel: string = useAppStore.getState().settings?.aiModel || 'groq-llama-3.1';
+    const aiModel: string = useAppStore.getState().settings?.aiModel || 'gemini-3.8-flash';
     let { provider, model } = resolveProviderAndModel(aiModel);
     let apiKey = await getLlmApiKey(provider);
     if (!apiKey && allowProviderFallback) {

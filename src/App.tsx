@@ -61,7 +61,7 @@ function Sidebar({
 }) {
   const t = useTranslation()
   const settings = useAppStore((state) => state.settings)
-  const activeModel = settings.aiModel || 'gpt-5.6-luna'
+  const activeModel = settings.aiModel || 'gemini-3.8-flash'
   return (
     <aside
       className={`flex h-[100dvh] shrink-0 flex-col border-r border-[var(--border-color)] bg-[var(--bg-sidebar)] p-3 transition-[width] duration-200 ${

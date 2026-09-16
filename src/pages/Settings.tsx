@@ -104,16 +104,16 @@ export default function Settings({
   const [downloading, setDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState<number>(0)
   const [language, setLanguage] = useState<SupportedLanguage>(DEFAULT_LANGUAGE)
-  const [aiModel, setAiModel] = useState('groq-llama-3.1')
+  const [aiModel, setAiModel] = useState('gemini-3.8-flash')
   const [aiAccessMode, setAiAccessMode] = useState<AiAccessMode>('byok')
   const [stealth, setStealth] = useState(true)
 
   // Per-provider model selections
-  const [activeProvider, setActiveProvider] = useState<'groq' | 'openai' | 'anthropic' | 'gemini'>('groq')
+  const [activeProvider, setActiveProvider] = useState<'groq' | 'openai' | 'anthropic' | 'gemini'>('gemini')
   const [groqModel, setGroqModel] = useState('llama-3.1-8b-instant')
   const [openaiModel, setOpenaiModel] = useState('gpt-5.6-luna')
   const [anthropicModel, setAnthropicModel] = useState('claude-haiku-4-5')
-  const [geminiModel, setGeminiModel] = useState('gemini-3.6-flash')
+  const [geminiModel, setGeminiModel] = useState('gemini-3.8-flash')
 
   // Key input values & visibility toggles
   const [keyInputs, setKeyInputs] = useState<Record<ProviderKeyType, string>>({
@@ -396,7 +396,7 @@ export default function Settings({
     const lang = (settings.language as SupportedLanguage) || DEFAULT_LANGUAGE
     setLanguage(lang)
 
-    const currentAiModel = (settings.aiModel as string) || 'groq-llama-3.1'
+    const currentAiModel = (settings.aiModel as string) || 'gemini-3.8-flash'
     setAiModel(currentAiModel)
     setAiAccessMode(settings.aiAccessMode === 'hosted' ? 'hosted' : 'byok')
 
@@ -404,7 +404,7 @@ export default function Settings({
     if (aiModels.groq) setGroqModel(aiModels.groq)
     if (aiModels.openai) setOpenaiModel(aiModels.openai)
     if (aiModels.anthropic) setAnthropicModel(aiModels.anthropic)
-    setGeminiModel(aiModels.gemini || 'gemini-3.6-flash')
+    setGeminiModel(aiModels.gemini || 'gemini-3.8-flash')
 
     if (currentAiModel.includes('gemini')) {
       setActiveProvider('gemini')
@@ -809,7 +809,7 @@ export default function Settings({
         autoUpdate: true,
         updateChannel: 'Stable',
         stealthEnabled: true,
-        aiModel: 'groq-llama-3.1',
+        aiModel: 'gemini-3.8-flash',
         aiAccessMode: 'hosted',
         language: DEFAULT_LANGUAGE,
         sttProvider: 'hosted',

@@ -44,14 +44,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoUpdate: true,
   updateChannel: 'Stable',
   language: 'zh-CN',
-  aiModel: 'groq-llama-3.1',
+  aiModel: 'gemini-3.8-flash',
   aiAccessMode: 'hosted',
   stealthEnabled: true,
   aiModels: {
     groq: 'llama-3.1-8b-instant',
     openai: 'gpt-5.6-luna',
     anthropic: 'claude-haiku-4-5',
-    gemini: 'gemini-3.6-flash',
+    gemini: 'gemini-3.8-flash',
   },
   sttProvider: 'hosted',
   sttModel: HOSTED_STT_MODEL,
@@ -72,7 +72,7 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
   if (aiModels.openai?.startsWith('gpt-4')) aiModels.openai = 'gpt-5.6-luna';
   if (aiModels.groq === 'gemma2-9b-it') aiModels.groq = 'llama-3.1-8b-instant';
   if (!aiModels.gemini || !['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.8-flash'].includes(aiModels.gemini)) {
-    aiModels.gemini = 'gemini-3.6-flash';
+    aiModels.gemini = 'gemini-3.8-flash';
   }
 
   let aiModel = saved?.aiModel || DEFAULT_SETTINGS.aiModel;
@@ -80,7 +80,7 @@ function normalizeSettings(saved?: Partial<AppSettings> | null): AppSettings {
   if (aiModel.startsWith('gpt-4')) aiModel = 'gpt-5.6-luna';
   if (aiModel === 'gemma2-9b-it') aiModel = 'llama-3.1-8b-instant';
   if (aiModel.startsWith('gemini') && !['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.8-flash'].includes(aiModel)) {
-    aiModel = 'gemini-3.6-flash';
+    aiModel = 'gemini-3.8-flash';
   }
   const aiAccessMode: AiAccessMode = !saved || saved.aiAccessMode === 'hosted' ? 'hosted' : 'byok';
   const savedSttProvider = saved?.sttProvider as string | undefined;
