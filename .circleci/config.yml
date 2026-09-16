@@ -1,9 +1,7 @@
 # Matches .github/workflows/release.yml: v* tag -> macOS+Windows installers -> GitHub Release.
 # Also deploys server, then builds and publishes landing to Cloudflare Workers.
 # CircleCI contexts required:
-#   `tauri-signing`: TAURI_SIGNING_PRIVATE_KEY and, if encrypted,
-#                    TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-#   `github-release`: GH_TOKEN or GITHUB_TOKEN (GitHub PAT with repo contents:write)
+#   `release`: TAURI_SIGNING_PRIVATE_KEY, GH_TOKEN or GITHUB_TOKEN (GitHub PAT with repo contents:write)
 #   `server-deploy`: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (optional: DEPLOY_PORT, DEPLOY_PATH)
 #   `cloudflare-deploy`: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, VITE_HOSTED_GATEWAY_URL
 version: 2.1
@@ -405,7 +403,7 @@ workflows:
   release:
     jobs:
       - build-macos:
-          context: tauri-signing
+          context: release
           filters:
             tags:
               only: /^v.*/
@@ -436,14 +434,14 @@ workflows:
             branches:
               ignore: /.*/
       - build-windows:
-          context: tauri-signing
+          context: release
           filters:
             tags:
               only: /^v.*/
             branches:
               ignore: /.*/
       - publish:
-          context: github-release
+          context: release
           serial-group: << pipeline.project.slug >>/release
           requires:
             - build-macos
