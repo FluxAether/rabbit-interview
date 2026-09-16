@@ -278,14 +278,59 @@ jobs:
 
             SSH_CMD="ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT $DEPLOY_USER@$DEPLOY_HOST"
             printf -v REMOTE_DEPLOY_PATH '%q' "$DEPLOY_PATH"
+            case "$DEPLOY_PATH" in /*) ;; *) echo "DEPLOY_PATH must be absolute" >&2; exit 1 ;; esac
+            case "$DEPLOY_PATH$DEPLOY_USER" in *$'\n'*|*$'\r'*) echo "Deployment paths and users must be single-line values" >&2; exit 1 ;; esac
+
+            $SSH_CMD "sudo -n systemctl daemon-reload"
+            SERVICE_NAME=oncue-gateway
+            SERVICE_STATE="$($SSH_CMD "sudo -n systemctl show --property=LoadState --value $SERVICE_NAME")"
+            if [ "$SERVICE_STATE" = not-found ]; then
+              SERVICE_NAME=rabbit-gateway
+              SERVICE_STATE="$($SSH_CMD "sudo -n systemctl show --property=LoadState --value $SERVICE_NAME")"
+            fi
+            case "$SERVICE_STATE" in
+              loaded) ;;
+              not-found)
+                SERVICE_NAME=oncue-gateway
+                $SSH_CMD "test -r $REMOTE_DEPLOY_PATH/.env" || {
+                  echo "No gateway service exists. Prepare $DEPLOY_PATH/.env readable by $DEPLOY_USER before first deployment; see docs/hosted_gateway_runbook.md." >&2
+                  exit 1
+                }
+                ;;
+              *) echo "Cannot deploy $SERVICE_NAME: systemd LoadState=$SERVICE_STATE" >&2; exit 1 ;;
+            esac
+
+            # systemd path specifiers and ExecStart quoting differ from shell quoting.
+            UNIT_WORKDIR="${DEPLOY_PATH//%/%%}/"
+            UNIT_EXEC_PATH="${UNIT_WORKDIR//\\/\\\\}oncue-gateway"
+            UNIT_EXEC_PATH="${UNIT_EXEC_PATH//\"/\\\"}"
+            # Pass the path as an argument; systemd restricts characters in executable names.
+            UNIT_EXEC_START="ExecStart=:/bin/sh -c 'exec \"\$1\"' -- \"$UNIT_EXEC_PATH\""
 
             echo "Uploading oncue-gateway binary to $DEPLOY_HOST:$DEPLOY_PATH..."
             $SSH_CMD "sudo -n mkdir -p -- $REMOTE_DEPLOY_PATH"
             $SSH_CMD "sudo -n tee -- $REMOTE_DEPLOY_PATH/oncue-gateway.new >/dev/null" < dist-server/oncue-gateway
             $SSH_CMD "sudo -n chmod -- 755 $REMOTE_DEPLOY_PATH/oncue-gateway.new && sudo -n mv -f -- $REMOTE_DEPLOY_PATH/oncue-gateway.new $REMOTE_DEPLOY_PATH/oncue-gateway"
 
-            echo "Restarting oncue-gateway systemd service..."
-            $SSH_CMD "sudo -n systemctl restart oncue-gateway"
+            install_unit_file() {
+              $SSH_CMD "sudo -n tee $1.new >/dev/null"
+              $SSH_CMD "sudo -n chmod 644 $1.new && sudo -n mv -f $1.new $1"
+            }
+            if [ "$SERVICE_STATE" = not-found ]; then
+              echo "Installing oncue-gateway systemd service..."
+              printf '%s\n' '[Unit]' 'Description=OnCue Gateway' 'After=network-online.target' 'Wants=network-online.target' \
+                '[Service]' 'Type=simple' "User=$DEPLOY_USER" "WorkingDirectory=$UNIT_WORKDIR" \
+                "$UNIT_EXEC_START" 'Restart=on-failure' 'RestartSec=5' '[Install]' 'WantedBy=multi-user.target' \
+                | install_unit_file /etc/systemd/system/oncue-gateway.service
+            fi
+            # Preserve existing User, WorkingDirectory, EnvironmentFile and other service settings.
+            $SSH_CMD "sudo -n mkdir -p /etc/systemd/system/$SERVICE_NAME.service.d"
+            printf '%s\n' '[Service]' 'ExecStart=' "$UNIT_EXEC_START" \
+              | install_unit_file /etc/systemd/system/$SERVICE_NAME.service.d/zz-oncue-deploy.conf
+            $SSH_CMD "sudo -n systemctl daemon-reload && sudo -n systemctl enable $SERVICE_NAME"
+
+            echo "Restarting $SERVICE_NAME systemd service..."
+            $SSH_CMD "sudo -n systemctl restart $SERVICE_NAME"
 
             echo "Checking gateway health..."
             HEALTH_URL="${GATEWAY_HEALTH_CHECK_URL:-http://127.0.0.1:8787/healthz}"

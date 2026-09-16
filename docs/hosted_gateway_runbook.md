@@ -19,6 +19,16 @@ For a container, set `GATEWAY_LISTEN_ADDR=0.0.0.0:8787`. Terminate with `SIGTERM
 
 Do not run multiple replicas in this version. Login throttles, one-time WebSocket tickets, and active LLM cancellation handles are process-local. Put them in a shared store before horizontal scaling.
 
+## CircleCI SSH deployment
+
+The `server-deploy` context supplies `DEPLOY_HOST`, `DEPLOY_USER`, and `DEPLOY_SSH_KEY`; `DEPLOY_PORT` defaults to `22` and the absolute `DEPLOY_PATH` defaults to `/opt/oncue-gateway`. The SSH user needs passwordless sudo for `mkdir`, `tee`, `chmod`, `mv`, and `systemctl` (including `show`, `daemon-reload`, `enable`, and `restart`).
+
+Before the first deployment, provision `$DEPLOY_PATH/.env` with the required configuration below, plus the referenced OIDC key files and MySQL database. The `.env` and key files must be readable by `DEPLOY_USER`; CI does not create secrets or copy the developer's local configuration. The new service runs as `DEPLOY_USER` with `WorkingDirectory=$DEPLOY_PATH`, where the binary loads `.env` itself.
+
+Deployment reuses `oncue-gateway.service` when present, otherwise an existing `rabbit-gateway.service`. It preserves the service's user, working directory, environment files and other settings, and writes a `zz-oncue-deploy.conf` drop-in so `ExecStart` uses the newly uploaded `oncue-gateway` binary. If neither unit exists, deployment installs `/etc/systemd/system/oncue-gateway.service`. It then reloads systemd, enables and restarts the selected service, and checks `/healthz`. A masked or invalid unit fails deployment without creating a replacement service.
+
+Run `node scripts/verify-server-deploy.mjs` to check first installation, repeated deployment, legacy-service compatibility, and failure handling without contacting a production server.
+
 ## Required configuration
 
 - `DATABASE_URL`: dedicated MySQL 8.4 database user and schema.
