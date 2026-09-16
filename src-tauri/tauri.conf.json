@@ -71,7 +71,7 @@
  "plugins": {
    "deep-link": {
      "desktop": {
-       "schemes": ["rabbitinterview"]
+       "schemes": ["oncuedesktop"]
      }
    },
    "updater": {

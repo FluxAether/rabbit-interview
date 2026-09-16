@@ -35,7 +35,7 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     .await?;
     sqlx::query(
         "INSERT INTO oidc_consents (account_id, client_id, scope, granted_at) \
-         VALUES (?, 'rabbit-desktop', 'openid profile email offline_access', UTC_TIMESTAMP(6))",
+         VALUES (?, 'oncue-desktop', 'openid profile email offline_access', UTC_TIMESTAMP(6))",
     )
     .bind(&account_id)
     .execute(state.auth().pool())
@@ -55,8 +55,8 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
     let authorize_query = form(&[
         ("response_type", "code"),
-        ("client_id", "rabbit-desktop"),
-        ("redirect_uri", "rabbitinterview://auth/callback"),
+        ("client_id", "oncue-desktop"),
+        ("redirect_uri", "oncuedesktop://auth/callback"),
         ("scope", "openid profile email offline_access"),
         ("state", "integration-state"),
         ("nonce", "integration-nonce"),
@@ -127,7 +127,7 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
             .as_str()
             .expect("authorization redirect"),
     )?;
-    assert_eq!(callback.scheme(), "rabbitinterview");
+    assert_eq!(callback.scheme(), "oncuedesktop");
     assert_eq!(
         callback
             .query_pairs()
@@ -145,10 +145,10 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
 
     let code_form = form(&[
         ("grant_type", "authorization_code"),
-        ("client_id", "rabbit-desktop"),
+        ("client_id", "oncue-desktop"),
         ("code", &code),
         ("code_verifier", verifier),
-        ("redirect_uri", "rabbitinterview://auth/callback"),
+        ("redirect_uri", "oncuedesktop://auth/callback"),
     ]);
     let token = send(&app, Method::POST, "/oauth2/token", Some(code_form.clone())).await?;
     assert_eq!(token.0, StatusCode::OK);
@@ -278,7 +278,7 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
 
     let refresh_form = form(&[
         ("grant_type", "refresh_token"),
-        ("client_id", "rabbit-desktop"),
+        ("client_id", "oncue-desktop"),
         ("refresh_token", refresh),
     ]);
     let rotated = send(
@@ -297,7 +297,7 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     assert_eq!(reuse.0, StatusCode::BAD_REQUEST);
     let revoked_family = form(&[
         ("grant_type", "refresh_token"),
-        ("client_id", "rabbit-desktop"),
+        ("client_id", "oncue-desktop"),
         ("refresh_token", rotated_refresh),
     ]);
     assert_eq!(
@@ -339,7 +339,7 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
 
     let logout_query = form(&[
         ("id_token_hint", rotated["id_token"].as_str().unwrap()),
-        ("post_logout_redirect_uri", "rabbitinterview://auth/logout"),
+        ("post_logout_redirect_uri", "oncuedesktop://auth/logout"),
         ("state", "logout-state"),
     ]);
     let logout = send(
@@ -352,7 +352,7 @@ async fn authorization_code_refresh_reuse_and_logout_flow() -> anyhow::Result<()
     assert_eq!(logout.0, StatusCode::SEE_OTHER);
     assert_eq!(
         logout.2.as_deref(),
-        Some("rabbitinterview://auth/logout?state=logout-state")
+        Some("oncuedesktop://auth/logout?state=logout-state")
     );
 
     Ok(())

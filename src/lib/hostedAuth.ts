@@ -9,9 +9,9 @@ import { decryptSecret, encryptSecret } from './secretCrypto'
 export const CREDIT_UNIT_SCALE = 60_000
 
 const REFRESH_TOKEN_KEY = 'HOSTED_REFRESH_TOKEN'
-const OIDC_CLIENT_ID = 'rabbit-desktop'
-const OIDC_REDIRECT_URI = 'rabbitinterview://auth/callback'
-const OIDC_POST_LOGOUT_REDIRECT_URI = 'rabbitinterview://auth/logout'
+const OIDC_CLIENT_ID = 'oncue-desktop'
+const OIDC_REDIRECT_URI = 'oncuedesktop://auth/callback'
+const OIDC_POST_LOGOUT_REDIRECT_URI = 'oncuedesktop://auth/logout'
 const OIDC_SCOPES = 'openid profile email offline_access'
 
 export interface HostedEntitlements {
@@ -428,7 +428,7 @@ function handleCallback(rawUrl: string): Promise<void> {
 async function completeCallback(rawUrl: string) {
   const generation = authGeneration
   const url = new URL(rawUrl)
-  if (url.protocol !== 'rabbitinterview:' || url.hostname !== 'auth') return
+  if (url.protocol !== 'oncuedesktop:' || url.hostname !== 'auth') return
   if (url.pathname === '/logout') {
     if (pendingLogoutState && url.searchParams.get('state') === pendingLogoutState) pendingLogoutState = ''
     return

@@ -35,8 +35,8 @@ Run `node scripts/verify-server-deploy.mjs` to check first installation, repeate
 - `GATEWAY_PUBLIC_URL`: public HTTPS origin; localhost HTTP is development-only.
 - `LANDING_PUBLIC_URL`: public HTTPS landing origin. Production landing and Gateway must be sibling domains under the same site; local development uses `http://localhost:4174` and `http://localhost:8787`. A localhost landing origin also allows the matching `127.0.0.1` origin, and the reverse.
 - `GATEWAY_ALLOWED_ORIGINS`: exact Tauri, landing, and development origins, never `*`. The configured landing origin is added automatically.
-- `OIDC_CLIENT_ID=rabbit-desktop`.
-- `OIDC_REDIRECT_URI=rabbitinterview://auth/callback` and `OIDC_POST_LOGOUT_REDIRECT_URI=rabbitinterview://auth/logout`.
+- `OIDC_CLIENT_ID=oncue-desktop`.
+- `OIDC_REDIRECT_URI=oncuedesktop://auth/callback` and `OIDC_POST_LOGOUT_REDIRECT_URI=oncuedesktop://auth/logout`.
 - `OIDC_SIGNING_KEYSET_FILE` and `OIDC_DATA_KEYRING_FILE`: read-only secret files described below.
 - `RESEND_API_KEY`: Resend API key (`re_...`).
 - `RESEND_FROM`: verified sender, either `no-reply@example.com` or `OnCue <no-reply@example.com>`.

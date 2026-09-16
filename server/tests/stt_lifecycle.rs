@@ -615,8 +615,8 @@ async fn mixed_load_http_stt_llm_and_passwords() -> anyhow::Result<()> {
                 }
                 _ = password_tick.tick() => {
                     let response = http.get(format!("{}/oauth2/authorize", gateway.url)).query(&[
-                        ("response_type","code"), ("client_id","rabbit-desktop"),
-                        ("redirect_uri","rabbitinterview://auth/callback"), ("scope","openid"),
+                        ("response_type","code"), ("client_id","oncue-desktop"),
+                        ("redirect_uri","oncuedesktop://auth/callback"), ("scope","openid"),
                         ("state","load"), ("code_challenge","E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"), ("code_challenge_method","S256"),
                     ]).send().await?;
                     assert_eq!(response.status(), reqwest::StatusCode::SEE_OTHER);

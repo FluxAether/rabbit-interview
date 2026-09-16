@@ -22,7 +22,7 @@ export function createJwtToken(accountId = TEST_ACCOUNT_ID, gatewayUrl = DEFAULT
     exp: now + 3600,
     iat: now,
     jti: randomUUID(),
-    client_id: 'rabbit-desktop',
+    client_id: 'oncue-desktop',
     scope: 'openid',
     token_use: 'access',
   };
@@ -129,7 +129,7 @@ export async function runApiStressTest(options = {}) {
   console.log(`\n[Phase 3] Argon2 CPU load with simultaneous /healthz probes...`);
   {
     // Step A: Fetch an interaction context
-    const authRes = await fetch(`${gatewayUrl}/oauth2/authorize?response_type=code&client_id=rabbit-desktop&redirect_uri=rabbitinterview://auth/callback&scope=openid&state=stress&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`, { redirect: 'manual' });
+    const authRes = await fetch(`${gatewayUrl}/oauth2/authorize?response_type=code&client_id=oncue-desktop&redirect_uri=oncuedesktop://auth/callback&scope=openid&state=stress&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`, { redirect: 'manual' });
     const location = authRes.headers.get('location') || '';
     const requestSecret = new URLSearchParams(location.split('#')[1] || '').get('request');
 

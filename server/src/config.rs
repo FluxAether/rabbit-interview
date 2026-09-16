@@ -90,9 +90,9 @@ impl Config {
             allowed_origins,
             oidc_client_id: required("OIDC_CLIENT_ID")?,
             oidc_redirect_uri: env::var("OIDC_REDIRECT_URI")
-                .unwrap_or_else(|_| "rabbitinterview://auth/callback".to_owned()),
+                .unwrap_or_else(|_| "oncuedesktop://auth/callback".to_owned()),
             oidc_post_logout_redirect_uri: env::var("OIDC_POST_LOGOUT_REDIRECT_URI")
-                .unwrap_or_else(|_| "rabbitinterview://auth/logout".to_owned()),
+                .unwrap_or_else(|_| "oncuedesktop://auth/logout".to_owned()),
             oidc_signing_keyset_file: PathBuf::from(required("OIDC_SIGNING_KEYSET_FILE")?),
             oidc_data_keyring_file: PathBuf::from(required("OIDC_DATA_KEYRING_FILE")?),
             resend_api_key: required("RESEND_API_KEY")?,
@@ -199,8 +199,8 @@ impl Config {
             &self.oidc_post_logout_redirect_uri,
             "/logout",
         )?;
-        if self.oidc_client_id != "rabbit-desktop" && self.oidc_client_id != "oncue-desktop" {
-            return Err(anyhow!("OIDC_CLIENT_ID must be rabbit-desktop or oncue-desktop"));
+        if self.oidc_client_id != "oncue-desktop" {
+            return Err(anyhow!("OIDC_CLIENT_ID must be oncue-desktop"));
         }
         validate_from_mailbox(&self.resend_from)?;
         if !self.resend_api_key.starts_with("re_") {
@@ -286,7 +286,7 @@ impl Config {
 
 fn validate_redirect_uri(name: &str, value: &str, path: &str) -> Result<()> {
     let url = url::Url::parse(value).with_context(|| format!("invalid {name}"))?;
-    if (url.scheme() != "rabbitinterview" && url.scheme() != "oncue")
+    if (url.scheme() != "oncuedesktop" && url.scheme() != "oncue")
         || url.host_str() != Some("auth")
         || url.path() != path
         || url.query().is_some()
@@ -453,7 +453,7 @@ mod tests {
     fn auth_callbacks_and_resend_from_are_strict() {
         assert!(validate_redirect_uri(
             "OIDC_REDIRECT_URI",
-            "rabbitinterview://auth/callback",
+            "oncuedesktop://auth/callback",
             "/callback"
         )
         .is_ok());
@@ -465,7 +465,7 @@ mod tests {
         .is_ok());
         assert!(validate_redirect_uri(
             "OIDC_REDIRECT_URI",
-            "rabbitinterview://evil/callback",
+            "oncuedesktop://evil/callback",
             "/callback"
         )
         .is_err());

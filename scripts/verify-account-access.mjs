@@ -23,7 +23,7 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), { stat
 const issuer = 'http://127.0.0.1:8787'
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
 const accessToken = 'test-access-token'
-const claims = { iss: issuer, sub: 'test-account', aud: 'rabbit-desktop', exp: Math.floor(Date.now() / 1000) + 3600, iat: Math.floor(Date.now() / 1000), at_hash: createHash('sha256').update(accessToken).digest().subarray(0, 16).toString('base64url') }
+const claims = { iss: issuer, sub: 'test-account', aud: 'oncue-desktop', exp: Math.floor(Date.now() / 1000) + 3600, iat: Math.floor(Date.now() / 1000), at_hash: createHash('sha256').update(accessToken).digest().subarray(0, 16).toString('base64url') }
 const tokenBody = [ { alg: 'RS256', kid: 'test' }, claims ].map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.')
 const idToken = tokenBody + '.' + sign('RSA-SHA256', Buffer.from(tokenBody), privateKey).toString('base64url')
 const secrets = new Map([['OPENAI_API_KEY', 'preserved-test-key']])

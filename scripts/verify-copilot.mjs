@@ -290,8 +290,8 @@ check(
   cargo.includes('tauri-plugin-deep-link')
     && cargo.includes('tauri-plugin-single-instance')
     && rustLib.includes('emit_auth_callback')
-    && rustLib.includes('url.scheme() != "rabbitinterview"')
-    && tauriConfig.includes('rabbitinterview'),
+    && rustLib.includes('url.scheme() != "oncuedesktop"')
+    && tauriConfig.includes('oncuedesktop'),
   'desktop auth callback is registered and validated before reaching the frontend',
 )
 check(!app.includes("listen<number[]>('audio-chunk'") && !page.includes("listen<number[]>('audio-chunk'"), 'views do not own audio listeners')

@@ -180,7 +180,7 @@ fn emit_auth_callback(app: &tauri::AppHandle, url: &url::Url) {
 }
 
 fn is_auth_callback(url: &url::Url) -> bool {
-    if url.scheme() != "rabbitinterview"
+    if url.scheme() != "oncuedesktop"
         || url.host_str() != Some("auth")
         || !matches!(url.path(), "/callback" | "/logout")
     {
@@ -203,16 +203,16 @@ mod hosted_auth_tests {
     #[test]
     fn accepts_only_the_exact_oidc_callback_shape() {
         assert!(is_auth_callback(
-            &url::Url::parse("rabbitinterview://auth/callback?state=s&code=c").unwrap()
+            &url::Url::parse("oncuedesktop://auth/callback?state=s&code=c").unwrap()
         ));
         assert!(is_auth_callback(
-            &url::Url::parse("rabbitinterview://auth/logout?state=s").unwrap()
+            &url::Url::parse("oncuedesktop://auth/logout?state=s").unwrap()
         ));
         for rejected in [
-            "rabbitinterview://auth/other?state=s&code=c",
+            "oncuedesktop://auth/other?state=s&code=c",
             "https://auth/callback?state=s&code=c",
-            "rabbitinterview://auth/callback?code=c",
-            "rabbitinterview://auth/callback?state=s",
+            "oncuedesktop://auth/callback?code=c",
+            "oncuedesktop://auth/callback?state=s",
         ] {
             assert!(!is_auth_callback(&url::Url::parse(rejected).unwrap()));
         }
