@@ -94,7 +94,7 @@ commands:
           command: |
             set -euo pipefail
             VERSION="${CIRCLE_TAG#v}"
-            REPO="${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
+            REPO="FluxAether/rabbit-interview"
             node scripts/build-updater-manifest.mjs fragment \
               --os "<< parameters.platform_os >>" \
               --target "<< parameters.target >>" \
@@ -469,7 +469,8 @@ jobs:
             echo "export GH_TOKEN=$TOKEN" >> "$BASH_ENV"
             echo "export GITHUB_TOKEN=$TOKEN" >> "$BASH_ENV"
             echo "export GH_REPO=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}" >> "$BASH_ENV"
-            echo "export GITHUB_REPOSITORY=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}" >> "$BASH_ENV"
+            echo "export GITHUB_REPOSITORY=FluxAether/rabbit-interview" >> "$BASH_ENV"
+            echo "export PUBLIC_GH_REPO=FluxAether/rabbit-interview" >> "$BASH_ENV"
       - gh/setup
       - run:
           name: Build manifest and checksums
@@ -494,41 +495,74 @@ jobs:
             \) -print0 | sort -z | xargs -0 sha256sum | sed "s#  dist-release/#  #" > dist-release/SHA256SUMS.txt
             node scripts/verify-release-assets.mjs dist-release
       - run:
-          name: Upload and publish source release
+          name: Upload and publish releases
           command: |
             set -euo pipefail
+            PUBLIC_REPO="FluxAether/rabbit-interview"
+            PREV_TAG="$(git describe --tags --abbrev=0 "${CIRCLE_TAG}^" 2>/dev/null || true)"
+            if [ -n "$PREV_TAG" ]; then
+              CHANGELOG="$(git log "${PREV_TAG}..${CIRCLE_TAG}" --pretty=format:"* %s (%h)" 2>/dev/null || true)"
+            else
+              CHANGELOG="$(git log -n 10 --pretty=format:"* %s (%h)" 2>/dev/null || true)"
+            fi
+            if [ -z "$CHANGELOG" ]; then
+              CHANGELOG="* ${CIRCLE_TAG} 更新"
+            fi
+
             TABLE=$(printf "%s\n%s\n%s\n%s\n%s" \
               "| 操作系统 / Platform | 推荐安装包 / Recommended Package | 说明 / Description |" \
               "| :--- | :--- | :--- |" \
-              "| **macOS** (Universal) | [OnCue-macOS-universal.dmg](https://github.com/${GH_REPO}/releases/download/${CIRCLE_TAG}/OnCue-macOS-universal.dmg) | 支持 Apple Silicon (M系列) 与 Intel 架构，拖入 Applications 即可 |" \
-              "| **Windows** (64-bit) | [OnCue-Windows-x64.exe](https://github.com/${GH_REPO}/releases/download/${CIRCLE_TAG}/OnCue-Windows-x64.exe) | 标准安装向导程序 |" \
+              "| **macOS** (Universal) | [OnCue-macOS-universal.dmg](https://github.com/${PUBLIC_REPO}/releases/download/${CIRCLE_TAG}/OnCue-macOS-universal.dmg) | 支持 Apple Silicon (M系列) 与 Intel 架构，拖入 Applications 即可 |" \
+              "| **Windows** (64-bit) | [OnCue-Windows-x64.exe](https://github.com/${PUBLIC_REPO}/releases/download/${CIRCLE_TAG}/OnCue-Windows-x64.exe) | 标准安装向导程序 |" \
               "| **Windows MSI** (64-bit) | \`*.msi\` | 企业静默分发 / GPO 部署专用 |")
-            NOTES=$(printf "%s\n\n%s\n\n%s\n\n%s\n\n%s" \
+            NOTES=$(printf "%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s" \
+              "### 📝 更新说明 / Release Notes" \
+              "$CHANGELOG" \
               "### 🚀 快速下载 / Quick Downloads" \
               "$TABLE" \
               "测试版。" \
               "当前 macOS 包没有 Developer ID 与公证，Windows 包没有 Authenticode 签名，安装时可能出现系统安全警告。请从本 Release 下载，并核对 SHA256SUMS.txt。" \
               "使用实时语音需要 Deepgram API Key，回答建议需要任一受支持的模型 API Key。仅在面试或测评规则允许辅助工具时使用。")
-            if gh release view "$CIRCLE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
-              echo "Source release $CIRCLE_TAG already exists; assets will be replaced."
-            else
-              gh release create "$CIRCLE_TAG" \
-                --repo "$GH_REPO" \
-                --target "$CIRCLE_SHA1" \
-                --draft \
+
+            publish_to_repo() {
+              local target_repo="$1"
+              echo "Publishing release $CIRCLE_TAG to $target_repo..."
+              if [ "$target_repo" != "$GH_REPO" ]; then
+                git push "https://x-access-token:${TOKEN}@github.com/${target_repo}.git" "refs/tags/${CIRCLE_TAG}" --force || true
+              fi
+
+              if gh release view "$CIRCLE_TAG" --repo "$target_repo" >/dev/null 2>&1; then
+                echo "Release $CIRCLE_TAG already exists in $target_repo; assets will be updated."
+              else
+                gh release create "$CIRCLE_TAG" \
+                  --repo "$target_repo" \
+                  --target "$CIRCLE_SHA1" \
+                  --draft \
+                  --title "$CIRCLE_TAG" \
+                  --notes "构建完成。安装包与校验文件见本 Release。"
+              fi
+              gh release upload "$CIRCLE_TAG" dist-release/* --repo "$target_repo" --clobber
+              gh release edit "$CIRCLE_TAG" \
+                --repo "$target_repo" \
+                --draft=false \
                 --title "$CIRCLE_TAG" \
-                --notes "构建完成。安装包与校验文件见本 Release。"
+                --notes "$NOTES"
+
+              local assets
+              assets="$(gh release view "$CIRCLE_TAG" --repo "$target_repo" --json assets --jq ".assets[].name")"
+              for required in OnCue-macOS-universal.dmg OnCue-Windows-x64.exe latest.json SHA256SUMS.txt; do
+                printf "%s\n" "$assets" | grep -Fxq "$required" || { echo "Missing release asset in $target_repo: $required" >&2; exit 1; }
+              done
+              echo "Release $CIRCLE_TAG successfully published to $target_repo"
+            }
+
+            # Publish to the public repository FluxAether/rabbit-interview
+            publish_to_repo "$PUBLIC_REPO"
+
+            # Also publish to source repo if different
+            if [ "$GH_REPO" != "$PUBLIC_REPO" ]; then
+              publish_to_repo "$GH_REPO"
             fi
-            gh release upload "$CIRCLE_TAG" dist-release/* --repo "$GH_REPO" --clobber
-            gh release edit "$CIRCLE_TAG" \
-              --repo "$GH_REPO" \
-              --draft=false \
-              --title "$CIRCLE_TAG" \
-              --notes "$NOTES"
-            ASSETS="$(gh release view "$CIRCLE_TAG" --repo "$GH_REPO" --json assets --jq ".assets[].name")"
-            for required in OnCue-macOS-universal.dmg OnCue-Windows-x64.exe latest.json SHA256SUMS.txt; do
-              printf "%s\n" "$ASSETS" | grep -Fxq "$required" || { echo "Missing source release asset: $required" >&2; exit 1; }
-            done
       - store_artifacts:
           path: dist-release
           destination: dist-release

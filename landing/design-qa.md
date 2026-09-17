@@ -30,7 +30,7 @@ Accepted deviations:
 - 1440 hero matches option 3 composition (left headline, right glowing copilot, waveform).
 - 375 stacks without horizontal overflow; nav collapses to Download + language.
 - ZH/EN toggle updates document lang and heading.
-- macOS/Windows/GitHub/SHA256SUMS links resolve to thomas92118/rabbit-interview releases/repo.
+- macOS/Windows/GitHub/SHA256SUMS links resolve to FluxAether/rabbit-interview releases/repo.
 - Console: no errors on load.
 - npm run landing:build and npm run build both passed.
 

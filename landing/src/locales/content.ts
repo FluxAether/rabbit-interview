@@ -1,11 +1,11 @@
 export type Lang = 'zh' | 'en'
 
 export const DOWNLOAD = {
-  mac: 'https://github.com/thomas92118/rabbit-interview/releases/latest/download/OnCue-macOS-universal.dmg',
-  win: 'https://github.com/thomas92118/rabbit-interview/releases/latest/download/OnCue-Windows-x64.exe',
-  sums: 'https://github.com/thomas92118/rabbit-interview/releases/latest/download/SHA256SUMS.txt',
-  repo: 'https://github.com/thomas92118/rabbit-interview',
-  releases: 'https://github.com/thomas92118/rabbit-interview/releases/latest',
+  mac: 'https://github.com/FluxAether/rabbit-interview/releases/latest/download/OnCue-macOS-universal.dmg',
+  win: 'https://github.com/FluxAether/rabbit-interview/releases/latest/download/OnCue-Windows-x64.exe',
+  sums: 'https://github.com/FluxAether/rabbit-interview/releases/latest/download/SHA256SUMS.txt',
+  repo: 'https://github.com/FluxAether/rabbit-interview',
+  releases: 'https://github.com/FluxAether/rabbit-interview/releases/latest',
 } as const
 
 export const copy = {

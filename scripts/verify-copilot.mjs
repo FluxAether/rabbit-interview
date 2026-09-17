@@ -2700,7 +2700,7 @@ function createKeyStoreHarness({
 check(panel.includes('copilot.clearConfirm'), 'Clear requires confirmation when the session has content')
 check(historyPage.includes('parseHistoryFeedback'), 'History renders saved scoring details')
 check(settingsStore.includes('useMicWithSystem: false'), 'real Copilot defaults to system audio without microphone')
-check(tauriConfig.includes('thomas92118/rabbit-interview'), 'updater points at the current origin repository')
+check(tauriConfig.includes('FluxAether/rabbit-interview'), 'updater points at the current origin repository')
 {
   const authPage = source('landing/src/components/AuthPage.tsx')
   const landingApp = source('landing/src/App.tsx')
