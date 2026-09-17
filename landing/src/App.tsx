@@ -189,7 +189,8 @@ function LandingPage() {
       // Hero interactive 3D perspective tilt on desktop
       const heroSec = heroSectionRef.current
       const preview = heroRightRef.current
-      if (heroSec && preview) {
+      const hasFinePointer = typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches
+      if (hasFinePointer && heroSec && preview) {
         const onMouseMove = (e: MouseEvent) => {
           const rect = heroSec.getBoundingClientRect()
           const x = (e.clientX - rect.left) / rect.width - 0.5
@@ -356,18 +357,12 @@ function LandingPage() {
 
           <div className="flex items-center gap-2 sm:gap-3">
             <a
-              href="#pricing"
-              className="inline-flex h-11 items-center rounded-lg border border-line bg-subtle px-3 text-xs font-medium text-ink transition-colors hover:border-ink/20 active:scale-95 md:hidden"
-            >
-              {t.nav.pricing}
-            </a>
-            <a
               href="#download"
-              className="inline-flex h-11 items-center rounded-lg border border-line bg-subtle px-3 text-xs font-medium text-ink transition-colors hover:border-ink/20 active:scale-95"
+              className="inline-flex h-9 sm:h-11 items-center rounded-lg border border-line bg-subtle px-3 text-xs font-medium text-ink transition-colors hover:border-ink/20 active:scale-95"
             >
               {t.nav.download}
             </a>
-            <div className="flex h-11 items-center rounded-full border border-line bg-subtle p-0.5 text-[11px] font-medium">
+            <div className="hidden md:flex h-11 items-center rounded-full border border-line bg-subtle p-0.5 text-[11px] font-medium">
               <button
                 type="button"
                 onClick={() => switchLang('zh')}
@@ -390,7 +385,7 @@ function LandingPage() {
             <button
               type="button"
               onClick={toggleTheme}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-line bg-subtle text-ink transition-colors hover:border-ink/20 focus-visible:outline-2 active:scale-95"
+              className="hidden md:inline-flex h-11 w-11 items-center justify-center rounded-full border border-line bg-subtle text-ink transition-colors hover:border-ink/20 focus-visible:outline-2 active:scale-95"
               aria-label={t.themeToggle}
               title={resolvedTheme === 'dark' ? t.themeLight : t.themeDark}
             >
@@ -403,7 +398,7 @@ function LandingPage() {
 
             <button
               type="button"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-line bg-subtle text-ink active:scale-95 md:hidden"
+              className="inline-flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-lg border border-line bg-subtle text-ink active:scale-95 md:hidden"
               aria-expanded={menuOpen}
               aria-label={t.nav.menu}
               onClick={() => setMenuOpen((open) => !open)}
@@ -413,14 +408,80 @@ function LandingPage() {
           </div>
         </div>
         {menuOpen ? (
-          <nav ref={mobileNavRef} className="border-t border-line bg-canvas px-5 py-3 md:hidden overflow-hidden" aria-label="mobile">
-            <div className="flex flex-col gap-3 text-sm">
-              <a href="#video" onClick={() => setMenuOpen(false)} className="transition-colors hover:text-ink">{t.nav.video}</a>
-              <a href="#features" onClick={() => setMenuOpen(false)} className="transition-colors hover:text-ink">{t.nav.features}</a>
-              <a href="#pricing" onClick={() => setMenuOpen(false)} className="transition-colors hover:text-ink">{t.nav.pricing}</a>
-              <a href="#privacy" onClick={() => setMenuOpen(false)} className="transition-colors hover:text-ink">{t.nav.privacy}</a>
-              <a href="/subscribe" onClick={() => setMenuOpen(false)} className="transition-colors hover:text-ink">{t.nav.subscribe}</a>
-              <a href="#download" onClick={() => setMenuOpen(false)} className="transition-colors hover:text-ink">{t.nav.download}</a>
+          <nav ref={mobileNavRef} className="border-t border-line/70 bg-canvas/95 backdrop-blur-2xl px-5 py-4 md:hidden overflow-hidden shadow-xl" aria-label="mobile">
+            <div className="flex flex-col gap-1 text-sm font-medium">
+              <a href="#video" onClick={() => setMenuOpen(false)} className="flex items-center justify-between rounded-xl px-3 py-2.5 text-mute transition-colors hover:bg-subtle hover:text-ink">
+                <span>{t.nav.video}</span>
+                <ArrowUpRight className="h-3.5 w-3.5 opacity-40" />
+              </a>
+              <a href="#features" onClick={() => setMenuOpen(false)} className="flex items-center justify-between rounded-xl px-3 py-2.5 text-mute transition-colors hover:bg-subtle hover:text-ink">
+                <span>{t.nav.features}</span>
+                <ArrowUpRight className="h-3.5 w-3.5 opacity-40" />
+              </a>
+              <a href="#pricing" onClick={() => setMenuOpen(false)} className="flex items-center justify-between rounded-xl px-3 py-2.5 text-mute transition-colors hover:bg-subtle hover:text-ink">
+                <span>{t.nav.pricing}</span>
+                <ArrowUpRight className="h-3.5 w-3.5 opacity-40" />
+              </a>
+              <a href="#privacy" onClick={() => setMenuOpen(false)} className="flex items-center justify-between rounded-xl px-3 py-2.5 text-mute transition-colors hover:bg-subtle hover:text-ink">
+                <span>{t.nav.privacy}</span>
+                <ArrowUpRight className="h-3.5 w-3.5 opacity-40" />
+              </a>
+              <a href="/subscribe" onClick={() => setMenuOpen(false)} className="flex items-center justify-between rounded-xl px-3 py-2.5 text-mute transition-colors hover:bg-subtle hover:text-ink">
+                <span>{t.nav.subscribe}</span>
+                <ArrowUpRight className="h-3.5 w-3.5 opacity-40" />
+              </a>
+            </div>
+
+            <div className="my-3 border-t border-line/60" />
+
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <div className="flex h-10 items-center rounded-full border border-line bg-subtle p-0.5 text-xs font-medium">
+                <button
+                  type="button"
+                  onClick={() => switchLang('zh')}
+                  className={`rounded-full px-3 py-1.5 transition-all ${lang === 'zh' ? 'border border-line/60 bg-surface font-semibold text-ink shadow-xs dark:border-transparent dark:bg-white/15' : 'text-mute hover:text-ink'}`}
+                  aria-pressed={lang === 'zh'}
+                >
+                  {t.langZh}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchLang('en')}
+                  className={`rounded-full px-3 py-1.5 transition-all ${lang === 'en' ? 'border border-line/60 bg-surface font-semibold text-ink shadow-xs dark:border-transparent dark:bg-white/15' : 'text-mute hover:text-ink'}`}
+                  aria-pressed={lang === 'en'}
+                >
+                  {t.langEn}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="inline-flex h-10 items-center gap-2 rounded-full border border-line bg-subtle px-3.5 text-xs font-medium text-ink transition-colors hover:border-ink/20 active:scale-95"
+                aria-label={t.themeToggle}
+              >
+                {resolvedTheme === 'dark' ? (
+                  <>
+                    <Sun className="h-3.5 w-3.5" />
+                    <span>{t.themeLight}</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="h-3.5 w-3.5" />
+                    <span>{t.themeDark}</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="mt-3.5 pt-1">
+              <a
+                href="#download"
+                onClick={() => setMenuOpen(false)}
+                className="flex h-11 w-full items-center justify-center rounded-xl bg-ink text-sm font-medium text-canvas transition-all active:scale-[0.98]"
+              >
+                {t.nav.download}
+              </a>
             </div>
           </nav>
         ) : null}
@@ -429,55 +490,55 @@ function LandingPage() {
       <main id="main">
         <section ref={heroSectionRef} id="top" className="relative overflow-hidden">
           <div className="pointer-events-none absolute inset-0 bg-[var(--hero-radial)]" />
-          <div className="mx-auto grid max-w-6xl items-center gap-10 px-5 py-16 lg:grid-cols-[1fr_1fr] lg:gap-12 lg:py-24">
+          <div className="mx-auto grid max-w-6xl items-center gap-10 px-5 pt-8 pb-12 sm:py-16 lg:grid-cols-[1fr_1fr] lg:gap-12 lg:py-24">
             <div ref={heroLeftRef}>
               <div className="hero-eyebrow inline-flex items-center gap-2 rounded-full border border-line bg-subtle px-3 py-1 text-xs text-mute">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 <span>{t.eyebrow}</span>
               </div>
 
-              <h1 className={`hero-heading mt-5 text-[40px] font-semibold leading-[1.08] tracking-[-0.045em] sm:text-5xl lg:text-[58px] ${lang === 'zh' ? 'max-w-[12ch]' : 'max-w-[15ch]'}`}>
+              <h1 className={`hero-heading mt-4 sm:mt-5 text-[32px] sm:text-5xl lg:text-[58px] font-semibold leading-[1.12] sm:leading-[1.08] tracking-[-0.04em] sm:tracking-[-0.045em] ${lang === 'zh' ? 'max-w-none sm:max-w-[12ch]' : 'max-w-none sm:max-w-[15ch]'}`}>
                 {t.h1.map((line, index) => (
                   <span key={line}>
-                    {index > 0 ? <br /> : null}
+                    {index > 0 ? <br className="hidden sm:inline" /> : null}
                     {line}
                   </span>
                 ))}
               </h1>
 
-              <p className="hero-lede mt-5 max-w-[34rem] text-[15px] leading-7 text-mute">{t.lede}</p>
+              <p className="hero-lede mt-4 sm:mt-5 max-w-[34rem] text-sm sm:text-[15px] leading-6 sm:leading-7 text-mute">{t.lede}</p>
 
-              <div className="mt-8 flex flex-wrap items-center gap-3">
+              <div className="mt-6 sm:mt-8 grid grid-cols-2 gap-2.5 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
                 <a
                   href={DOWNLOAD.mac}
-                  className="hero-cta-btn inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl bg-ink px-5 text-sm font-medium text-canvas transition-all hover:opacity-90 active:scale-[0.98]"
+                  className="hero-cta-btn inline-flex h-11 sm:h-12 items-center justify-center gap-2 whitespace-nowrap rounded-xl sm:rounded-2xl bg-ink px-4 sm:px-5 text-xs sm:text-sm font-medium text-canvas transition-all hover:opacity-90 active:scale-[0.98]"
                 >
-                  <Apple className="h-4 w-4" />
-                  {t.downloadMac}
+                  <Apple className="h-4 w-4 shrink-0" />
+                  <span>{t.downloadMac}</span>
                 </a>
                 <a
                   href={DOWNLOAD.win}
-                  className="hero-cta-btn inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl border border-line bg-subtle px-5 text-sm font-medium text-ink transition-all hover:border-ink/20 active:scale-[0.98]"
+                  className="hero-cta-btn inline-flex h-11 sm:h-12 items-center justify-center gap-2 whitespace-nowrap rounded-xl sm:rounded-2xl border border-line bg-subtle px-4 sm:px-5 text-xs sm:text-sm font-medium text-ink transition-all hover:border-ink/20 active:scale-[0.98]"
                 >
-                  <WindowsIcon className="h-4 w-4" />
-                  {t.downloadWin}
+                  <WindowsIcon className="h-4 w-4 shrink-0" />
+                  <span>{t.downloadWin}</span>
                 </a>
                 <a
                   href={DOWNLOAD.repo}
-                  className="hero-cta-btn inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl border border-line bg-subtle px-5 text-sm text-ink transition-all hover:border-ink/20 active:scale-[0.98]"
+                  className="hero-cta-btn inline-flex h-11 sm:h-12 items-center justify-center gap-2 whitespace-nowrap rounded-xl sm:rounded-2xl border border-line bg-subtle px-4 sm:px-5 text-xs sm:text-sm text-ink transition-all hover:border-ink/20 active:scale-[0.98]"
                 >
-                  <GitHubIcon className="h-4 w-4" />
-                  {t.viewGithub}
+                  <GitHubIcon className="h-4 w-4 shrink-0" />
+                  <span>{t.viewGithub}</span>
                 </a>
                 <a
                   href="#video"
-                  className="hero-cta-btn inline-flex h-12 items-center gap-2 whitespace-nowrap rounded-2xl border border-line bg-subtle px-5 text-sm font-medium text-ink transition-all hover:border-ink/20 active:scale-[0.98]"
+                  className="hero-cta-btn inline-flex h-11 sm:h-12 items-center justify-center gap-2 whitespace-nowrap rounded-xl sm:rounded-2xl border border-line bg-subtle px-4 sm:px-5 text-xs sm:text-sm font-medium text-ink transition-all hover:border-ink/20 active:scale-[0.98]"
                 >
-                  <Play className="h-3.5 w-3.5 fill-current" />
-                  {t.watchVideo}
+                  <Play className="h-3.5 w-3.5 fill-current shrink-0" />
+                  <span>{t.watchVideo}</span>
                 </a>
               </div>
-              <p className="hero-fine mt-4 max-w-md text-[12px] leading-5 text-mute/80">{t.heroFine}</p>
+              <p className="hero-fine mt-3 sm:mt-4 max-w-md text-[11px] sm:text-[12px] leading-5 text-mute/80">{t.heroFine}</p>
             </div>
 
             <div
@@ -510,7 +571,7 @@ function LandingPage() {
             <div ref={downloadCardsRef} className="mt-10 grid gap-4 sm:grid-cols-2">
               <a
                 href={DOWNLOAD.mac}
-                className="group flex items-center gap-4 rounded-2xl border border-line bg-surface px-6 py-6 text-left shadow-sm transition-all hover:border-ink/20 hover:shadow-md dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/20 dark:hover:bg-white/[0.05] dark:shadow-none"
+                className="group flex items-center gap-4 rounded-2xl border border-line bg-surface p-5 sm:p-6 text-left shadow-sm transition-all hover:border-ink/20 hover:shadow-md dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/20 dark:hover:bg-white/[0.05] dark:shadow-none"
               >
                 <Apple className="h-8 w-8 shrink-0 transition-transform duration-300 group-hover:scale-110" />
                 <span>
@@ -520,7 +581,7 @@ function LandingPage() {
               </a>
               <a
                 href={DOWNLOAD.win}
-                className="group flex items-center gap-4 rounded-2xl border border-line bg-surface px-6 py-6 text-left shadow-sm transition-all hover:border-ink/20 hover:shadow-md dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/20 dark:hover:bg-white/[0.05] dark:shadow-none"
+                className="group flex items-center gap-4 rounded-2xl border border-line bg-surface p-5 sm:p-6 text-left shadow-sm transition-all hover:border-ink/20 hover:shadow-md dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/20 dark:hover:bg-white/[0.05] dark:shadow-none"
               >
                 <WindowsIcon className="h-8 w-8 shrink-0 transition-transform duration-300 group-hover:scale-110" />
                 <span>

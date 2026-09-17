@@ -44,8 +44,8 @@ export default function CopilotPanel({
       {/* Interactive Mode Control Bar (for Showcase) */}
       {!compact && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-subtle/70 px-3 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.02]">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-mute">{t.copilot.hudBadge} · {t.previewBadge}</span>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[11px] text-mute">{t.copilot.hudBadge} · {t.previewBadge}</span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -161,7 +161,7 @@ export default function CopilotPanel({
           {/* If in HUD mode, render super-compact bullet points */}
           {viewMode === 'hud' ? (
             <div className="rounded-xl border border-line bg-subtle/50 p-2.5 dark:border-white/10 dark:bg-white/[0.02]">
-              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-center text-xs">
                 {steps.map((step, index) => (
                   <div key={step} className="rounded-lg border border-line bg-surface px-2 py-2 shadow-xs dark:border-white/5 dark:bg-white/[0.04]">
                     <div className="font-mono text-[10px] text-mute">Point 0{index + 1}</div>

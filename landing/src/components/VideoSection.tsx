@@ -344,7 +344,7 @@ export default function VideoSection({ t }: VideoSectionProps) {
                   <button
                     type="button"
                     onClick={togglePlay}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors active:scale-95"
+                    className="flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors active:scale-95"
                     aria-label={isPlaying ? t.videoShowcase.pause : t.videoShowcase.play}
                   >
                     {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4 fill-white" />}
@@ -353,7 +353,7 @@ export default function VideoSection({ t }: VideoSectionProps) {
                   <button
                     type="button"
                     onClick={() => seekToChapter(0)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors active:scale-95"
+                    className="flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors active:scale-95"
                     title={t.videoShowcase.replay}
                     aria-label={t.videoShowcase.replay}
                   >
@@ -363,7 +363,7 @@ export default function VideoSection({ t }: VideoSectionProps) {
                   <button
                     type="button"
                     onClick={toggleMute}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors active:scale-95"
+                    className="flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors active:scale-95"
                     aria-label={isMuted ? 'Unmute' : 'Mute'}
                   >
                     {isMuted ? <VolumeX className="h-4 w-4 text-rose-400" /> : <Volume2 className="h-4 w-4" />}
@@ -384,7 +384,7 @@ export default function VideoSection({ t }: VideoSectionProps) {
                   <button
                     type="button"
                     onClick={toggleFullscreen}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors active:scale-95"
+                    className="flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors active:scale-95"
                     title={t.videoShowcase.fullscreen}
                     aria-label={t.videoShowcase.fullscreen}
                   >
@@ -400,7 +400,7 @@ export default function VideoSection({ t }: VideoSectionProps) {
                 <span className="font-medium tracking-wide text-ink">{t.videoShowcase.chapterPrompt}</span>
                 <span className="font-mono text-[11px] text-mute/80">{activeChapterIndex + 1} / {chapters.length}</span>
               </div>
-              <div ref={chaptersGridRef} className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              <div ref={chaptersGridRef} className="flex overflow-x-auto snap-x snap-mandatory gap-2 pb-1 -mx-1 px-1 no-scrollbar sm:mx-0 sm:px-0 sm:grid sm:grid-cols-3 lg:grid-cols-5">
                 {chapters.map((ch, idx) => {
                   const isActive = activeChapterIndex === idx
                   return (
@@ -408,7 +408,7 @@ export default function VideoSection({ t }: VideoSectionProps) {
                       key={ch.tag}
                       type="button"
                       onClick={() => seekToChapter(ch.time)}
-                      className={`group relative flex flex-col justify-between rounded-xl border p-3 text-left transition-all ${
+                      className={`group relative flex shrink-0 w-[190px] sm:w-auto snap-start flex-col justify-between rounded-xl border p-3 text-left transition-all ${
                         isActive
                           ? 'border-sky-400/50 bg-sky-400/[0.08] shadow-sm shadow-sky-400/10'
                           : 'border-white/10 bg-white/[0.02] hover:border-white/25 hover:bg-white/[0.05]'

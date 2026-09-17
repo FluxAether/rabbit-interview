@@ -120,7 +120,7 @@ export default function PricingSection({ t }: { t: Copy }) {
 
         <div ref={cardsRef} className="mt-12 grid gap-6 md:grid-cols-2 lg:gap-8">
           {/* BYOK Plan Card */}
-          <div className="flex flex-col justify-between rounded-3xl border border-line bg-surface p-7 shadow-sm transition-all hover:border-ink/20 sm:p-8 dark:border-white/10 dark:bg-white/[0.02] dark:hover:border-white/20 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+          <div className="flex flex-col justify-between rounded-3xl border border-line bg-surface p-5 sm:p-8 shadow-sm transition-all hover:border-ink/20 dark:border-white/10 dark:bg-white/[0.02] dark:hover:border-white/20 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
             <div>
               <div className="flex items-center justify-between">
                 <span className="font-mono text-xs text-mute">{p.byokKicker}</span>
@@ -140,7 +140,7 @@ export default function PricingSection({ t }: { t: Copy }) {
                 <li className="flex items-start gap-2.5"><Check className="h-4 w-4 shrink-0 text-emerald-400" /><span>{p.byokFeature3}</span></li>
               </ul>
             </div>
-            <a href="/subscribe?plan=BYOK_LIFETIME" className="mt-8 inline-flex h-11 items-center justify-center rounded-xl border border-line bg-subtle text-sm font-medium text-ink transition-colors hover:border-ink/20 dark:border-white/15 dark:bg-white/[0.03] dark:hover:border-white/25 dark:hover:bg-white/[0.06]">
+            <a href="/subscribe?plan=BYOK_LIFETIME" className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl border border-line bg-subtle text-sm font-medium text-ink transition-colors hover:border-ink/20 dark:border-white/15 dark:bg-white/[0.03] dark:hover:border-white/25 dark:hover:bg-white/[0.06]">
               {p.byokCta}
             </a>
           </div>
@@ -148,7 +148,7 @@ export default function PricingSection({ t }: { t: Copy }) {
           {/* Hosted Credits Plan Card */}
           <div
             ref={highlightCardRef}
-            className="relative flex flex-col justify-between rounded-3xl border-2 border-emerald-500/40 bg-surface p-7 shadow-lg sm:p-8 dark:bg-gradient-to-b dark:from-white/[0.05] dark:to-white/[0.01] dark:shadow-[0_12px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12)]"
+            className="relative flex flex-col justify-between rounded-3xl border-2 border-emerald-500/40 bg-surface p-5 sm:p-8 shadow-lg dark:bg-gradient-to-b dark:from-white/[0.05] dark:to-white/[0.01] dark:shadow-[0_12px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12)]"
           >
             <div>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -174,7 +174,7 @@ export default function PricingSection({ t }: { t: Copy }) {
                       key={pack.code}
                       type="button"
                       onClick={() => handleSelectPack(idx)}
-                      className={`flex-1 rounded-lg py-1.5 font-medium transition-all ${
+                      className={`flex-1 rounded-lg py-1.5 sm:py-2 text-[11px] sm:text-xs font-medium transition-all ${
                         isSelected
                           ? 'bg-surface font-semibold text-ink shadow-xs dark:bg-white/15'
                           : 'text-mute hover:text-ink'
@@ -206,7 +206,7 @@ export default function PricingSection({ t }: { t: Copy }) {
             </div>
             <a
               href={`/subscribe?plan=${activePack.code}`}
-              className="mt-8 inline-flex h-11 items-center justify-center rounded-xl bg-ink text-sm font-medium text-canvas transition-all hover:opacity-90 active:scale-[0.98]"
+              className="mt-8 inline-flex h-11 w-full items-center justify-center rounded-xl bg-ink text-sm font-medium text-canvas transition-all hover:opacity-90 active:scale-[0.98]"
             >
               {p.hostedCta}
             </a>

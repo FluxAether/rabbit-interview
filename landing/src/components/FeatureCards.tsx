@@ -222,37 +222,40 @@ export default function FeatureCards({ t }: { t: Copy }) {
         )
 
         // Subtle 3D tilt interaction on hover for desktop
-        cardElements.forEach((card) => {
-          const onMouseMove = (e: MouseEvent) => {
-            const rect = card.getBoundingClientRect()
-            const x = e.clientX - rect.left - rect.width / 2
-            const y = e.clientY - rect.top - rect.height / 2
-            const rotX = -(y / (rect.height / 2)) * 3.5
-            const rotY = (x / (rect.width / 2)) * 3.5
+        const hasFinePointer = typeof window !== 'undefined' && window.matchMedia('(hover: hover) and (pointer: fine)').matches
+        if (hasFinePointer) {
+          cardElements.forEach((card) => {
+            const onMouseMove = (e: MouseEvent) => {
+              const rect = card.getBoundingClientRect()
+              const x = e.clientX - rect.left - rect.width / 2
+              const y = e.clientY - rect.top - rect.height / 2
+              const rotX = -(y / (rect.height / 2)) * 3.5
+              const rotY = (x / (rect.width / 2)) * 3.5
 
-            gsap.to(card, {
-              rotationX: rotX,
-              rotationY: rotY,
-              y: -4,
-              transformPerspective: 1000,
-              duration: 0.25,
-              ease: 'power1.out',
-            })
-          }
+              gsap.to(card, {
+                rotationX: rotX,
+                rotationY: rotY,
+                y: -4,
+                transformPerspective: 1000,
+                duration: 0.25,
+                ease: 'power1.out',
+              })
+            }
 
-          const onMouseLeave = () => {
-            gsap.to(card, {
-              rotationX: 0,
-              rotationY: 0,
-              y: 0,
-              duration: 0.5,
-              ease: 'power2.out',
-            })
-          }
+            const onMouseLeave = () => {
+              gsap.to(card, {
+                rotationX: 0,
+                rotationY: 0,
+                y: 0,
+                duration: 0.5,
+                ease: 'power2.out',
+              })
+            }
 
-          card.addEventListener('mousemove', onMouseMove)
-          card.addEventListener('mouseleave', onMouseLeave)
-        })
+            card.addEventListener('mousemove', onMouseMove)
+            card.addEventListener('mouseleave', onMouseLeave)
+          })
+        }
       }
     })
   }, { scope: sectionRef })
