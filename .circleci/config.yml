@@ -7,11 +7,77 @@
 #   `cloudflare-deploy`: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, VITE_HOSTED_GATEWAY_URL
 version: 2.1
 
+parameters:
+  force_build:
+    type: boolean
+    default: false
+
 orbs:
   node: circleci/node@7
   gh: circleci/github-cli@2.6
 
 commands:
+  skip-unless-changed:
+    parameters:
+      paths_regex:
+        type: string
+      run_shell:
+        type: string
+        default: bash
+    steps:
+      - run:
+          name: Skip if no relevant path changes
+          shell: << parameters.run_shell >>
+          command: |
+            set -euo pipefail
+            if [ "<< pipeline.parameters.force_build >>" = "true" ]; then
+              echo "force_build=true; continuing"
+              exit 0
+            fi
+            git fetch --unshallow >/dev/null 2>&1 || git fetch --depth=100 >/dev/null 2>&1 || true
+            git fetch --tags origin >/dev/null 2>&1 || git fetch --tags >/dev/null 2>&1 || true
+
+            BASE=""
+            if [ -n "${CIRCLE_TAG:-}" ]; then
+              PREV_TAG="$(git describe --tags --abbrev=0 "${CIRCLE_TAG}^" 2>/dev/null || true)"
+              if [ -n "${PREV_TAG}" ]; then
+                BASE="${PREV_TAG}"
+                echo "Comparing against previous tag: ${BASE}"
+              fi
+            fi
+
+            if [ -z "${BASE}" ]; then
+              PIPELINE_BASE="<< pipeline.git.base_revision >>"
+              if [ -n "${PIPELINE_BASE}" ] && [ "${PIPELINE_BASE}" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${PIPELINE_BASE}^{commit}" 2>/dev/null; then
+                BASE="${PIPELINE_BASE}"
+                echo "Comparing against pipeline base revision: ${BASE}"
+              elif git rev-parse --verify --quiet "${CIRCLE_SHA1}^" >/dev/null 2>&1; then
+                BASE="${CIRCLE_SHA1}^"
+                echo "Comparing against parent commit: ${BASE}"
+              fi
+            fi
+
+            if [ -z "${BASE}" ]; then
+              echo "No base revision found; continuing build"
+              exit 0
+            fi
+
+            changed="$(git diff --name-only "${BASE}" "${CIRCLE_SHA1}")"
+            echo "Changed files between ${BASE} and ${CIRCLE_SHA1}:"
+            echo "${changed}"
+
+            if echo "${changed}" | grep -Eq '<< parameters.paths_regex >>'; then
+              echo "Relevant changes found for pattern '<< parameters.paths_regex >>'; continuing"
+              exit 0
+            fi
+
+            echo "No relevant path changes for pattern '<< parameters.paths_regex >>'; skipping"
+            if command -v circleci-agent >/dev/null 2>&1; then
+              circleci-agent step halt
+            elif command -v circleci-agent.exe >/dev/null 2>&1; then
+              circleci-agent.exe step halt
+            fi
+            exit 0
   collect-release-assets:
     parameters:
       platform_os:
@@ -89,6 +155,8 @@ jobs:
     resource_class: m4pro.medium
     steps:
       - checkout
+      - skip-unless-changed:
+          paths_regex: '^(src/|src-tauri/|public/|scripts/|package(-lock)?\.json|index\.html|vite\.config\.ts|tsconfig.*|tailwind\.config\.js|postcss\.config\.js)'
       - run:
           name: Check release configuration
           command: |
@@ -155,6 +223,9 @@ jobs:
       shell: powershell.exe -ExecutionPolicy Bypass
     steps:
       - checkout
+      - skip-unless-changed:
+          paths_regex: '^(src/|src-tauri/|public/|scripts/|package(-lock)?\.json|index\.html|vite\.config\.ts|tsconfig.*|tailwind\.config\.js|postcss\.config\.js)'
+          run_shell: bash.exe
       - run:
           name: Check release configuration
           command: |
@@ -220,6 +291,8 @@ jobs:
     resource_class: medium
     steps:
       - checkout
+      - skip-unless-changed:
+          paths_regex: '^server/'
       - run:
           name: Setup Rust
           command: |
@@ -259,6 +332,9 @@ jobs:
     docker:
       - image: cimg/base:current
     steps:
+      - checkout
+      - skip-unless-changed:
+          paths_regex: '^server/'
       - attach_workspace:
           at: dist-server
       - run:
@@ -350,6 +426,8 @@ jobs:
     resource_class: medium
     steps:
       - checkout
+      - skip-unless-changed:
+          paths_regex: '^landing/'
       - run:
           name: Check Cloudflare deployment configuration
           command: |
@@ -375,6 +453,8 @@ jobs:
       - image: cimg/node:20.19
     steps:
       - checkout
+      - skip-unless-changed:
+          paths_regex: '^(src/|src-tauri/|public/|scripts/|package(-lock)?\.json|index\.html|vite\.config\.ts|tsconfig.*|tailwind\.config\.js|postcss\.config\.js)'
       - attach_workspace:
           at: dist-release
       - run:
@@ -480,8 +560,6 @@ workflows:
               ignore: /.*/
       - build-deploy-landing:
           context: cloudflare-deploy
-          requires:
-            - deploy-server
           filters:
             tags:
               only: /^v.*/
