@@ -466,6 +466,7 @@ jobs:
               echo "Set GH_TOKEN or GITHUB_TOKEN with repo contents:write" >&2
               exit 1
             fi
+            echo "export TOKEN=$TOKEN" >> "$BASH_ENV"
             echo "export GH_TOKEN=$TOKEN" >> "$BASH_ENV"
             echo "export GITHUB_TOKEN=$TOKEN" >> "$BASH_ENV"
             echo "export GH_REPO=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}" >> "$BASH_ENV"
@@ -498,6 +499,7 @@ jobs:
           name: Upload and publish releases
           command: |
             set -euo pipefail
+            TOKEN="${TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
             PUBLIC_REPO="FluxAether/rabbit-interview"
             PREV_TAG="$(git describe --tags --abbrev=0 "${CIRCLE_TAG}^" 2>/dev/null || true)"
             if [ -n "$PREV_TAG" ]; then
@@ -528,6 +530,7 @@ jobs:
               local target_repo="$1"
               echo "Publishing release $CIRCLE_TAG to $target_repo..."
               if [ "$target_repo" != "$GH_REPO" ]; then
+                git push "https://x-access-token:${TOKEN}@github.com/${target_repo}.git" "${CIRCLE_SHA1}:refs/tags/${CIRCLE_TAG}" --force || \
                 git push "https://x-access-token:${TOKEN}@github.com/${target_repo}.git" "refs/tags/${CIRCLE_TAG}" --force || true
               fi
 
